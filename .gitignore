@@ -1,1 +1,23 @@
-/.idea
+.idea/
+.vscode/
+.DS_Store/
+
+/json-schema-validator/node_modules
+/json-schema-validator/dist
+
+# local env files
+/json-schema-validator/.env.local
+/json-schema-validator/.env.*.local
+
+# Log files
+/json-schema-validator/npm-debug.log*
+/json-schema-validator/yarn-debug.log*
+/json-schema-validator/yarn-error.log*
+/json-schema-validator/pnpm-debug.log*
+
+# Editor directories and files
+/json-schema-validator/*.suo
+/json-schema-validator/*.ntvs*
+/json-schema-validator/*.njsproj
+/json-schema-validator/*.sln
+/json-schema-validator/*.sw?
