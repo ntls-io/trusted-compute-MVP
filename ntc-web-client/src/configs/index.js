@@ -1,0 +1,3 @@
+import "./layouts";
+
+export default {};

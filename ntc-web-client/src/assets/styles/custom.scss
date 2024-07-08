@@ -1,0 +1,40 @@
+@font-face {
+  font-family: "Visby";
+  src: url("../fonts/VisbyRoundCF-Regular.woff2");
+  font-weight: normal;
+}
+@font-face {
+  font-family: "Visby";
+  src: url("../fonts/VisbyRoundCF-Medium.woff2");
+  font-weight: 500;
+}
+@font-face {
+  font-family: "Visby";
+  src: url("../fonts/VisbyRoundCF-Bold.woff2");
+  font-weight: bold;
+}
+
+@import "bootstrap";
+@import "bootstrap-vue";
+
+@import "./alt/adminlte.core.css";
+
+html,
+body,
+#app {
+  font-family: Visby, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.card {
+  margin-bottom: 1rem;
+}
+
+.wizard-btn {
+  min-width: 0 !important;
+}
+
+.vue-form-wizard .wizard-tab-content {
+  padding: 15px;
+}
