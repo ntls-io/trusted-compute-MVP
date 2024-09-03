@@ -1,6 +1,6 @@
 # SGX-MVP Directory
 
-This directory contains all the relevant sgx code for NTC-MVP.
+This directory contains all the relevant SGX code for NTC-MVP.
 
 - `wasmi-impl` serves as the WebAssembly interpreter
 - `test-data` contains sample JSON data and schemas

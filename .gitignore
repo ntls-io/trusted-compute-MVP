@@ -23,7 +23,7 @@
 /json-schema-validator/*.sw?
 
 # /wasm-exec-sgx
-bin
+bin/
 */target
 /obj
 /lib

@@ -2,3 +2,11 @@
 /OUTPUT
 /result-*
 /Cargo.lock
+
+!/bin
+
+/bin/get_mean_wasm.wasm
+
+sgx-mvp.sig
+sgx-mvp.manifest
+sgx-mvp.manifest.sgx
