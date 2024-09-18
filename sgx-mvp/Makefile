@@ -3,10 +3,13 @@ ARCH_LIBDIR ?= /lib/$(shell $(CC) -dumpmachine)
 
 SELF_EXE = target/release/sgx-mvp
 
+# WASM files
+SRC_WASM_MEAN= get-mean-wasm/
+
 .PHONY: all
-all: $(SELF_EXE) sgx-mvp.manifest
+all: wasm $(SELF_EXE) sgx-mvp.manifest
 ifeq ($(SGX),1)
-all: sgx-mvp.manifest.sgx sgx-mvp.sig
+all: wasm sgx-mvp.manifest.sgx sgx-mvp.sig
 endif
 
 ifeq ($(DEBUG),1)
@@ -47,6 +50,11 @@ else
 GRAMINE = gramine-sgx
 endif
 
+.PHONY: wasm
+wasm:
+	@echo "\033[32mRequest to compile the wasm part...\033[0m"
+	@make -C $(SRC_WASM_MEAN)
+
 .PHONY: wasm-mvp
 wasm-mvp: all
 	$(GRAMINE) sgx-mvp
@@ -54,6 +62,7 @@ wasm-mvp: all
 .PHONY: clean
 clean:
 	$(RM) -rf *.token *.sig *.manifest.sgx *.manifest result-* OUTPUT
+	@make -C $(SRC_WASM_MEAN) clean
 
 .PHONY: distclean
 distclean: clean
