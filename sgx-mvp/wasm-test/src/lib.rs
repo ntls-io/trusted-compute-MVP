@@ -9,7 +9,9 @@ pub fn wasm_execution(
 ) -> Result<Value> { // Change return type to Result<Value>
 
     // Load the WASM module
-    let engine = Engine::default();
+    let mut config = Config::new();
+    config.static_memory_maximum_size(128 * 1024 * 1024);  // Limit to 128 MB
+    let engine = Engine::new(&config)?;
     let module = Module::from_file(&engine, binary)?;
     let mut linker = Linker::new(&engine);
 

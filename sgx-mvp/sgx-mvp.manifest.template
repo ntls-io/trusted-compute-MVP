@@ -18,7 +18,7 @@ fs.mounts = [
 ]
 
 sgx.debug = true
-sgx.edmm_enable = {{ 'true' if env.get('EDMM', '0') == '1' else 'false' }}
+sgx.enclave_size = "4G"   # Increase enclave size to 4GB
 
 sgx.trusted_files = [
   "file:{{ gramine.libos }}",
