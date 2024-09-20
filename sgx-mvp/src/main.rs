@@ -6,6 +6,7 @@ use std::io::Read;
 use std::path::Path;
 
 static WASM_FILE_MEAN: &str = "bin/get_mean_wasm.wasm";
+static WASM_FILE_MEDIAN: &str = "bin/get_median_wasm.wasm";
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("[+] Enclave created successfully");
@@ -21,10 +22,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let test_json_schema = read_json_from_file(&test_schema_file_path)?;
     println!("[+] Successfully read JSON schema file");
 
-    println!("[+] Execute WASM binary with JSON data and schema");
+    println!("[+] Execute WASM mean binary with JSON data and schema");
     // Call the function with the parameters and handle the result
-    let result_json = wasm_test::wasm_execution(WASM_FILE_MEAN, test_json_data, test_json_schema)?;
-    println!("[+] Result: {}", serde_json::to_string_pretty(&result_json)?);
+    let result_mean = wasm_test::wasm_execution(WASM_FILE_MEAN, test_json_data.clone(), test_json_schema.clone())?;
+    println!("[+] Result: {}", serde_json::to_string_pretty(&result_mean)?);
+
+    println!("[+] Execute WASM median binary with JSON data and schema");
+    // Call the function with the parameters and handle the result
+    let result_median = wasm_test::wasm_execution(WASM_FILE_MEDIAN, test_json_data.clone(), test_json_schema.clone())?;
+    println!("[+] Result: {}", serde_json::to_string_pretty(&result_median)?);
 
     println!("[+] Successfully ran enclave code");
     Ok(())

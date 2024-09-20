@@ -4,7 +4,9 @@ SELF_EXE = target/release/sgx-mvp
 
 # WASM files
 SRC_WASM_MEAN= get-mean-wasm/
-WASM_BIN = bin/get_mean_wasm.wasm
+SRC_WASM_MEDIAN= get-median-wasm/
+WASM_MEAN_BIN = bin/get_mean_wasm.wasm
+WASM_MEDIAN_BIN = bin/get_median_wasm.wasm
 
 .PHONY: all
 all: check_wasm_bin $(SELF_EXE) sgx-mvp.manifest
@@ -54,6 +56,7 @@ endif
 wasm:
 	@echo "\033[32mRequest to compile the wasm part...\033[0m"
 	@make -C $(SRC_WASM_MEAN)
+	@make -C $(SRC_WASM_MEDIAN)
 
 .PHONY: wasm-mvp
 wasm-mvp: all
@@ -62,8 +65,13 @@ wasm-mvp: all
 #TODO: Add additional WASM binaries here
 .PHONY: check_wasm_bin
 check_wasm_bin:
-	@if [ ! -f $(WASM_BIN) ]; then \
-		echo "\033[31mError: $(WASM_BIN) does not exist. Please compile the WASM binary.\033[0m"; \
+	@if [ ! -f $(WASM_MEAN_BIN) ]; then \
+		echo "\033[31mError: $(WASM_MEAN_BIN) does not exist. Please compile the WASM binary.\033[0m"; \
+		echo "\033[31mPlease run: make wasm\033[0m"; \
+		exit 1; \
+	fi
+	@if [ ! -f $(WASM_MEDIAN_BIN) ]; then \
+		echo "\033[31mError: $(WASM_MEDIAN_BIN) does not exist. Please compile the WASM binary.\033[0m"; \
 		echo "\033[31mPlease run: make wasm\033[0m"; \
 		exit 1; \
 	fi
@@ -72,6 +80,7 @@ check_wasm_bin:
 clean:
 	$(RM) -rf *.token *.sig *.manifest.sgx *.manifest result-* OUTPUT
 	@make -C $(SRC_WASM_MEAN) clean
+	@make -C $(SRC_WASM_MEDIAN) clean
 
 .PHONY: distclean
 distclean: clean

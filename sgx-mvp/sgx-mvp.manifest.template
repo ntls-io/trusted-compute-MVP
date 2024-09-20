@@ -27,7 +27,8 @@ sgx.trusted_files = [
   "file:{{ arch_libdir }}/",
   "file:test-data/1_test_data.json",
   "file:test-data/1_test_schema.json",
-  "file:bin/get_mean_wasm.wasm"
+  "file:bin/get_mean_wasm.wasm",
+  "file:bin/get_median_wasm.wasm"
 ]
 
 # The maximum number of threads in a single process needs to be declared in advance.
