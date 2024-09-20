@@ -1,4 +1,4 @@
-extern crate wasm_test;
+extern crate wasmi_impl;
 
 use serde_json::Value;
 use std::fs::File;
@@ -24,12 +24,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("[+] Execute WASM mean binary with JSON data and schema");
     // Call the function with the parameters and handle the result
-    let result_mean = wasm_test::wasm_execution(WASM_FILE_MEAN, test_json_data.clone(), test_json_schema.clone())?;
+    let result_mean = wasmi_impl::wasm_execution(WASM_FILE_MEAN, test_json_data.clone(), test_json_schema.clone())?;
     println!("[+] Result: {}", serde_json::to_string_pretty(&result_mean)?);
 
     println!("[+] Execute WASM median binary with JSON data and schema");
     // Call the function with the parameters and handle the result
-    let result_median = wasm_test::wasm_execution(WASM_FILE_MEDIAN, test_json_data.clone(), test_json_schema.clone())?;
+    let result_median = wasmi_impl::wasm_execution(WASM_FILE_MEDIAN, test_json_data.clone(), test_json_schema.clone())?;
     println!("[+] Result: {}", serde_json::to_string_pretty(&result_median)?);
 
     println!("[+] Successfully ran enclave code");
