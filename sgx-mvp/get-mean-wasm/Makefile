@@ -9,7 +9,7 @@ TOML = Cargo.toml
 all: $(BIN_WASM)
 
 $(BIN_WASM): $(FILES_RUST_F) $(TOML)
-	@echo "\033[32mStarting cargo to build the mean int wasm binary...\033[0m"
+	@echo "\033[32mStarting cargo to build the mean wasm binary...\033[0m"
 	@cd $(SRC_WASM) && cargo build --target wasm32-unknown-unknown --release
 	@cp $(SRC_WASM)/target/wasm32-unknown-unknown/release/get_mean_wasm.wasm $(BIN)/$(APP_WASM)
 
