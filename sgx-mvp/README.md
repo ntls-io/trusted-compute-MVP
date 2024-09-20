@@ -8,6 +8,14 @@ This directory contains all the relevant SGX code for NTC-MVP.
 
 # Quick Start
 
+## Step 1
+
+```sh
+# Build the wasm binaries
+make wasm
+```
+
+## Step 2
 ```sh
 # Build the program and the final Gramine manifest
 make SGX=1

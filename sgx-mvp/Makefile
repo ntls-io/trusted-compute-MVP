@@ -1,15 +1,15 @@
-
 ARCH_LIBDIR ?= /lib/$(shell $(CC) -dumpmachine)
 
 SELF_EXE = target/release/sgx-mvp
 
 # WASM files
 SRC_WASM_MEAN= get-mean-wasm/
+WASM_BIN = bin/get_mean_wasm.wasm
 
 .PHONY: all
-all: wasm $(SELF_EXE) sgx-mvp.manifest
+all: check_wasm_bin $(SELF_EXE) sgx-mvp.manifest
 ifeq ($(SGX),1)
-all: wasm sgx-mvp.manifest.sgx sgx-mvp.sig
+all: check_wasm_bin sgx-mvp.manifest.sgx sgx-mvp.sig
 endif
 
 ifeq ($(DEBUG),1)
@@ -58,6 +58,15 @@ wasm:
 .PHONY: wasm-mvp
 wasm-mvp: all
 	$(GRAMINE) sgx-mvp
+
+#TODO: Add additional WASM binaries here
+.PHONY: check_wasm_bin
+check_wasm_bin:
+	@if [ ! -f $(WASM_BIN) ]; then \
+		echo "\033[31mError: $(WASM_BIN) does not exist. Please compile the WASM binary.\033[0m"; \
+		echo "\033[31mPlease run: make wasm\033[0m"; \
+		exit 1; \
+	fi
 
 .PHONY: clean
 clean:
