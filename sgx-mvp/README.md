@@ -6,6 +6,7 @@ This directory contains all the relevant SGX code for NTC-MVP.
 - `test-data` contains sample JSON data and schemas
 - `get-mean-wasm` contains Rust code for the WASM mean binary
 - `get-median-wasm` contains Rust code for the WASM median binary
+- `get-sd-wasm` contains Rust code for the WASM standard deviation binary
 
 # Quick Start
 
