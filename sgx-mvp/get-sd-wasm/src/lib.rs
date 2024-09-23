@@ -38,21 +38,18 @@ pub extern "C" fn exec(
                         .map(|v| v.as_f64().unwrap())
                         .collect();
                     let n = numbers.len();
-                    if n > 0 {
-                        let mean = numbers.iter().sum::<f64>() / n as f64;
-                        let variance = numbers.iter()
-                            .map(|value| {
-                                let diff = value - mean;
-                                diff * diff
-                            })
-                            .sum::<f64>() / n as f64;
-                        let std_dev = variance.sqrt();
-                        let rounded_std_dev = (std_dev * 1_000_000.0).round() / 1_000_000.0;
-                        result.insert(key.clone(), json!({ "StandardDeviation": rounded_std_dev }));
-                    } else {
-                        // Handle empty array case if necessary
-                        result.insert(key.clone(), json!({ "StandardDeviation": null }));
-                    }
+                    let mean = numbers.iter().sum::<f64>() / n as f64;
+                    let variance = numbers.iter()
+                        .map(|value| {
+                            let diff = value - mean;
+                            diff * diff
+                        })
+                        .sum::<f64>() / n as f64;
+                    let std_dev = variance.sqrt();
+                    let rounded_std_dev = (std_dev * 1_000_000.0).round() / 1_000_000.0;
+                    
+                    // Directly store the rounded standard deviation under each column
+                    result.insert(key.clone(), json!(rounded_std_dev));
                 }
             }
         }

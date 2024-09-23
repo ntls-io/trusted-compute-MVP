@@ -1,4 +1,4 @@
-# Rust manifest
+# Rust manifest with Python
 
 loader.entrypoint = "file:{{ gramine.libos }}"
 libos.entrypoint = "{{ self_exe }}"

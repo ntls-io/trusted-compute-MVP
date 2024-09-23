@@ -39,7 +39,9 @@ pub extern "C" fn exec(
                         .collect();
                     let average = numbers.iter().sum::<f64>() / numbers.len() as f64;
                     let rounded_average = (average * 1_000_000.0).round() / 1_000_000.0;
-                    result.insert(key.clone(), json!({ "Average": rounded_average }));
+
+                    // Directly store the rounded average under each column
+                    result.insert(key.clone(), json!(rounded_average));
                 }
             }
         }

@@ -50,7 +50,9 @@ pub extern "C" fn exec(
                             (numbers[mid - 1] + numbers[mid]) / 2.0
                         };
                         let rounded_median = (median * 1_000_000.0).round() / 1_000_000.0;
-                        result.insert(key.clone(), json!({ "Median": rounded_median }));
+                        
+                        // Directly store the rounded median under each column
+                        result.insert(key.clone(), json!(rounded_median));
                     }
                 }
             }

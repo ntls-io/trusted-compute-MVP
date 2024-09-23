@@ -5,7 +5,7 @@ extern crate wasmi_impl;
 use serde_json::Value;
 use std::fs::File;
 use std::path::Path;
-use std::io::{Read, Write};
+use std::io::Read;
 use anyhow;
 use wasmi_impl::WasmErrorCode;
 use pyo3::prelude::*;
