@@ -6,8 +6,6 @@ use serde_json::Value;
 use std::fs::File;
 use std::path::Path;
 use std::io::{Read, Write};
-use std::process::Command;
-use std::process::Stdio;
 use anyhow;
 use wasmi_impl::WasmErrorCode;
 use pyo3::prelude::*;
@@ -95,34 +93,25 @@ fn handle_wasm_error(code: i32, operation: &str) {
 
 fn run_python_mean_calculation(test_json_data: &Value) -> Result<Value, Box<dyn std::error::Error>> {
     Python::with_gil(|py| {
-        let calculate_means = r#"
-import json
-import numpy as np
-
-def calculate_means(data):
-    means = {}
-    for column, values in data.items():
-        mean_value = np.mean(values) 
-        # Round the mean to 6 decimal places
-        means[column] = np.round(mean_value, 6)
-    return json.dumps(means)
-"#;
-
+        // Load the external Python script
+        let py_file_path = "calculate_means.py"; // Specify the correct path to your Python file
+        
+        // Open and read the Python file contents
+        let code = std::fs::read_to_string(py_file_path)
+            .map_err(|e| anyhow::anyhow!("Failed to read Python script: {}", e))?;
+        
+        // Create a Python dictionary to hold the data
         let locals = PyDict::new(py);
 
-        // Convert the JSON data to a string and load it in Python
+        // Convert the JSON data to a string and set it in the Python locals
         locals.set_item("data", serde_json::to_string(test_json_data)?)?;
 
-        // Evaluate the JSON and mean calculation logic explicitly
-        py.run(calculate_means, None, None)?;
+        // Run the Python code from the file in the current Python context
+        py.run(&code, None, None)?;
 
         // Execute the mean calculation in the current context
         let result: String = py
-            .eval(
-                "calculate_means(json.loads(data))",
-                None,
-                Some(locals),
-            )?
+            .eval("calculate_means(json.loads(data))", None, Some(locals))?
             .extract()?;
 
         // Parse the result back into a Rust serde_json::Value
@@ -131,3 +120,4 @@ def calculate_means(data):
         Ok(python_result)
     })
 }
+
