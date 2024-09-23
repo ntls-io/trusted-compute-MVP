@@ -10,6 +10,8 @@ use std::process::Command;
 use std::process::Stdio;
 use anyhow;
 use wasmi_impl::WasmErrorCode;
+use pyo3::prelude::*;
+use pyo3::types::PyDict;
 
 static WASM_FILE_MEAN: &str = "bin/get_mean_wasm.wasm";
 static WASM_FILE_MEDIAN: &str = "bin/get_median_wasm.wasm";
@@ -65,10 +67,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // Pass the JSON data to the Python script and capture the result
-    let python_mean_result = run_python_mean_calculation(test_json_data.clone())?;
+    // Execute Python Mean Calculation via FFI
+    let python_mean_result = run_python_mean_calculation(&test_json_data)?;
     println!("[+] Python Mean Result: {}", serde_json::to_string_pretty(&python_mean_result)?);
-    
 
     println!("[+] Successfully ran enclave code");
     Ok(())
@@ -92,37 +93,41 @@ fn handle_wasm_error(code: i32, operation: &str) {
     eprintln!("[!] Error during '{}' operation: {}", operation, wasm_error);
 }
 
-/// Function to run Python mean calculation with JSON data passed from Rust and return the result to Rust
-fn run_python_mean_calculation(test_json_data: Value) -> Result<Value, Box<dyn std::error::Error>> {
-    println!("[+] Running Python script to calculate mean of each field...");
+fn run_python_mean_calculation(test_json_data: &Value) -> Result<Value, Box<dyn std::error::Error>> {
+    Python::with_gil(|py| {
+        let calculate_means = r#"
+import json
+import numpy as np
 
-    // Serialize the JSON data
-    let json_input = serde_json::to_string(&test_json_data)?;
+def calculate_means(data):
+    means = {}
+    for column, values in data.items():
+        mean_value = np.mean(values) 
+        # Round the mean to 6 decimal places
+        means[column] = np.round(mean_value, 6)
+    return json.dumps(means)
+"#;
 
-    // Spawn the Python process and pass the JSON data via stdin
-    let mut process = Command::new("/usr/bin/python3.8")
-        .arg("calculate_means.py")  // Python script
-        .stdin(Stdio::piped())      // Allow passing stdin
-        .stdout(Stdio::piped())     // Capture stdout
-        .spawn()
-        .expect("Failed to execute Python script");
+        let locals = PyDict::new(py);
 
-    // Write the JSON data to the stdin of the Python process
-    if let Some(mut stdin) = process.stdin.take() {
-        stdin.write_all(json_input.as_bytes())?;  // Correct method to write to stdin
-    }
+        // Convert the JSON data to a string and load it in Python
+        locals.set_item("data", serde_json::to_string(test_json_data)?)?;
 
-    // Capture the output of the Python script
-    let output = process.wait_with_output()?;
+        // Evaluate the JSON and mean calculation logic explicitly
+        py.run(calculate_means, None, None)?;
 
-    if output.status.success() {
-        let stdout = String::from_utf8(output.stdout)?;
-        // Parse the Python script's stdout (which is JSON) into a Rust serde_json::Value
-        let python_result: Value = serde_json::from_str(&stdout)?;
+        // Execute the mean calculation in the current context
+        let result: String = py
+            .eval(
+                "calculate_means(json.loads(data))",
+                None,
+                Some(locals),
+            )?
+            .extract()?;
+
+        // Parse the result back into a Rust serde_json::Value
+        let python_result: Value = serde_json::from_str(&result)?;
+
         Ok(python_result)
-    } else {
-        let stderr = String::from_utf8(output.stderr)?;
-        eprintln!("Python error: {}", stderr);
-        Err(anyhow::anyhow!("Python script execution failed").into())
-    }
+    })
 }

@@ -40,7 +40,8 @@ sgx.trusted_files = [
   "file:/usr/bin/python3.8",  # Python executable
   "file:/usr/lib/python3.8/",  # Python standard libraries
   "file:calculate_means.py",
-  "file:/usr/lib/python3/dist-packages/", 
+  "file:/usr/lib/python3/dist-packages/",
+  "file:build.rs",
 ]
 
 # The maximum number of threads in a single process needs to be declared in advance.

@@ -2,8 +2,10 @@
 name = "sgx-mvp"
 version = "0.1.0"
 edition = "2021"
+build = "build.rs"  # This ensures build.rs is used
 
 [dependencies]
 wasmi-impl = { path = "wasmi-impl" }
 serde_json = "1.0.127"
 anyhow = "1.0"
+pyo3 = { version = "0.15", features = ["extension-module", "auto-initialize"] }
