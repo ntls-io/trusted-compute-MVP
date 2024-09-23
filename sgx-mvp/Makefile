@@ -5,8 +5,10 @@ SELF_EXE = target/release/sgx-mvp
 # WASM files
 SRC_WASM_MEAN= get-mean-wasm/
 SRC_WASM_MEDIAN= get-median-wasm/
+SRC_WASM_SD= get-sd-wasm/
 WASM_MEAN_BIN = bin/get_mean_wasm.wasm
 WASM_MEDIAN_BIN = bin/get_median_wasm.wasm
+WASM_SD_BIN = bin/get_sd_wasm.wasm
 
 .PHONY: all
 all: check_wasm_bin $(SELF_EXE) sgx-mvp.manifest
@@ -57,6 +59,7 @@ wasm:
 	@echo "\033[32mRequest to compile the wasm part...\033[0m"
 	@make -C $(SRC_WASM_MEAN)
 	@make -C $(SRC_WASM_MEDIAN)
+	@make -C $(SRC_WASM_SD)
 
 .PHONY: wasm-mvp
 wasm-mvp: all
@@ -75,12 +78,18 @@ check_wasm_bin:
 		echo "\033[31mPlease run: make wasm\033[0m"; \
 		exit 1; \
 	fi
+	@if [ ! -f $(WASM_SD_BIN) ]; then \
+		echo "\033[31mError: $(WASM_SD_BIN) does not exist. Please compile the WASM binary.\033[0m"; \
+		echo "\033[31mPlease run: make wasm\033[0m"; \
+		exit 1; \
+	fi
 
 .PHONY: clean
 clean:
 	$(RM) -rf *.token *.sig *.manifest.sgx *.manifest result-* OUTPUT
 	@make -C $(SRC_WASM_MEAN) clean
 	@make -C $(SRC_WASM_MEDIAN) clean
+	@make -C $(SRC_WASM_SD) clean
 
 .PHONY: distclean
 distclean: clean

@@ -49,6 +49,7 @@ pub fn wasm_execution(
 
     // Prepare space for output buffer
     let output_ptr = schema_ptr + schema_len;
+    // TODO: Increase buffer size for larger outputs
     let output_size = 1024 * 1024;  // 1MB buffer
     let output_len_ptr = output_ptr + output_size;
 

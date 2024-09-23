@@ -7,6 +7,7 @@ use std::path::Path;
 
 static WASM_FILE_MEAN: &str = "bin/get_mean_wasm.wasm";
 static WASM_FILE_MEDIAN: &str = "bin/get_median_wasm.wasm";
+static WASM_FILE_STD_DEV: &str = "bin/get_sd_wasm.wasm";
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("[+] Enclave created successfully");
@@ -31,6 +32,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Call the function with the parameters and handle the result
     let result_median = wasmi_impl::wasm_execution(WASM_FILE_MEDIAN, test_json_data.clone(), test_json_schema.clone())?;
     println!("[+] Result: {}", serde_json::to_string_pretty(&result_median)?);
+
+    println!("[+] Execute WASM standard deviation binary with JSON data and schema");
+    let result_std_dev = wasmi_impl::wasm_execution(WASM_FILE_STD_DEV, test_json_data.clone(), test_json_schema.clone())?;
+    println!("[+] Result: {}", serde_json::to_string_pretty(&result_std_dev)?);
 
     println!("[+] Successfully ran enclave code");
     Ok(())
