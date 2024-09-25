@@ -43,3 +43,33 @@ gramine-direct sgx-mvp
 ```
 
 Note that _gramine-sgx_ requires all files we use in `sgx.trusted_files`
+
+# Cleaning Up
+
+To maintain a clean workspace, you can use the following commands:
+
+## `make clean`
+
+This command removes generated files and artifacts from the build process, including:
+- All temporary tokens, signatures, and SGX manifests.
+- The `result-*` files and any generated `OUTPUT` files.
+- Cleans up the WASM binaries for _mean_, _median_, and _standard deviation_.
+
+Run it as follows:
+
+```sh
+make clean
+```
+
+## `make distclean`
+
+This command performs a more thorough cleanup by first invoking **make clean** and then removing additional files, such as:
+
+- The target/ directory where compiled artifacts are stored.
+- The Cargo.lock file, which can help ensure that the next build uses fresh dependencies.
+
+Run it as follows:
+
+```sh
+make distclean
+```
