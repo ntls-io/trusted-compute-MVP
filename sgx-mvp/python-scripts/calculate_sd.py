@@ -1,7 +1,7 @@
 import json
 import numpy as np
 
-def calculate_standard_deviation(data):
+def exec(data):
     std_devs = {}
     for column, values in data.items():
         std_dev_value = np.std(values)

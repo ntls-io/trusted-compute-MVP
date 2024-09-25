@@ -1,7 +1,7 @@
 import json
 import numpy as np
 
-def calculate_mean(data):
+def exec(data):
     means = {}
     for column, values in data.items():
         mean_value = np.mean(values) 

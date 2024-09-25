@@ -1,7 +1,7 @@
 import json
 import numpy as np
 
-def calculate_median(data):
+def exec(data):
     medians = {}
     for column, values in data.items():
         median_value = np.median(values)
