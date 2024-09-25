@@ -39,7 +39,7 @@ sgx.trusted_files = [
   "file:bin/get_sd_wasm.wasm",
   "file:/usr/bin/python3.8",  # Python executable
   "file:/usr/lib/python3.8/",  # Python standard libraries
-  "file:calculate_means.py",
+  "file:python-scripts/",
   "file:/usr/lib/python3/dist-packages/",
   "file:build.rs",
 ]

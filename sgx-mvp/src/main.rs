@@ -69,6 +69,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let python_mean_result = run_python_mean_calculation(&test_json_data)?;
     println!("[+] Python Mean Result: {}", serde_json::to_string_pretty(&python_mean_result)?);
 
+    // Execute Python Median Calculation via FFI
+    let python_median_result = run_python_median_calculation(&test_json_data)?;
+    println!("[+] Python Median Result: {}", serde_json::to_string_pretty(&python_median_result)?);
+
+    // Execute Python SD Calculation via FFI
+    let python_sd_result = run_python_sd_calculation(&test_json_data)?;
+    println!("[+] Python standard deviation Result: {}", serde_json::to_string_pretty(&python_sd_result)?);
+
     println!("[+] Successfully ran enclave code");
     Ok(())
 }
@@ -94,7 +102,7 @@ fn handle_wasm_error(code: i32, operation: &str) {
 fn run_python_mean_calculation(test_json_data: &Value) -> Result<Value, Box<dyn std::error::Error>> {
     Python::with_gil(|py| {
         // Load the external Python script
-        let py_file_path = "calculate_means.py"; // Specify the correct path to your Python file
+        let py_file_path = "python-scripts/calculate_mean.py"; // Path to the Python script
         
         // Open and read the Python file contents
         let code = std::fs::read_to_string(py_file_path)
@@ -111,7 +119,7 @@ fn run_python_mean_calculation(test_json_data: &Value) -> Result<Value, Box<dyn 
 
         // Execute the mean calculation in the current context
         let result: String = py
-            .eval("calculate_means(json.loads(data))", None, Some(locals))?
+            .eval("calculate_mean(json.loads(data))", None, Some(locals))?
             .extract()?;
 
         // Parse the result back into a Rust serde_json::Value
@@ -121,3 +129,62 @@ fn run_python_mean_calculation(test_json_data: &Value) -> Result<Value, Box<dyn 
     })
 }
 
+fn run_python_median_calculation(test_json_data: &Value) -> Result<Value, Box<dyn std::error::Error>> {
+    Python::with_gil(|py| {
+        // Load the external Python script
+        let py_file_path = "python-scripts/calculate_median.py"; // Path to the Python script
+        
+        // Open and read the Python file contents
+        let code = std::fs::read_to_string(py_file_path)
+            .map_err(|e| anyhow::anyhow!("Failed to read Python script: {}", e))?;
+        
+        // Create a Python dictionary to hold the data
+        let locals = PyDict::new(py);
+
+        // Convert the JSON data to a string and set it in the Python locals
+        locals.set_item("data", serde_json::to_string(test_json_data)?)?;
+
+        // Run the Python code from the file in the current Python context
+        py.run(&code, None, None)?;
+
+        // Execute the mean calculation in the current context
+        let result: String = py
+            .eval("calculate_median(json.loads(data))", None, Some(locals))?
+            .extract()?;
+
+        // Parse the result back into a Rust serde_json::Value
+        let python_result: Value = serde_json::from_str(&result)?;
+
+        Ok(python_result)
+    })
+}
+
+fn run_python_sd_calculation(test_json_data: &Value) -> Result<Value, Box<dyn std::error::Error>> {
+    Python::with_gil(|py| {
+        // Load the external Python script
+        let py_file_path = "python-scripts/calculate_sd.py"; // Path to the Python script
+        
+        // Open and read the Python file contents
+        let code = std::fs::read_to_string(py_file_path)
+            .map_err(|e| anyhow::anyhow!("Failed to read Python script: {}", e))?;
+        
+        // Create a Python dictionary to hold the data
+        let locals = PyDict::new(py);
+
+        // Convert the JSON data to a string and set it in the Python locals
+        locals.set_item("data", serde_json::to_string(test_json_data)?)?;
+
+        // Run the Python code from the file in the current Python context
+        py.run(&code, None, None)?;
+
+        // Execute the mean calculation in the current context
+        let result: String = py
+            .eval("calculate_standard_deviation(json.loads(data))", None, Some(locals))?
+            .extract()?;
+
+        // Parse the result back into a Rust serde_json::Value
+        let python_result: Value = serde_json::from_str(&result)?;
+
+        Ok(python_result)
+    })
+}
