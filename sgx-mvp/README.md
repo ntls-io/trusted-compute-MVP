@@ -10,6 +10,10 @@ This directory contains all the relevant SGX code for NTC-MVP.
 
 # Quick Start
 
+## Step 0
+
+Follow the instructions in the [Gramine Installation Guide](https://gramine.readthedocs.io/en/stable/installation.html#install-gramine-packages-1) under "Install Gramine packages."
+
 ## Step 1
 
 ```sh
