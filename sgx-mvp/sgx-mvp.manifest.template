@@ -32,8 +32,7 @@ sgx.trusted_files = [
   "file:{{ self_exe }}",
   "file:{{ gramine.runtimedir() }}/",
   "file:{{ arch_libdir }}/",
-  "file:test-data/1_test_data.json",
-  "file:test-data/1_test_schema.json",
+  "file:test-data/",
   "file:bin/get_mean_wasm.wasm",
   "file:bin/get_median_wasm.wasm",
   "file:bin/get_sd_wasm.wasm",
@@ -42,6 +41,10 @@ sgx.trusted_files = [
   "file:python-scripts/",
   "file:/usr/lib/python3/dist-packages/",
   "file:build.rs",
+]
+
+sgx.allowed_files = [
+  "file:temp/",
 ]
 
 # The maximum number of threads in a single process needs to be declared in advance.

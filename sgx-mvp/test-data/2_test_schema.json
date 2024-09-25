@@ -13,17 +13,10 @@
             "items": {
                 "type": "number"
             }
-        },
-        "Column_3": {
-            "type": "array",
-            "items": {
-                "type": "number"
-            }
         }
     },
     "required": [
         "Column_1",
-        "Column_2",
-        "Column_3"
+        "Column_2"
     ]
 }

@@ -12,3 +12,7 @@ bin/get_sd_wasm.wasm
 sgx-mvp.sig
 sgx-mvp.manifest
 sgx-mvp.manifest.sgx
+
+temp/*
+
+!temp/.gitkeep
