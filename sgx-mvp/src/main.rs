@@ -80,7 +80,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Execute Python SD Calculation via FFI
     let python_sd_result = python_rust_impl::run_python(&test_json_data, PYTHON_FILE_SD)?;
-    println!("[+] Python standard deviation Result: {}", serde_json::to_string_pretty(&python_sd_result)?);
+    println!("[+] Python Standard Deviation Result: {}", serde_json::to_string_pretty(&python_sd_result)?);
 
     println!("[+] Successfully ran enclave code");
     Ok(())
