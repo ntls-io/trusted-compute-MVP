@@ -3,10 +3,12 @@
 This directory contains all the relevant SGX code for NTC-MVP.
 
 - `wasmi-impl` serves as the WebAssembly interpreter
+- `python-impl` serves as the Python interpreter
 - `test-data` contains sample JSON data and schemas
 - `get-mean-wasm` contains Rust code for the WASM mean binary
 - `get-median-wasm` contains Rust code for the WASM median binary
 - `get-sd-wasm` contains Rust code for the WASM standard deviation binary
+- `json-append` contains Rust code for the append functionality
 
 # Quick Start
 
