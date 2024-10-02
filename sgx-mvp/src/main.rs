@@ -10,19 +10,34 @@ use std::path::Path;
 use std::io::{Read, Write};
 use anyhow;
 use wasmi_impl::WasmErrorCode;
+use reqwest;
+use reqwest::Certificate;
+use std::error::Error;
 
 // WASM binary files
 static WASM_FILE_MEAN: &str = "bin/get_mean_wasm.wasm";
 static WASM_FILE_MEDIAN: &str = "bin/get_median_wasm.wasm";
 static WASM_FILE_STD_DEV: &str = "bin/get_sd_wasm.wasm";
 
-// Python script files
-static PYTHON_FILE_MEAN: &str = "python-scripts/calculate_mean.py";
-static PYTHON_FILE_MEDIAN: &str = "python-scripts/calculate_median.py";
-static PYTHON_FILE_SD: &str = "python-scripts/calculate_sd.py";
+// URLs for Python scripts on GitHub
+const GITHUB_BASE_URL: &str = "https://raw.githubusercontent.com/ntls-io/Python-Scripts-MVP/main/";
+const PYTHON_FILE_MEAN_URL: &str = "calculate_mean.py";
+const PYTHON_FILE_MEDIAN_URL: &str = "calculate_median.py";
+const PYTHON_FILE_SD_URL: &str = "calculate_sd.py";
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+// File paths to save the downloaded Python scripts
+const PYTHON_FILE_MEAN: &str = "/tmpfs/calculate_mean.py";
+const PYTHON_FILE_MEDIAN: &str = "/tmpfs/calculate_median.py";
+const PYTHON_FILE_SD: &str = "/tmpfs/calculate_sd.py";
+
+fn main() -> Result<(), Box<dyn Error>> {
     println!("[+] Enclave created successfully");
+
+    // Download Python scripts from GitHub
+    download_python_script(GITHUB_BASE_URL, PYTHON_FILE_MEAN_URL, PYTHON_FILE_MEAN)?;
+    download_python_script(GITHUB_BASE_URL, PYTHON_FILE_MEDIAN_URL, PYTHON_FILE_MEDIAN)?;
+    download_python_script(GITHUB_BASE_URL, PYTHON_FILE_SD_URL, PYTHON_FILE_SD)?;
+    println!("[+] Python scripts downloaded successfully");
 
     // Construct the path to the JSON data and schema files.
     let json_data_1_path = "test-data/1_test_data.json";
@@ -45,7 +60,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Err(code) => {
             handle_wasm_error(code, "Mean");
-            // Optionally, handle the error (e.g., exit, continue, retry)
         }
     }
 
@@ -57,7 +71,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Err(code) => {
             handle_wasm_error(code, "Median");
-            // Optionally, handle the error
         }
     }
 
@@ -69,7 +82,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Err(code) => {
             handle_wasm_error(code, "Standard Deviation");
-            // Optionally, handle the error
         }
     }
 
@@ -93,8 +105,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if json_append::validate_json_schemas(&json_schema_1, &json_schema_2) {
         let appended_json = json_append::append_json(&json_data_1, &json_data_2)?;
 
-        // Save the appended JSON data to /temp/merged_json.json
-        let output_file_path = "/temp/merged_json.json";
+        // Save the appended JSON data to /tmpfs/merged_json.json
+        let output_file_path = "/tmpfs/merged_json.json";
         write_json_to_file(&appended_json, output_file_path)?;
         println!("[+] Appended JSON data saved to '{}'", output_file_path);
     } else {
@@ -107,25 +119,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// Helper function to read JSON from a file
-fn read_json_from_file<P: AsRef<Path>>(path: P) -> Result<Value, Box<dyn std::error::Error>> {
-    let mut file = File::open(&path)
-        .map_err(|e| anyhow::anyhow!("Unable to open file '{}': {}", path.as_ref().display(), e))?;
+fn read_json_from_file<P: AsRef<Path>>(path: P) -> Result<Value, Box<dyn Error>> {
+    let mut file = File::open(&path)?;
     let mut contents = String::new();
-    file.read_to_string(&mut contents)
-        .map_err(|e| anyhow::anyhow!("Unable to read file '{}': {}", path.as_ref().display(), e))?;
-    let json: Value = serde_json::from_str(&contents)
-        .map_err(|e| anyhow::anyhow!("Failed to parse JSON from file '{}': {}", path.as_ref().display(), e))?;
+    file.read_to_string(&mut contents)?;
+    let json: Value = serde_json::from_str(&contents)?;
     Ok(json)
 }
 
 /// Helper function to write JSON to a file
-fn write_json_to_file(json_data: &Value, file_path: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let mut file = File::create(file_path)
-        .map_err(|e| anyhow::anyhow!("Unable to create file '{}': {}", file_path, e))?;
-    let json_string = serde_json::to_string_pretty(json_data)
-        .map_err(|e| anyhow::anyhow!("Failed to convert JSON data to string: {}", e))?;
-    file.write_all(json_string.as_bytes())
-        .map_err(|e| anyhow::anyhow!("Failed to write JSON data to file '{}': {}", file_path, e))?;
+fn write_json_to_file(json_data: &Value, file_path: &str) -> Result<(), Box<dyn Error>> {
+    let mut file = File::create(file_path)?;
+    let json_string = serde_json::to_string_pretty(json_data)?;
+    file.write_all(json_string.as_bytes())?;
     Ok(())
 }
 
@@ -133,4 +139,25 @@ fn write_json_to_file(json_data: &Value, file_path: &str) -> Result<(), Box<dyn 
 fn handle_wasm_error(code: i32, operation: &str) {
     let wasm_error: WasmErrorCode = code.into();
     eprintln!("[!] Error during '{}' operation: {}", operation, wasm_error);
+}
+
+/// Helper function to download a Python script from GitHub
+fn download_python_script(base_url: &str, file_name: &str, save_path: &str) -> Result<(), Box<dyn Error>> {
+    let url = format!("{}{}", base_url, file_name);
+    
+    // Load the CA certificate
+    let cert = include_bytes!("../etc/ssl/cacert.pem");
+    let ca_cert = Certificate::from_pem(cert)?;
+    
+    let client = reqwest::blocking::Client::builder()
+        .add_root_certificate(ca_cert)
+        .build()?;
+    
+    let response = client.get(&url).send()?.text()?;
+
+    let mut file = File::create(save_path)?;
+    file.write_all(response.as_bytes())?;
+    println!("[+] Downloaded and saved '{}'", file_name);
+
+    Ok(())
 }

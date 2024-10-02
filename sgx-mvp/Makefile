@@ -10,8 +10,10 @@ WASM_MEAN_BIN = bin/get_mean_wasm.wasm
 WASM_MEDIAN_BIN = bin/get_median_wasm.wasm
 WASM_SD_BIN = bin/get_sd_wasm.wasm
 
+CACERT_FILE = etc/ssl/cacert.pem
+
 .PHONY: all
-all: check_wasm_bin $(SELF_EXE) sgx-mvp.manifest
+all: check_wasm_bin cacert $(SELF_EXE) sgx-mvp.manifest
 ifeq ($(SGX),1)
 all: check_wasm_bin sgx-mvp.manifest.sgx sgx-mvp.sig
 endif
@@ -65,6 +67,12 @@ wasm:
 wasm-mvp: all
 	$(GRAMINE) sgx-mvp
 
+# Download the latest CA certificate bundle
+.PHONY: cacert
+cacert:
+	@echo "\033[32mDownloading the latest CA certificate bundle...\033[0m"
+	curl -o $(CACERT_FILE) https://curl.se/ca/cacert.pem
+
 #TODO: Add additional WASM binaries here
 .PHONY: check_wasm_bin
 check_wasm_bin:
@@ -86,10 +94,11 @@ check_wasm_bin:
 
 .PHONY: clean
 clean:
-	$(RM) -rf *.token *.sig *.manifest.sgx *.manifest result-* OUTPUT
+	$(RM) -rf *.token *.sig *.manifest.sgx *.manifest result-* OUTPUT $(CACERT_FILE)
 	@make -C $(SRC_WASM_MEAN) clean
 	@make -C $(SRC_WASM_MEDIAN) clean
 	@make -C $(SRC_WASM_SD) clean
+	@find temp/ -type f ! -name '.gitkeep' -exec $(RM) {} +
 
 .PHONY: distclean
 distclean: clean

@@ -22,6 +22,9 @@ fs.mounts = [
   { path = "{{ arch_libdir }}", uri = "file:{{ arch_libdir }}" },
   { path = "/usr", uri = "file:/usr" },  # Include Python libraries
   { path = "/usr/lib/python3.8", uri = "file:/usr/lib/python3.8" },  # Python interpreter path
+  { path = "/usr/lib/ssl/certs", uri = "file:/usr/lib/ssl/certs" },
+  { path = "/etc/ssl/certs", uri = "file:/etc/ssl/certs" },
+  { type = "tmpfs", path = "/tmpfs"},
 ]
 
 sgx.debug = true
@@ -38,14 +41,18 @@ sgx.trusted_files = [
   "file:bin/get_sd_wasm.wasm",
   "file:/usr/bin/python3.8",  # Python executable
   "file:/usr/lib/python3.8/",  # Python standard libraries
-  "file:python-scripts/",
   "file:/usr/lib/python3/dist-packages/",
   "file:build.rs",
+  "file:etc/ssl/cacert.pem",
+  "file:/usr/lib/ssl/certs/",
+  "file:/etc/ssl/certs/",
 ]
 
 sgx.allowed_files = [
   "file:temp/",
 ]
+
+sys.enable_extra_runtime_domain_names_conf = true
 
 # The maximum number of threads in a single process needs to be declared in advance.
 #   https://gramine.readthedocs.io/en/stable/manifest-syntax.html#number-of-threads

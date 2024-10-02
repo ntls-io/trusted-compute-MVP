@@ -9,3 +9,4 @@ python-rust-impl = { path = "python-rust-impl" }
 json-append = { path = "json-append" }
 serde_json = "1.0.127"
 anyhow = "1.0"
+reqwest = { version = "0.12", features = ["blocking"] }
