@@ -5,7 +5,8 @@ This directory contains all the relevant SGX code for NTC-MVP.
 - `wasmi-impl` serves as the WebAssembly interpreter
 - `python-impl` serves as the Python interpreter
 - `test-data` contains sample JSON data and schemas
-- `json-append` contains Rust code for the append functionality
+- `json-append` contains code for the append functionality
+- `github-download` contains the code needed to download GitHub hosted schema/binaries
 
 # Quick Start
 
