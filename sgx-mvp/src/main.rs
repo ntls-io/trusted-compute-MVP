@@ -12,6 +12,7 @@ use anyhow;
 use wasmi_impl::WasmErrorCode;
 use reqwest;
 use reqwest::Certificate;
+use sha2::{Sha256, Digest};
 use std::error::Error;
 
 // WASM binary files
@@ -30,22 +31,28 @@ const PYTHON_FILE_MEAN: &str = "/tmpfs/calculate_mean.py";
 const PYTHON_FILE_MEDIAN: &str = "/tmpfs/calculate_median.py";
 const PYTHON_FILE_SD: &str = "/tmpfs/calculate_sd.py";
 
+// Expected SHA256 hashes for the Python scripts
+const EXPECTED_HASH_MEAN: &str = "d1bb84ecf1f107013df0fe5ea8a63c15bbd673a81a13a6871c6b43d7e85fd690";
+const EXPECTED_HASH_MEDIAN: &str = "bcda34f2af83a2dac745a5d86f18f4c4cd6cb4e61c76e0dec005a5fc9bc124f5";
+const EXPECTED_HASH_SD: &str = "65230a7a140e30f94fe4d070c9f9e8146a44c2f59d85bff2e83ac9ffa5db39ee";
+
 fn main() -> Result<(), Box<dyn Error>> {
     println!("[+] Enclave created successfully");
 
-    // Download Python scripts from GitHub
-    download_python_script(GITHUB_BASE_URL, PYTHON_FILE_MEAN_URL, PYTHON_FILE_MEAN)?;
-    download_python_script(GITHUB_BASE_URL, PYTHON_FILE_MEDIAN_URL, PYTHON_FILE_MEDIAN)?;
-    download_python_script(GITHUB_BASE_URL, PYTHON_FILE_SD_URL, PYTHON_FILE_SD)?;
-    println!("[+] Python scripts downloaded successfully");
+    println!("[+] Start downloading and verifying Python scripts");
+    // Download Python scripts from GitHub and verify their hashes
+    verify_python_script(GITHUB_BASE_URL, PYTHON_FILE_MEAN_URL, PYTHON_FILE_MEAN, EXPECTED_HASH_MEAN)?;
+    verify_python_script(GITHUB_BASE_URL, PYTHON_FILE_MEDIAN_URL, PYTHON_FILE_MEDIAN, EXPECTED_HASH_MEDIAN)?;
+    verify_python_script(GITHUB_BASE_URL, PYTHON_FILE_SD_URL, PYTHON_FILE_SD, EXPECTED_HASH_SD)?;
+    println!("[+] Python scripts downloaded and verified successfully");
 
-    // Construct the path to the JSON data and schema files.
+    // Construct the path to the JSON data and schema files
     let json_data_1_path = "test-data/1_test_data.json";
     let json_data_2_path = "test-data/2_test_data.json";
     let json_schema_1_path = "test-data/1_test_schema.json";
     let json_schema_2_path = "test-data/2_test_schema.json";
 
-    // Read the JSON data and schema from their respective files.
+    // Read the JSON data and schema from their respective files
     let json_data_1 = read_json_from_file(&json_data_1_path)?;
     println!("[+] Successfully read JSON data file");
 
@@ -141,8 +148,8 @@ fn handle_wasm_error(code: i32, operation: &str) {
     eprintln!("[!] Error during '{}' operation: {}", operation, wasm_error);
 }
 
-/// Helper function to download a Python script from GitHub
-fn download_python_script(base_url: &str, file_name: &str, save_path: &str) -> Result<(), Box<dyn Error>> {
+/// Helper function to download a Python script from GitHub, calculate its hash, and verify integrity
+fn verify_python_script(base_url: &str, file_name: &str, save_path: &str, expected_hash: &str) -> Result<(), Box<dyn Error>> {
     let url = format!("{}{}", base_url, file_name);
     
     // Load the CA certificate
@@ -154,6 +161,18 @@ fn download_python_script(base_url: &str, file_name: &str, save_path: &str) -> R
         .build()?;
     
     let response = client.get(&url).send()?.text()?;
+
+    // Calculate SHA256 hash
+    let mut hasher = Sha256::new();
+    hasher.update(&response);
+    let hash = hasher.finalize();
+    let hash_hex = format!("{:x}", hash);
+    
+    // Verify hash
+    if hash_hex != expected_hash {
+        return Err(anyhow::anyhow!("Hash verification failed for '{}'. Expected: {}, Found: {}", file_name, expected_hash, hash_hex).into());
+    }
+    println!("[+] Hash verified successfully for '{}'", file_name);
 
     let mut file = File::create(save_path)?;
     file.write_all(response.as_bytes())?;

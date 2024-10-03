@@ -67,13 +67,17 @@ wasm:
 wasm-mvp: all
 	$(GRAMINE) sgx-mvp
 
-# Download the latest CA certificate bundle
+# Download the latest CA certificate bundle if it does not exist
 .PHONY: cacert
 cacert:
-	@echo "\033[32mDownloading the latest CA certificate bundle...\033[0m"
-	curl -o $(CACERT_FILE) https://curl.se/ca/cacert.pem
+	@if [ ! -f $(CACERT_FILE) ]; then \
+		echo "\033[32mDownloading the latest CA certificate bundle...\033[0m"; \
+		curl -o $(CACERT_FILE) https://curl.se/ca/cacert.pem; \
+	else \
+		echo "\033[32mCA certificate bundle already exists, skipping download...\033[0m"; \
+	fi
 
-#TODO: Add additional WASM binaries here
+# TODO: Add additional WASM binaries here
 .PHONY: check_wasm_bin
 check_wasm_bin:
 	@if [ ! -f $(WASM_MEAN_BIN) ]; then \
