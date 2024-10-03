@@ -3,12 +3,6 @@
 /result-*
 /Cargo.lock
 
-!/bin
-
-bin/get_mean_wasm.wasm
-bin/get_median_wasm.wasm
-bin/get_sd_wasm.wasm
-
 sgx-mvp.sig
 sgx-mvp.manifest
 sgx-mvp.manifest.sgx

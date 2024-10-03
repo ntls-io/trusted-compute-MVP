@@ -7,7 +7,6 @@ edition = "2021"
 wasmi-impl = { path = "wasmi-impl" }
 python-rust-impl = { path = "python-rust-impl" }
 json-append = { path = "json-append" }
+github-download = { path = "github-download" }
 serde_json = "1.0.127"
 anyhow = "1.0"
-reqwest = { version = "0.12", features = ["blocking"] }
-sha2 = "0.10.8"

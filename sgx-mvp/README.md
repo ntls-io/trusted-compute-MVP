@@ -5,9 +5,6 @@ This directory contains all the relevant SGX code for NTC-MVP.
 - `wasmi-impl` serves as the WebAssembly interpreter
 - `python-impl` serves as the Python interpreter
 - `test-data` contains sample JSON data and schemas
-- `get-mean-wasm` contains Rust code for the WASM mean binary
-- `get-median-wasm` contains Rust code for the WASM median binary
-- `get-sd-wasm` contains Rust code for the WASM standard deviation binary
 - `json-append` contains Rust code for the append functionality
 
 # Quick Start
@@ -19,17 +16,11 @@ Follow the instructions in the [Gramine Installation Guide](https://gramine.read
 ## Step 1
 
 ```sh
-# Build the wasm binaries
-make wasm
-```
-
-## Step 2
-```sh
 # Build the program and the final Gramine manifest
 make SGX=1
 
 # Run the program
-make SGX=1 wasm-mvp
+make SGX=1 mvp
 ```
 
 To test with non-SGX Gramine instead, omit `SGX=1` in both commands.

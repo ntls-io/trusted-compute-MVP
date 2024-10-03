@@ -36,9 +36,6 @@ sgx.trusted_files = [
   "file:{{ gramine.runtimedir() }}/",
   "file:{{ arch_libdir }}/",
   "file:test-data/",
-  "file:bin/get_mean_wasm.wasm",
-  "file:bin/get_median_wasm.wasm",
-  "file:bin/get_sd_wasm.wasm",
   "file:/usr/bin/python3.8",  # Python executable
   "file:/usr/lib/python3.8/",  # Python standard libraries
   "file:/usr/lib/python3/dist-packages/",
@@ -46,10 +43,6 @@ sgx.trusted_files = [
   "file:etc/ssl/cacert.pem",
   "file:/usr/lib/ssl/certs/",
   "file:/etc/ssl/certs/",
-]
-
-sgx.allowed_files = [
-  "file:temp/",
 ]
 
 sys.enable_extra_runtime_domain_names_conf = true
