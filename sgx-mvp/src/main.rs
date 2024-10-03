@@ -8,7 +8,9 @@ use std::fs::File;
 use std::path::Path;
 use std::io::{Read, Write};
 use anyhow;
-use wasmi_impl::WasmErrorCode;
+use wasmi_impl::{WasmErrorCode, wasm_execution};
+use python_rust_impl::run_python;
+use json_append::{append_json, validate_json_schemas};
 use std::error::Error;
 use github_download::{verify_and_download_python, verify_and_download_wasm};
 
@@ -76,7 +78,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // Execute Mean WASM Module
     println!("[+] Execute WASM mean binary with JSON data and schema");
-    match wasmi_impl::wasm_execution(WASM_FILE_MEAN, json_data_1.clone(), json_schema_1.clone()) {
+    match wasm_execution(WASM_FILE_MEAN, json_data_1.clone(), json_schema_1.clone()) {
         Ok(result_mean) => {
             println!("[+] Mean Result: {}", serde_json::to_string_pretty(&result_mean)?);
         }
@@ -87,7 +89,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // Execute Median WASM Module
     println!("[+] Execute WASM median binary with JSON data and schema");
-    match wasmi_impl::wasm_execution(WASM_FILE_MEDIAN, json_data_1.clone(), json_schema_1.clone()) {
+    match wasm_execution(WASM_FILE_MEDIAN, json_data_1.clone(), json_schema_1.clone()) {
         Ok(result_median) => {
             println!("[+] Median Result: {}", serde_json::to_string_pretty(&result_median)?);
         }
@@ -98,7 +100,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // Execute Standard Deviation WASM Module
     println!("[+] Execute WASM standard deviation binary with JSON data and schema");
-    match wasmi_impl::wasm_execution(WASM_FILE_STD_DEV, json_data_1.clone(), json_schema_1.clone()) {
+    match wasm_execution(WASM_FILE_STD_DEV, json_data_1.clone(), json_schema_1.clone()) {
         Ok(result_std_dev) => {
             println!("[+] Standard Deviation Result: {}", serde_json::to_string_pretty(&result_std_dev)?);
         }
@@ -108,15 +110,15 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     // Execute Python Mean Calculation via FFI
-    let python_mean_result = python_rust_impl::run_python(&json_data_1, PYTHON_FILE_MEAN)?;
+    let python_mean_result = run_python(&json_data_1, PYTHON_FILE_MEAN)?;
     println!("[+] Python Mean Result: {}", serde_json::to_string_pretty(&python_mean_result)?);
 
     // Execute Python Median Calculation via FFI
-    let python_median_result = python_rust_impl::run_python(&json_data_1, PYTHON_FILE_MEDIAN)?;
+    let python_median_result = run_python(&json_data_1, PYTHON_FILE_MEDIAN)?;
     println!("[+] Python Median Result: {}", serde_json::to_string_pretty(&python_median_result)?);
 
     // Execute Python SD Calculation via FFI
-    let python_sd_result = python_rust_impl::run_python(&json_data_1, PYTHON_FILE_SD)?;
+    let python_sd_result = run_python(&json_data_1, PYTHON_FILE_SD)?;
     println!("[+] Python Standard Deviation Result: {}", serde_json::to_string_pretty(&python_sd_result)?);
 
     println!("[+] Append JSON files");
@@ -124,8 +126,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let json_schema_2 = read_json_from_file(&json_schema_2_path)?;
 
     // Validate the schemas before appending
-    if json_append::validate_json_schemas(&json_schema_1, &json_schema_2) {
-        let appended_json = json_append::append_json(&json_data_1, &json_data_2)?;
+    if validate_json_schemas(&json_schema_1, &json_schema_2) {
+        let appended_json = append_json(&json_data_1, &json_data_2)?;
 
         // Save the appended JSON data to /tmpfs/merged_json.json
         let output_file_path = "/tmpfs/merged_json.json";
