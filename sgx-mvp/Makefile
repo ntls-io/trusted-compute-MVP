@@ -102,7 +102,6 @@ clean:
 	@make -C $(SRC_WASM_MEAN) clean
 	@make -C $(SRC_WASM_MEDIAN) clean
 	@make -C $(SRC_WASM_SD) clean
-	@find temp/ -type f ! -name '.gitkeep' -exec $(RM) {} +
 
 .PHONY: distclean
 distclean: clean

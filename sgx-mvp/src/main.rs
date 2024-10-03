@@ -1,5 +1,3 @@
-// src/main.rs
-
 extern crate wasmi_impl;
 extern crate python_rust_impl;
 extern crate json_append;
@@ -19,6 +17,11 @@ use std::error::Error;
 static WASM_FILE_MEAN: &str = "bin/get_mean_wasm.wasm";
 static WASM_FILE_MEDIAN: &str = "bin/get_median_wasm.wasm";
 static WASM_FILE_STD_DEV: &str = "bin/get_sd_wasm.wasm";
+
+// Expected SHA256 hashes for the WASM binaries
+const EXPECTED_WASM_HASH_MEAN: &str = "b5ee81a20256dec2bd3db6e673b11eadae4baf8fafbe68cec1f36517bb569255";
+const EXPECTED_WASM_HASH_MEDIAN: &str = "728445d425153350b3e353cc96d29c16d5d81978ea3d7bad21f3d2b2dd76d813";
+const EXPECTED_WASM_HASH_SD: &str = "feb835e2eb26115d1865f381ab80440442761f7c89bc7a56d05bca2cb151c37e";
 
 // URLs for Python scripts on GitHub
 const GITHUB_BASE_URL: &str = "https://raw.githubusercontent.com/ntls-io/Python-Scripts-MVP/main/";
@@ -45,6 +48,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     verify_python_script(GITHUB_BASE_URL, PYTHON_FILE_MEDIAN_URL, PYTHON_FILE_MEDIAN, EXPECTED_HASH_MEDIAN)?;
     verify_python_script(GITHUB_BASE_URL, PYTHON_FILE_SD_URL, PYTHON_FILE_SD, EXPECTED_HASH_SD)?;
     println!("[+] Python scripts downloaded and verified successfully");
+
+    println!("[+] Start verifying WASM binaries");
+    // Verify WASM binaries
+    verify_wasm_binary(WASM_FILE_MEAN, EXPECTED_WASM_HASH_MEAN)?;
+    verify_wasm_binary(WASM_FILE_MEDIAN, EXPECTED_WASM_HASH_MEDIAN)?;
+    verify_wasm_binary(WASM_FILE_STD_DEV, EXPECTED_WASM_HASH_SD)?;
+    println!("[+] WASM binaries verified successfully");
 
     // Construct the path to the JSON data and schema files
     let json_data_1_path = "test-data/1_test_data.json";
@@ -178,5 +188,32 @@ fn verify_python_script(base_url: &str, file_name: &str, save_path: &str, expect
     file.write_all(response.as_bytes())?;
     println!("[+] Downloaded and saved '{}'", file_name);
 
+    Ok(())
+}
+
+/// Helper function to verify the SHA256 hash of a WASM binary
+fn verify_wasm_binary(file_path: &str, expected_hash: &str) -> Result<(), Box<dyn Error>> {
+    let mut file = File::open(file_path)?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0; 4096];
+
+    // Read file in chunks to calculate hash
+    loop {
+        let bytes_read = file.read(&mut buffer)?;
+        if bytes_read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..bytes_read]);
+    }
+
+    let hash = hasher.finalize();
+    let hash_hex = format!("{:x}", hash);
+
+    // Verify hash
+    if hash_hex != expected_hash {
+        return Err(anyhow::anyhow!("Hash verification failed for '{}'. Expected: {}, Found: {}", file_path, expected_hash, hash_hex).into());
+    }
+
+    println!("[+] Hash verified successfully for '{}'", file_path);
     Ok(())
 }
