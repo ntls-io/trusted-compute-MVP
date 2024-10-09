@@ -45,6 +45,10 @@ sgx.trusted_files = [
   "file:/etc/ssl/certs/",
 ]
 
+loader.env.DATABASE_NAME = { passthrough = true }
+loader.env.COLLECTION_NAME = { passthrough = true }
+loader.env.COSMOSDB_URI = { passthrough = true }
+
 sys.enable_extra_runtime_domain_names_conf = true
 
 # The maximum number of threads in a single process needs to be declared in advance.

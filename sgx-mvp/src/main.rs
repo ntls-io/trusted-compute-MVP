@@ -2,17 +2,20 @@ extern crate wasmi_impl;
 extern crate python_rust_impl;
 extern crate json_append;
 extern crate github_download;
+extern crate sgx_cosmos_db;
 
 use serde_json::Value;
 use std::fs::File;
 use std::path::Path;
 use std::io::{Read, Write};
+use std::env;
 use anyhow;
 use wasmi_impl::{WasmErrorCode, wasm_execution};
 use python_rust_impl::run_python;
 use json_append::{append_json, validate_json_schemas};
 use std::error::Error;
 use github_download::{verify_and_download_python, verify_and_download_wasm};
+use sgx_cosmos_db::read_json_schema_from_mongodb;
 
 // WASM binary files
 static WASM_FILE_MEAN: &str = "/tmpfs/get_mean_wasm.wasm";
@@ -46,8 +49,23 @@ const EXPECTED_HASH_MEAN: &str = "d1bb84ecf1f107013df0fe5ea8a63c15bbd673a81a13a6
 const EXPECTED_HASH_MEDIAN: &str = "bcda34f2af83a2dac745a5d86f18f4c4cd6cb4e61c76e0dec005a5fc9bc124f5";
 const EXPECTED_HASH_SD: &str = "65230a7a140e30f94fe4d070c9f9e8146a44c2f59d85bff2e83ac9ffa5db39ee";
 
-fn main() -> Result<(), Box<dyn Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("[+] Enclave created successfully");
+
+    // Fetch environment variables
+    let database_name = env::var("DATABASE_NAME")
+        .expect("DATABASE_NAME environment variable is not set");
+    let collection_name = env::var("COLLECTION_NAME")
+        .expect("COLLECTION_NAME environment variable is not set");
+    let cosmosdb_uri = env::var("COSMOSDB_URI")
+        .expect("COSMOSDB_URI environment variable is not set");
+
+    // Remove the environment variables to ensure they are no longer available
+    // Prevent misuse by external code
+    env::remove_var("DATABASE_NAME");
+    env::remove_var("COLLECTION_NAME");
+    env::remove_var("COSMOSDB_URI");
 
     println!("[+] Start downloading and verifying Python scripts");
     // Download Python scripts from GitHub and verify their hashes
@@ -66,15 +84,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Construct the path to the JSON data and schema files
     let json_data_1_path = "test-data/1_test_data.json";
     let json_data_2_path = "test-data/2_test_data.json";
-    let json_schema_1_path = "test-data/1_test_schema.json";
-    let json_schema_2_path = "test-data/2_test_schema.json";
 
     // Read the JSON data and schema from their respective files
     let json_data_1 = read_json_from_file(&json_data_1_path)?;
     println!("[+] Successfully read JSON data file");
 
-    let json_schema_1 = read_json_from_file(&json_schema_1_path)?;
-    println!("[+] Successfully read JSON schema file");
+    // Read the JSON schema from MongoDB using the _id field
+    let json_schema_1 = read_json_schema_from_mongodb("67064270f0d88c22c4c21169", &database_name, &collection_name, &cosmosdb_uri).await?;
+    println!("[+] Successfully read JSON schema from MongoDB: {}", serde_json::to_string_pretty(&json_schema_1)?);
 
     // Execute Mean WASM Module
     println!("[+] Execute WASM mean binary with JSON data and schema");
@@ -123,7 +140,9 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     println!("[+] Append JSON files");
     let json_data_2 = read_json_from_file(&json_data_2_path)?;
-    let json_schema_2 = read_json_from_file(&json_schema_2_path)?;
+
+    // Read the JSON schema from MongoDB using the _id field
+    let json_schema_2 = read_json_schema_from_mongodb("67064270f0d88c22c4c21169", &database_name, &collection_name, &cosmosdb_uri).await?;
 
     // Validate the schemas before appending
     if validate_json_schemas(&json_schema_1, &json_schema_2) {

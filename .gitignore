@@ -26,3 +26,5 @@ bin/
 */target
 /obj
 /lib
+
+start.sh

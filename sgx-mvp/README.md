@@ -7,6 +7,7 @@ This directory contains all the relevant SGX code for NTC-MVP.
 - `test-data` contains sample JSON data and schemas
 - `json-append` contains code for the append functionality
 - `github-download` contains the code needed to download GitHub hosted schema/binaries
+- `sgx-cosmos-db` contains the code to download the schemas from CosmosDB
 
 # Quick Start
 
@@ -17,6 +18,25 @@ Follow the instructions in the [Gramine Installation Guide](https://gramine.read
 Ensure that Python 3.8 is installed. If necessary, modify the path(s) in the [sgx-mvp.manifest.template](https://github.com/ntls-io/trusted-compute-MVP/blob/main/sgx-mvp/sgx-mvp.manifest.template) to match your setup.
 
 ## Step 1
+
+Before running the program, you need to set the required environment variables by sourcing the provided `start.sh` script.
+
+To load these environment variables, run the following command:
+
+```sh
+source ./start.sh
+```
+
+`start.sh` script contents:
+```sh
+export DATABASE_NAME="database_name"
+export COLLECTION_NAME="collection_name"
+export COSMOSDB_URI="connection_string"
+```
+
+Ensure that you replace the placeholder values with your actual database information before running the script.
+
+## Step 2
 
 ```sh
 # Build the program and the final Gramine manifest
