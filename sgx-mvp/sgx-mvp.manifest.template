@@ -11,7 +11,7 @@ loader.env.MALLOC_ARENA_MAX = "1"
 
 # Environment variables to specify Python configuration
 loader.env.PYTHONHOME = "/usr"
-loader.env.PYTHONPATH = "/usr/lib/python3.8:/usr/lib/python3.8/site-packages"
+loader.env.PYTHONPATH = "/usr/lib/python3.8:/usr/lib/python3/dist-packages/"
 loader.env.PYTHONUNBUFFERED = "1"  # Ensures output is flushed immediately
 
 # For easier debugging — not strictly required to run this workload

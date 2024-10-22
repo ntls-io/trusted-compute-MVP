@@ -13,28 +13,42 @@ This directory contains all the relevant SGX code for NTC-MVP.
 
 ## Step 0
 
-Follow the instructions in the [Gramine Installation Guide](https://gramine.readthedocs.io/en/stable/installation.html#install-gramine-packages-1) under "Install Gramine packages."
+1. Follow the instructions in the [Gramine Installation Guide](https://gramine.readthedocs.io/en/stable/installation.html#install-gramine-packages-1) under "Install Gramine packages."
 
-Ensure that Python 3.8 is installed. If necessary, modify the path(s) in the [sgx-mvp.manifest.template](https://github.com/ntls-io/trusted-compute-MVP/blob/main/sgx-mvp/sgx-mvp.manifest.template) to match your setup.
+2. Ensure that Python 3.8 is installed. If necessary, modify the path(s) in the [sgx-mvp.manifest.template](https://github.com/ntls-io/trusted-compute-MVP/blob/main/sgx-mvp/sgx-mvp.manifest.template) to match your setup.
+
+    Ensure that you have the necessary Python development package installed:
+    `sudo apt-get install python3.8-dev`
+    `sudo apt-get install libffi-dev`
+
+3. Install Rust using the [official installation guide](https://www.rust-lang.org/tools/install)
+
+4. Additional dependencies
+
+```sh
+sudo apt-get update
+sudo apt-get install libssl-dev
+```
 
 ## Step 1
 
-Before running the program, you need to set the required environment variables by sourcing the provided `start.sh` script.
+Before running the program, you need to set the required environment variables. Ensure that you replace the placeholder values with your actual database information before running the script.
 
-To load these environment variables, run the following command:
+Create a script `start.sh` with the following contents:
 
-```sh
-source ./start.sh
-```
-
-`start.sh` script contents:
 ```sh
 export DATABASE_NAME="database_name"
 export COLLECTION_NAME="collection_name"
 export COSMOSDB_URI="connection_string"
 ```
 
-Ensure that you replace the placeholder values with your actual database information before running the script.
+Allow execution of the new script `chmod +x start.sh`
+
+To load these environment variables, run the following command:
+
+```sh
+source ./start.sh
+```
 
 ## Step 2
 
