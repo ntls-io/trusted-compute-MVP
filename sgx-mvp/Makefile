@@ -24,11 +24,14 @@ endif
 $(SELF_EXE): Cargo.toml
 	cargo build --release
 
+RA_TYPE ?= none
+
 sgx-mvp.manifest: sgx-mvp.manifest.template
 	gramine-manifest \
 		-Dlog_level=$(GRAMINE_LOG_LEVEL) \
 		-Darch_libdir=$(ARCH_LIBDIR) \
 		-Dself_exe=$(SELF_EXE) \
+		-Dra_type=$(RA_TYPE) \
 		$< $@
 
 # Make on Ubuntu <= 20.04 doesn't support "Rules with Grouped Targets" (`&:`),

@@ -1,6 +1,5 @@
 # Rust manifest with Python
 
-loader.entrypoint = "file:{{ gramine.libos }}"
 libos.entrypoint = "{{ self_exe }}"
 loader.log_level = "{{ log_level }}"
 
@@ -29,9 +28,9 @@ fs.mounts = [
 
 sgx.debug = true
 sgx.enclave_size = "4G"   # Increase enclave size to 4GB
+sgx.remote_attestation = "{{ ra_type }}"
 
 sgx.trusted_files = [
-  "file:{{ gramine.libos }}",
   "file:{{ self_exe }}",
   "file:{{ gramine.runtimedir() }}/",
   "file:{{ arch_libdir }}/",
