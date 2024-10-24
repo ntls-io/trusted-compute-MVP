@@ -18,8 +18,11 @@ This directory contains all the relevant SGX code for NTC-MVP.
 2. Ensure that Python 3.8 is installed. If necessary, modify the path(s) in the [sgx-mvp.manifest.template](https://github.com/ntls-io/trusted-compute-MVP/blob/main/sgx-mvp/sgx-mvp.manifest.template) to match your setup.
 
     Ensure that you have the necessary Python development package installed:
-    `sudo apt-get install python3.8-dev`
-    `sudo apt-get install libffi-dev`
+
+```sh
+    sudo apt-get install libffi-dev
+    sudo apt-get install python3.8-dev
+```
 
 3. Install Rust using the [official installation guide](https://www.rust-lang.org/tools/install)
 
