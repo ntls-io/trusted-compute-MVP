@@ -18,9 +18,9 @@ use github_download::{verify_and_download_python, verify_and_download_wasm};
 use sgx_cosmos_db::read_json_schema_from_mongodb;
 
 // WASM binary files
-static WASM_FILE_MEAN: &str = "/tmpfs/get_mean_wasm.wasm";
-static WASM_FILE_MEDIAN: &str = "/tmpfs/get_median_wasm.wasm";
-static WASM_FILE_STD_DEV: &str = "/tmpfs/get_sd_wasm.wasm";
+static WASM_FILE_MEAN: &str = "/tmp/get_mean_wasm.wasm";
+static WASM_FILE_MEDIAN: &str = "/tmp/get_median_wasm.wasm";
+static WASM_FILE_STD_DEV: &str = "/tmp/get_sd_wasm.wasm";
 
 // Expected SHA256 hashes for the WASM binaries
 const EXPECTED_WASM_HASH_MEAN: &str = "b5ee81a20256dec2bd3db6e673b11eadae4baf8fafbe68cec1f36517bb569255";
@@ -40,9 +40,9 @@ const PYTHON_FILE_MEDIAN_URL: &str = "calculate_median.py";
 const PYTHON_FILE_SD_URL: &str = "calculate_sd.py";
 
 // File paths to save the downloaded Python scripts
-const PYTHON_FILE_MEAN: &str = "/tmpfs/calculate_mean.py";
-const PYTHON_FILE_MEDIAN: &str = "/tmpfs/calculate_median.py";
-const PYTHON_FILE_SD: &str = "/tmpfs/calculate_sd.py";
+const PYTHON_FILE_MEAN: &str = "/tmp/calculate_mean.py";
+const PYTHON_FILE_MEDIAN: &str = "/tmp/calculate_median.py";
+const PYTHON_FILE_SD: &str = "/tmp/calculate_sd.py";
 
 // Expected SHA256 hashes for the Python scripts
 const EXPECTED_HASH_MEAN: &str = "d1bb84ecf1f107013df0fe5ea8a63c15bbd673a81a13a6871c6b43d7e85fd690";
@@ -148,8 +148,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if validate_json_schemas(&json_schema_1, &json_schema_2) {
         let appended_json = append_json(&json_data_1, &json_data_2)?;
 
-        // Save the appended JSON data to /tmpfs/merged_json.json
-        let output_file_path = "/tmpfs/merged_json.json";
+        // Save the appended JSON data to /tmp/merged_json.json
+        let output_file_path = "/tmp/merged_json.json";
         write_json_to_file(&appended_json, output_file_path)?;
         println!("[+] Appended JSON data saved to '{}'", output_file_path);
     } else {

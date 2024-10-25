@@ -1,6 +1,10 @@
 # Rust manifest with Python
 
+################################## GRAMINE ####################################
+
+# Entrypoint binary which Gramine invokes.
 libos.entrypoint = "{{ self_exe }}"
+
 loader.log_level = "{{ log_level }}"
 
 loader.env.LD_LIBRARY_PATH = "/lib:{{ arch_libdir }}"
@@ -8,13 +12,40 @@ loader.env.LD_LIBRARY_PATH = "/lib:{{ arch_libdir }}"
 # See https://gramine.readthedocs.io/en/stable/performance.html#glibc-malloc-tuning
 loader.env.MALLOC_ARENA_MAX = "1"
 
+################################# ENV VARS ####################################
+
 # Environment variables to specify Python configuration
 loader.env.PYTHONHOME = "/usr"
 loader.env.PYTHONPATH = "/usr/lib/python3.8:/usr/lib/python3/dist-packages/"
 loader.env.PYTHONUNBUFFERED = "1"  # Ensures output is flushed immediately
 
+# Environment variables for CosmosDB
+loader.env.DATABASE_NAME = { passthrough = true }
+loader.env.COLLECTION_NAME = { passthrough = true }
+loader.env.COSMOSDB_URI = { passthrough = true }
+
+# Attestation environment variables [TODO]
+# loader.env.RATLS_CRT_PATH = "/tmp/tlscert.der"
+# loader.env.RATLS_KEY_PATH = "/tmp/tlskey.der"
+
 # For easier debugging — not strictly required to run this workload
 loader.env.RUST_BACKTRACE = "full"
+
+################################## SIGNALS ####################################
+
+# Allow for injecting SIGTERM signal from the host. Without this option,
+# pressing `Ctrl + C` wouldn't terminate MVP. (Disable for production)
+sys.enable_sigterm_injection = true
+
+################################# MOUNT FS ####################################
+
+# General notes:
+# - All mount points are mounted using the default 'chroot' type.
+# - `path`: names of directories and files in Gramine environment; they may be
+#           arbitrary but here we mostly reuse host URIs for simplicity (except
+#           for the first `/lib` mount point).
+# - `uri`:  names of directories and files on the host, prepended
+#           by the 'file:' keyword.
 
 fs.mounts = [
   { path = "/lib", uri = "file:{{ gramine.runtimedir() }}" },
@@ -23,12 +54,28 @@ fs.mounts = [
   { path = "/usr/lib/python3.8", uri = "file:/usr/lib/python3.8" },  # Python interpreter path
   { path = "/usr/lib/ssl/certs", uri = "file:/usr/lib/ssl/certs" },
   { path = "/etc/ssl/certs", uri = "file:/etc/ssl/certs" },
-  { type = "tmpfs", path = "/tmpfs"},
+  { type = "tmpfs", path = "/tmp"},
 ]
 
+############################### SGX: GENERAL ##################################
+
 sgx.debug = true
-sgx.enclave_size = "4G"   # Increase enclave size to 4GB
+sgx.enclave_size = "4G"
 sgx.remote_attestation = "{{ ra_type }}"
+
+sys.enable_extra_runtime_domain_names_conf = true
+
+# Attestation versioning [TODO]
+{# sgx.isvprodid = {{ isvprodid }} #}
+{# sgx.isvsvn    = {{ isvsvn }} #}
+
+# The maximum number of threads in a single process needs to be declared in advance.
+#   https://gramine.readthedocs.io/en/stable/manifest-syntax.html#number-of-threads
+sgx.max_threads = {{ '1' if env.get('EDMM', '0') == '1' else '8' }}
+
+############################# SGX: TRUSTED FILES ###############################
+
+# Specify all files used by NTLS NTC and its dependencies
 
 sgx.trusted_files = [
   "file:{{ self_exe }}",
@@ -43,13 +90,3 @@ sgx.trusted_files = [
   "file:/usr/lib/ssl/certs/",
   "file:/etc/ssl/certs/",
 ]
-
-loader.env.DATABASE_NAME = { passthrough = true }
-loader.env.COLLECTION_NAME = { passthrough = true }
-loader.env.COSMOSDB_URI = { passthrough = true }
-
-sys.enable_extra_runtime_domain_names_conf = true
-
-# The maximum number of threads in a single process needs to be declared in advance.
-#   https://gramine.readthedocs.io/en/stable/manifest-syntax.html#number-of-threads
-sgx.max_threads = {{ '1' if env.get('EDMM', '0') == '1' else '8' }}
