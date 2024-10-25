@@ -69,6 +69,11 @@ sys.enable_extra_runtime_domain_names_conf = true
 {# sgx.isvsvn    = {{ isvsvn }} #}
 
 # The maximum number of threads in a single process needs to be declared in advance.
+# Account for:
+# - one main thread
+# - the tokio worker threads
+# - any threads and threadpools you might be starting
+# - helper threads internal to Gramine — see:
 #   https://gramine.readthedocs.io/en/stable/manifest-syntax.html#number-of-threads
 sgx.max_threads = {{ '1' if env.get('EDMM', '0') == '1' else '8' }}
 

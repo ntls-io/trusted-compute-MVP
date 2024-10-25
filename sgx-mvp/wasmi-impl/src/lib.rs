@@ -1,10 +1,9 @@
 // wasmi-impl/src/lib.rs
 
-use wasmi::{
-    Engine, Extern, Linker, Memory, MemoryType, Module, Store, Val,
-};
+use wasmi::{Engine, Linker, Memory, MemoryType, Module, Store, Val};
 use serde_json::Value as JsonValue;
 use std::fs;
+use anyhow::{anyhow, Result};
 
 /// Define the error codes returned by the WASM modules
 #[repr(i32)]
@@ -20,7 +19,20 @@ pub enum WasmErrorCode {
 }
 
 impl WasmErrorCode {
-    /// Returns the i32 code associated with the WasmErrorCode
+    /// Creates a `WasmErrorCode` from an `i32` code
+    pub fn from_code(code: i32) -> Self {
+        match code {
+            0 => WasmErrorCode::Success,
+            1 => WasmErrorCode::ParseInputData,
+            2 => WasmErrorCode::ParseSchema,
+            3 => WasmErrorCode::SerializeOutput,
+            4 => WasmErrorCode::OutputBufferTooSmall,
+            5 => WasmErrorCode::ExecutionFailed,
+            other => WasmErrorCode::Unknown(other),
+        }
+    }
+
+    /// Returns the `i32` code associated with the `WasmErrorCode`
     pub fn code(&self) -> i32 {
         match self {
             WasmErrorCode::Success => 0,
@@ -34,17 +46,10 @@ impl WasmErrorCode {
     }
 }
 
+// Implement the `From<i32>` trait for `WasmErrorCode`
 impl From<i32> for WasmErrorCode {
     fn from(code: i32) -> Self {
-        match code {
-            0 => WasmErrorCode::Success,
-            1 => WasmErrorCode::ParseInputData,
-            2 => WasmErrorCode::ParseSchema,
-            3 => WasmErrorCode::SerializeOutput,
-            4 => WasmErrorCode::OutputBufferTooSmall,
-            5 => WasmErrorCode::ExecutionFailed,
-            other => WasmErrorCode::Unknown(other),
-        }
+        WasmErrorCode::from_code(code)
     }
 }
 
@@ -62,6 +67,8 @@ impl std::fmt::Display for WasmErrorCode {
     }
 }
 
+impl std::error::Error for WasmErrorCode {}
+
 /// Executes a WASM binary with the provided JSON data and schema.
 ///
 /// # Arguments
@@ -73,112 +80,67 @@ impl std::fmt::Display for WasmErrorCode {
 /// # Returns
 ///
 /// * `Ok(JsonValue)` containing the result if execution is successful.
-/// * `Err(i32)` containing the error code if an error occurs.
-pub fn wasm_execution(
-    binary: &str,
-    data: JsonValue,
-    schema: JsonValue,
-) -> std::result::Result<JsonValue, i32> {
+/// * `Err(anyhow::Error)` containing the error if an error occurs.
+pub fn wasm_execution(binary: &str, data: JsonValue, schema: JsonValue) -> Result<JsonValue> {
     // Load the WASM binary
-    let wasm_binary = match fs::read(binary) {
-        Ok(bytes) => bytes,
-        Err(e) => {
-            eprintln!("[!] Failed to read WASM binary '{}': {}", binary, e);
-            return Err(WasmErrorCode::ExecutionFailed.code());
-        }
-    };
+    let wasm_binary = fs::read(binary)
+        .map_err(|e| anyhow!("Failed to read WASM binary '{}': {}", binary, e))?;
 
     // Create an engine and store
     let engine = Engine::default();
     let mut store = Store::new(&engine, ());
 
     // Compile the module
-    let module = match Module::new(&engine, &wasm_binary) {
-        Ok(m) => m,
-        Err(e) => {
-            eprintln!("[!] Failed to compile WASM module '{}': {}", binary, e);
-            return Err(WasmErrorCode::ExecutionFailed.code());
-        }
-    };
+    let module = Module::new(&engine, &wasm_binary)
+        .map_err(|e| anyhow!("Failed to compile WASM module '{}': {}", binary, e))?;
 
     // Create a linker
     let mut linker = Linker::new(&engine);
 
     // Create a memory type (minimum 17 pages = 17 * 64KB = 1,088 KB)
-    let memory_type = match MemoryType::new(17, None) {
-        Ok(mt) => mt,
-        Err(e) => {
-            eprintln!("[!] Failed to create memory type: {}", e);
-            return Err(WasmErrorCode::ExecutionFailed.code());
-        }
-    };
+    let memory_type = MemoryType::new(17, None)
+        .map_err(|e| anyhow!("Failed to create memory type: {}", e))?;
 
     // Create a memory instance and add it to the linker
-    let memory = match Memory::new(&mut store, memory_type) {
-        Ok(m) => m,
-        Err(e) => {
-            eprintln!("[!] Failed to create memory: {}", e);
-            return Err(WasmErrorCode::ExecutionFailed.code());
-        }
-    };
-    if let Err(e) = linker.define("env", "memory", memory.clone()) {
-        eprintln!("[!] Failed to define memory in linker: {}", e);
-        return Err(WasmErrorCode::ExecutionFailed.code());
-    }
+    let memory = Memory::new(&mut store, memory_type)
+        .map_err(|e| anyhow!("Failed to create memory: {}", e))?;
+
+    linker
+        .define("env", "memory", memory.clone())
+        .map_err(|e| anyhow!("Failed to define memory in linker: {}", e))?;
 
     // Instantiate the module
-    let instance_pre = match linker.instantiate(&mut store, &module) {
-        Ok(inst) => inst,
-        Err(e) => {
-            eprintln!("[!] Failed to instantiate WASM module '{}': {}", binary, e);
-            return Err(WasmErrorCode::ExecutionFailed.code());
-        }
-    };
+    let instance_pre = linker
+        .instantiate(&mut store, &module)
+        .map_err(|e| anyhow!("Failed to instantiate WASM module '{}': {}", binary, e))?;
 
-    let instance = match instance_pre.ensure_no_start(&mut store) {
-        Ok(inst) => inst,
-        Err(e) => {
-            eprintln!("[!] Failed to ensure no start: {}", e);
-            return Err(WasmErrorCode::ExecutionFailed.code());
-        }
-    };
+    let instance = instance_pre
+        .ensure_no_start(&mut store)
+        .map_err(|e| anyhow!("Failed to ensure no start: {}", e))?;
 
     // Serialize input data and schema
-    let data_bytes = match serde_json::to_vec(&data) {
-        Ok(bytes) => bytes,
-        Err(e) => {
-            eprintln!("[!] Failed to serialize input data: {}", e);
-            return Err(WasmErrorCode::ParseInputData.code());
-        }
-    };
+    let data_bytes = serde_json::to_vec(&data)
+        .map_err(|e| anyhow!("Failed to serialize input data: {}", e))?;
 
-    let schema_bytes = match serde_json::to_vec(&schema) {
-        Ok(bytes) => bytes,
-        Err(e) => {
-            eprintln!("[!] Failed to serialize input schema: {}", e);
-            return Err(WasmErrorCode::ParseSchema.code());
-        }
-    };
+    let schema_bytes = serde_json::to_vec(&schema)
+        .map_err(|e| anyhow!("Failed to serialize input schema: {}", e))?;
 
     // Write data into WASM memory
     let data_ptr: u32 = 0;
     let data_len = data_bytes.len() as u32;
-    if let Err(e) = memory.write(&mut store, data_ptr as usize, &data_bytes) {
-        eprintln!("[!] Failed to write input data to memory: {}", e);
-        return Err(WasmErrorCode::ExecutionFailed.code());
-    }
+    memory
+        .write(&mut store, data_ptr as usize, &data_bytes)
+        .map_err(|e| anyhow!("Failed to write input data to memory: {}", e))?;
 
     let schema_ptr = data_ptr + data_len;
     let schema_len = schema_bytes.len() as u32;
-    if let Err(e) = memory.write(&mut store, schema_ptr as usize, &schema_bytes) {
-        eprintln!("[!] Failed to write input schema to memory: {}", e);
-        return Err(WasmErrorCode::ExecutionFailed.code());
-    }
+    memory
+        .write(&mut store, schema_ptr as usize, &schema_bytes)
+        .map_err(|e| anyhow!("Failed to write input schema to memory: {}", e))?;
 
     // Prepare space for output buffer
     let output_ptr = schema_ptr + schema_len;
-    // TODO: Increase buffer size for larger outputs
-    let output_size = 1024 * 1024;  // 1MB buffer
+    let output_size = 1024 * 1024; // 1MB buffer
     let output_len_ptr = output_ptr + output_size;
 
     // Ensure the memory is large enough
@@ -187,20 +149,16 @@ pub fn wasm_execution(
     if total_memory_size > current_memory_size {
         let additional_bytes = total_memory_size - current_memory_size;
         let additional_pages = ((additional_bytes + 0xFFFF) / 0x10000) as u32; // Round up to the next page
-        if let Err(e) = memory.grow(&mut store, additional_pages) {
-            eprintln!("[!] Failed to grow memory: {}", e);
-            return Err(WasmErrorCode::ExecutionFailed.code());
-        }
+        memory
+            .grow(&mut store, additional_pages)
+            .map_err(|e| anyhow!("Failed to grow memory: {}", e))?;
     }
 
     // Get the function `exec`
-    let exec_func = match instance.get_export(&mut store, "exec") {
-        Some(Extern::Func(f)) => f,
-        _ => {
-            eprintln!("[!] Failed to find `exec` function export in '{}'", binary);
-            return Err(WasmErrorCode::ExecutionFailed.code());
-        }
-    };
+    let exec_func = instance
+        .get_export(&mut store, "exec")
+        .and_then(|ext| ext.into_func())
+        .ok_or_else(|| anyhow!("Failed to find `exec` function export in '{}'", binary))?;
 
     // Prepare the function arguments
     let args = [
@@ -217,48 +175,39 @@ pub fn wasm_execution(
     let mut results = [Val::I32(0)];
 
     // Call the function
-    if let Err(e) = exec_func.call(&mut store, &args, &mut results) {
-        eprintln!("[!] Failed to execute `exec` function: {}", e);
-        return Err(WasmErrorCode::ExecutionFailed.code());
-    }
+    exec_func
+        .call(&mut store, &args, &mut results)
+        .map_err(|e| anyhow!("Failed to execute `exec` function: {}", e))?;
 
     // Check the result code
     let result_code = match results[0] {
         Val::I32(code) => code,
-        _ => {
-            eprintln!("[!] Invalid return value from WASM function");
-            return Err(WasmErrorCode::ExecutionFailed.code());
-        }
+        _ => return Err(anyhow!("Invalid return value from WASM function")),
     };
 
     if result_code != WasmErrorCode::Success.code() {
-        // WASM function returned an error code
-        return Err(result_code);
+        // Map the error code to a WasmErrorCode variant
+        let wasm_error = WasmErrorCode::from_code(result_code);
+        // Return the error as anyhow::Error, embedding the WasmErrorCode
+        return Err(anyhow!(wasm_error));
     }
 
     // Read the actual output length from WASM memory
     let mut actual_output_len_bytes = [0u8; 4];
-    if let Err(e) = memory.read(&mut store, output_len_ptr as usize, &mut actual_output_len_bytes) {
-        eprintln!("[!] Failed to read actual output length: {}", e);
-        return Err(WasmErrorCode::ExecutionFailed.code());
-    }
+    memory
+        .read(&mut store, output_len_ptr as usize, &mut actual_output_len_bytes)
+        .map_err(|e| anyhow!("Failed to read actual output length: {}", e))?;
     let actual_output_len = i32::from_le_bytes(actual_output_len_bytes) as usize;
 
     // Read the output data from WASM memory
     let mut output_data = vec![0u8; actual_output_len];
-    if let Err(e) = memory.read(&mut store, output_ptr as usize, &mut output_data) {
-        eprintln!("[!] Failed to read output data from memory: {}", e);
-        return Err(WasmErrorCode::ExecutionFailed.code());
-    }
+    memory
+        .read(&mut store, output_ptr as usize, &mut output_data)
+        .map_err(|e| anyhow!("Failed to read output data from memory: {}", e))?;
 
     // Deserialize the output JSON
-    let result_json: JsonValue = match serde_json::from_slice(&output_data) {
-        Ok(json) => json,
-        Err(e) => {
-            eprintln!("[!] Failed to deserialize output JSON: {}", e);
-            return Err(WasmErrorCode::SerializeOutput.code());
-        }
-    };
+    let result_json: JsonValue = serde_json::from_slice(&output_data)
+        .map_err(|e| anyhow!("Failed to deserialize output JSON: {}", e))?;
 
     // Return the result JSON
     Ok(result_json)

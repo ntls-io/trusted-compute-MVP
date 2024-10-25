@@ -1,5 +1,5 @@
 use serde_json::Value;
-use anyhow;
+use anyhow::{anyhow, Result};
 
 /// Function to validate that two JSON schemas match
 pub fn validate_json_schemas(schema1: &Value, schema2: &Value) -> bool {
@@ -79,14 +79,18 @@ fn compare_schema_values(value1: &Value, value2: &Value) -> bool {
 }
 
 /// Function to append second JSON's columnar data to the first, expanding the columns
-pub fn append_json(json1: &Value, json2: &Value) -> Result<Value, Box<dyn std::error::Error>> {
+pub fn append_json(json1: &Value, json2: &Value) -> Result<Value> {
     // Ensure both inputs are objects with arrays as values
     if !json1.is_object() || !json2.is_object() {
-        return Err(anyhow::anyhow!("JSON data should be objects with arrays as values").into());
+        return Err(anyhow!("JSON data should be objects with arrays as values"));
     }
 
-    let obj1 = json1.as_object().ok_or_else(|| anyhow::anyhow!("Expected an object in json1"))?;
-    let obj2 = json2.as_object().ok_or_else(|| anyhow::anyhow!("Expected an object in json2"))?;
+    let obj1 = json1
+        .as_object()
+        .ok_or_else(|| anyhow!("Expected an object in json1"))?;
+    let obj2 = json2
+        .as_object()
+        .ok_or_else(|| anyhow!("Expected an object in json2"))?;
 
     let mut merged_data = json1.clone();
 
@@ -97,12 +101,16 @@ pub fn append_json(json1: &Value, json2: &Value) -> Result<Value, Box<dyn std::e
                 let mut combined_array = arr1.clone();
                 combined_array.extend(arr2.clone());
 
-                merged_data[key] = Value::Array(combined_array);
+                if let Some(merged_obj) = merged_data.as_object_mut() {
+                    merged_obj.insert(key.clone(), Value::Array(combined_array));
+                } else {
+                    return Err(anyhow!("Merged data is not an object"));
+                }
             } else {
-                return Err(anyhow::anyhow!("Expected an array for key '{}' in json2", key).into());
+                return Err(anyhow!("Expected an array for key '{}' in json2", key));
             }
         } else {
-            return Err(anyhow::anyhow!("Expected an array for key '{}' in json1", key).into());
+            return Err(anyhow!("Expected an array for key '{}' in json1", key));
         }
     }
 
