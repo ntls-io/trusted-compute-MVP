@@ -2,10 +2,8 @@ ARCH_LIBDIR ?= /lib/$(shell $(CC) -dumpmachine)
 
 SELF_EXE = target/release/sgx-mvp
 
-CACERT_FILE = etc/ssl/cacert.pem
-
 .PHONY: all
-all: cacert $(SELF_EXE) sgx-mvp.manifest
+all: $(SELF_EXE) sgx-mvp.manifest
 ifeq ($(SGX),1)
 all: sgx-mvp.manifest.sgx sgx-mvp.sig
 endif
@@ -55,19 +53,9 @@ endif
 mvp: all
 	$(GRAMINE) sgx-mvp
 
-# Download the latest CA certificate bundle if it does not exist
-.PHONY: cacert
-cacert:
-	@if [ ! -f $(CACERT_FILE) ]; then \
-		echo "\033[32mDownloading the latest CA certificate bundle...\033[0m"; \
-		curl -o $(CACERT_FILE) https://curl.se/ca/cacert.pem; \
-	else \
-		echo "\033[32mCA certificate bundle already exists, skipping download...\033[0m"; \
-	fi
-
 .PHONY: clean
 clean:
-	$(RM) -rf *.token *.sig *.manifest.sgx *.manifest result-* OUTPUT $(CACERT_FILE)
+	$(RM) -rf *.token *.sig *.manifest.sgx *.manifest result-* OUTPUT
 
 .PHONY: distclean
 distclean: clean

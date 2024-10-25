@@ -1,21 +1,22 @@
 use reqwest;
 use reqwest::Certificate;
+use reqwest::blocking::Client;
 use std::error::Error;
 use anyhow;
 use sha2::{Sha256, Digest};
-use std::fs::File;
+use std::fs::{File, read};
 use std::io::Write;
 
 
 /// Helper function to download a Python script from GitHub, calculate its hash, and verify integrity
 pub fn verify_and_download_python(base_url: &str, file_name: &str, save_path: &str, expected_hash: &str) -> Result<(), Box<dyn Error>> {
     let url = format!("{}{}", base_url, file_name);
-    
-    // Load the CA certificate
-    let cert = include_bytes!("../../etc/ssl/cacert.pem");
-    let ca_cert = Certificate::from_pem(cert)?;
-    
-    let client = reqwest::blocking::Client::builder()
+
+    let ca_bundle = read("/etc/ssl/certs/ca-certificates.crt")?;
+    let ca_cert = Certificate::from_pem(&ca_bundle)?;
+
+    let client = Client::builder()
+        .use_rustls_tls()
         .add_root_certificate(ca_cert)
         .build()?;
     
@@ -44,11 +45,11 @@ pub fn verify_and_download_python(base_url: &str, file_name: &str, save_path: &s
 pub fn verify_and_download_wasm(base_url: &str, file_name: &str, save_path: &str, expected_hash: &str) -> Result<(), Box<dyn Error>> {
     let url = format!("{}{}", base_url, file_name);
 
-    // Load the CA certificate
-    let cert = include_bytes!("../../etc/ssl/cacert.pem");
-    let ca_cert = Certificate::from_pem(cert)?;
+    let ca_bundle = read("/etc/ssl/certs/ca-certificates.crt")?;
+    let ca_cert = Certificate::from_pem(&ca_bundle)?;
 
-    let client = reqwest::blocking::Client::builder()
+    let client = Client::builder()
+        .use_rustls_tls()
         .add_root_certificate(ca_cert)
         .build()?;
 

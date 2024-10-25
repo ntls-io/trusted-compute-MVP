@@ -13,24 +13,25 @@ This directory contains all the relevant SGX code for NTC-MVP.
 
 ## Step 0
 
-1. Follow the instructions in the [Gramine Installation Guide](https://gramine.readthedocs.io/en/stable/installation.html#install-gramine-packages-1) under "Install Gramine packages."
+1. Follow the instructions in the [Gramine Installation Guide](https://gramine.readthedocs.io/en/stable/installation.html#install-gramine-packages-1) under "Install Gramine packages" and [Prepare a signing key](https://gramine.readthedocs.io/en/stable/quickstart.html#prepare-a-signing-key).
 
 2. Ensure that Python 3.8 is installed. If necessary, modify the path(s) in the [sgx-mvp.manifest.template](https://github.com/ntls-io/trusted-compute-MVP/blob/main/sgx-mvp/sgx-mvp.manifest.template) to match your setup.
 
     Ensure that you have the necessary Python development package installed:
 
 ```sh
+    sudo apt-get update
     sudo apt-get install libffi-dev
     sudo apt-get install python3.8-dev
 ```
 
 3. Install Rust using the [official installation guide](https://www.rust-lang.org/tools/install)
 
-4. Additional dependencies
+4. Install additional dependencies
 
 ```sh
 sudo apt-get update
-sudo apt-get install libssl-dev
+sudo apt-get install -y libssl-dev ca-certificates
 ```
 
 ## Step 1
