@@ -78,6 +78,95 @@ gramine-direct sgx-mvp
 
 Note that _gramine-sgx_ requires all files we use in `sgx.trusted_files`
 
+# Postman API Samples
+
+This guide provides details for importing Postman collections to test the API endpoints
+
+---
+
+## Importing Postman Collection
+
+To test the APIs, you can import the Postman collection provided in this repository.
+
+### Steps to Import
+
+1. **Locate the Postman Collection**:
+   - The Postman collection is saved in the `postman/` directory of this repository.
+   - File: `postman/collection.json`
+
+2. **Open Postman**:
+   - Launch the Postman application on your system.
+
+3. **Import the Collection**:
+   - Click **Import** in the top-left corner of Postman.
+   - Drag and drop the `collection.json` file or click **Upload Files** and select it.
+
+4. **Verify Imported Requests**:
+   - After import, you should see all API endpoints organized under the collection.
+
+---
+
+## Health Check API
+
+### Endpoint
+
+- **URL**: `http://127.0.0.1:8080/health`
+- **Method**: `GET`
+
+### Description
+
+The `health` endpoint verifies that the server is running and responsive. It returns a simple success message.
+
+### Response
+
+- **Success** (`200 OK`):
+  ```text
+  Server is running
+
+---
+
+## Execute Python API
+
+### Endpoint
+
+- **URL**: `http://127.0.0.1:8080/execute_python`
+- **Method**: `POST`
+- **Headers**: 
+  - `Content-Type: application/json`
+
+### Request Body Format
+
+The body must include the GitHub URL of the Python script and its expected SHA256 hash. This ensures the script is verified before execution.
+
+```json
+{
+  "github_url": "URL to the Python script on GitHub",
+  "expected_hash": "SHA256 hash of the Python script"
+}
+```
+
+### Response
+
+- **Success** (`200 OK`):
+
+```json
+{
+  "result": {
+    "Column_1": X,
+    "Column_2": Y
+  }
+}
+```
+
+- **Failure** (`500 Internal Server Error`):
+```json
+{
+  "error": "Detailed error message"
+}
+```
+
+---
+
 # Cleaning Up
 
 To maintain a clean workspace, you can use the following commands:
