@@ -1,5 +1,5 @@
-use serde_json::Value;
 use anyhow::{anyhow, Result};
+use serde_json::Value;
 
 /// Function to validate that two JSON schemas match
 pub fn validate_json_schemas(schema1: &Value, schema2: &Value) -> bool {
@@ -39,7 +39,6 @@ pub fn validate_json_schemas(schema1: &Value, schema2: &Value) -> bool {
         false
     }
 }
-
 
 /// Recursive function to compare schema values (types and structure)
 fn compare_schema_values(value1: &Value, value2: &Value) -> bool {

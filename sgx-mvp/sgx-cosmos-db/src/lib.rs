@@ -1,11 +1,11 @@
+use anyhow::{anyhow, Result};
+use bson;
 use mongodb::{
     bson::{doc, oid::ObjectId, Document},
     options::ClientOptions,
     Client,
 };
 use serde_json::Value;
-use anyhow::{anyhow, Result};
-use bson;
 
 /// Asynchronously reads a JSON schema from MongoDB using the `_id` field
 pub async fn read_json_schema_from_mongodb(

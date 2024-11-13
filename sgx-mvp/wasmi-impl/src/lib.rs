@@ -1,9 +1,9 @@
 // wasmi-impl/src/lib.rs
 
-use wasmi::{Engine, Linker, Memory, MemoryType, Module, Store, Val};
+use anyhow::{anyhow, Result};
 use serde_json::Value as JsonValue;
 use std::fs;
-use anyhow::{anyhow, Result};
+use wasmi::{Engine, Linker, Memory, MemoryType, Module, Store, Val};
 
 /// Define the error codes returned by the WASM modules
 #[repr(i32)]
@@ -83,8 +83,8 @@ impl std::error::Error for WasmErrorCode {}
 /// * `Err(anyhow::Error)` containing the error if an error occurs.
 pub fn wasm_execution(binary: &str, data: JsonValue, schema: JsonValue) -> Result<JsonValue> {
     // Load the WASM binary
-    let wasm_binary = fs::read(binary)
-        .map_err(|e| anyhow!("Failed to read WASM binary '{}': {}", binary, e))?;
+    let wasm_binary =
+        fs::read(binary).map_err(|e| anyhow!("Failed to read WASM binary '{}': {}", binary, e))?;
 
     // Create an engine and store
     let engine = Engine::default();
@@ -98,8 +98,8 @@ pub fn wasm_execution(binary: &str, data: JsonValue, schema: JsonValue) -> Resul
     let mut linker = Linker::new(&engine);
 
     // Create a memory type (minimum 17 pages = 17 * 64KB = 1,088 KB)
-    let memory_type = MemoryType::new(17, None)
-        .map_err(|e| anyhow!("Failed to create memory type: {}", e))?;
+    let memory_type =
+        MemoryType::new(17, None).map_err(|e| anyhow!("Failed to create memory type: {}", e))?;
 
     // Create a memory instance and add it to the linker
     let memory = Memory::new(&mut store, memory_type)
@@ -119,8 +119,8 @@ pub fn wasm_execution(binary: &str, data: JsonValue, schema: JsonValue) -> Resul
         .map_err(|e| anyhow!("Failed to ensure no start: {}", e))?;
 
     // Serialize input data and schema
-    let data_bytes = serde_json::to_vec(&data)
-        .map_err(|e| anyhow!("Failed to serialize input data: {}", e))?;
+    let data_bytes =
+        serde_json::to_vec(&data).map_err(|e| anyhow!("Failed to serialize input data: {}", e))?;
 
     let schema_bytes = serde_json::to_vec(&schema)
         .map_err(|e| anyhow!("Failed to serialize input schema: {}", e))?;
@@ -195,7 +195,11 @@ pub fn wasm_execution(binary: &str, data: JsonValue, schema: JsonValue) -> Resul
     // Read the actual output length from WASM memory
     let mut actual_output_len_bytes = [0u8; 4];
     memory
-        .read(&mut store, output_len_ptr as usize, &mut actual_output_len_bytes)
+        .read(
+            &mut store,
+            output_len_ptr as usize,
+            &mut actual_output_len_bytes,
+        )
         .map_err(|e| anyhow!("Failed to read actual output length: {}", e))?;
     let actual_output_len = i32::from_le_bytes(actual_output_len_bytes) as usize;
 

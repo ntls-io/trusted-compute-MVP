@@ -1,21 +1,22 @@
-extern crate wasmi_impl;
-extern crate python_rust_impl;
-extern crate json_append;
 extern crate github_download;
+extern crate json_append;
+extern crate python_rust_impl;
 extern crate sgx_cosmos_db;
+extern crate wasmi_impl;
 
-use serde_json::Value;
-use std::fs::File;
-use std::path::Path;
-use std::io::{Read, Write};
-use std::env;
-use anyhow::{Result, anyhow, Error};
-use wasmi_impl::{WasmErrorCode, wasm_execution};
-use python_rust_impl::run_python;
+use actix_web::{web, App, HttpResponse, HttpServer, Responder};
+use anyhow::{anyhow, Error, Result};
+use github_download::{verify_and_download_python_github, verify_and_download_wasm};
 use json_append::{append_json, validate_json_schemas};
-use github_download::{verify_and_download_python, verify_and_download_wasm};
+use python_rust_impl::run_python;
+use serde_json::Value;
 use sgx_cosmos_db::read_json_schema_from_mongodb;
-use actix_web::{web, App, HttpServer, Responder, HttpResponse};
+use std::env;
+use std::fs::File;
+use std::io::{Read, Write};
+use std::path::Path;
+use wasmi_impl::{wasm_execution, WasmErrorCode};
+use serde::Deserialize;
 
 // WASM binary files
 static WASM_FILE_MEAN: &str = "/tmp/get_mean_wasm.wasm";
@@ -33,21 +34,10 @@ const WASM_FILE_MEAN_URL: &str = "get_mean_wasm.wasm";
 const WASM_FILE_MEDIAN_URL: &str = "get_median_wasm.wasm";
 const WASM_FILE_STD_DEV_URL: &str = "get_sd_wasm.wasm";
 
-// URLs for Python scripts on GitHub
-const GITHUB_BASE_URL: &str = "https://raw.githubusercontent.com/ntls-io/Python-Scripts-MVP/main/";
-const PYTHON_FILE_MEAN_URL: &str = "calculate_mean.py";
-const PYTHON_FILE_MEDIAN_URL: &str = "calculate_median.py";
-const PYTHON_FILE_SD_URL: &str = "calculate_sd.py";
-
 // File paths to save the downloaded Python scripts
 const PYTHON_FILE_MEAN: &str = "/tmp/calculate_mean.py";
 const PYTHON_FILE_MEDIAN: &str = "/tmp/calculate_median.py";
 const PYTHON_FILE_SD: &str = "/tmp/calculate_sd.py";
-
-// Expected SHA256 hashes for the Python scripts
-const EXPECTED_HASH_MEAN: &str = "d1bb84ecf1f107013df0fe5ea8a63c15bbd673a81a13a6871c6b43d7e85fd690";
-const EXPECTED_HASH_MEDIAN: &str = "bcda34f2af83a2dac745a5d86f18f4c4cd6cb4e61c76e0dec005a5fc9bc124f5";
-const EXPECTED_HASH_SD: &str = "65230a7a140e30f94fe4d070c9f9e8146a44c2f59d85bff2e83ac9ffa5db39ee";
 
 // Define a health check route
 async fn health_check() -> impl Responder {
@@ -70,28 +60,6 @@ async fn main() -> Result<()> {
     env::remove_var("DATABASE_NAME");
     env::remove_var("COLLECTION_NAME");
     env::remove_var("COSMOSDB_URI");
-
-    println!("[+] Start downloading and verifying Python scripts");
-    // Download Python scripts from GitHub and verify their hashes
-    verify_and_download_python(
-        GITHUB_BASE_URL,
-        PYTHON_FILE_MEAN_URL,
-        PYTHON_FILE_MEAN,
-        EXPECTED_HASH_MEAN,
-    )?;
-    verify_and_download_python(
-        GITHUB_BASE_URL,
-        PYTHON_FILE_MEDIAN_URL,
-        PYTHON_FILE_MEDIAN,
-        EXPECTED_HASH_MEDIAN,
-    )?;
-    verify_and_download_python(
-        GITHUB_BASE_URL,
-        PYTHON_FILE_SD_URL,
-        PYTHON_FILE_SD,
-        EXPECTED_HASH_SD,
-    )?;
-    println!("[+] Python scripts downloaded and verified successfully");
 
     println!("[+] Start downloading and verifying WASM binaries");
     // Download and verify WASM binaries
@@ -166,7 +134,11 @@ async fn main() -> Result<()> {
 
     // Execute Standard Deviation WASM Module
     println!("[+] Execute WASM standard deviation binary with JSON data and schema");
-    match wasm_execution(WASM_FILE_STD_DEV, json_data_1.clone(), json_schema_1.clone()) {
+    match wasm_execution(
+        WASM_FILE_STD_DEV,
+        json_data_1.clone(),
+        json_schema_1.clone(),
+    ) {
         Ok(result_std_dev) => {
             println!(
                 "[+] Standard Deviation Result: {}",
@@ -177,27 +149,6 @@ async fn main() -> Result<()> {
             handle_wasm_error(error, "Standard Deviation");
         }
     }
-
-    // Execute Python Mean Calculation via FFI
-    let python_mean_result = run_python(&json_data_1, PYTHON_FILE_MEAN)?;
-    println!(
-        "[+] Python Mean Result: {}",
-        serde_json::to_string_pretty(&python_mean_result)?
-    );
-
-    // Execute Python Median Calculation via FFI
-    let python_median_result = run_python(&json_data_1, PYTHON_FILE_MEDIAN)?;
-    println!(
-        "[+] Python Median Result: {}",
-        serde_json::to_string_pretty(&python_median_result)?
-    );
-
-    // Execute Python SD Calculation via FFI
-    let python_sd_result = run_python(&json_data_1, PYTHON_FILE_SD)?;
-    println!(
-        "[+] Python Standard Deviation Result: {}",
-        serde_json::to_string_pretty(&python_sd_result)?
-    );
 
     println!("[+] Append JSON files");
     let json_data_2 = read_json_from_file(&json_data_2_path)?;
@@ -217,10 +168,7 @@ async fn main() -> Result<()> {
         // Save the appended JSON data to /tmp/merged_json.json
         let output_file_path = "/tmp/merged_json.json";
         write_json_to_file(&appended_json, output_file_path)?;
-        println!(
-            "[+] Appended JSON data saved to '{}'",
-            output_file_path
-        );
+        println!("[+] Appended JSON data saved to '{}'", output_file_path);
     } else {
         eprintln!("[!] JSON schemas do not match. Cannot append the data.");
         return Err(anyhow!("JSON schema validation failed"));
@@ -231,8 +179,8 @@ async fn main() -> Result<()> {
     // Start the Actix Web server
     HttpServer::new(|| {
         App::new()
-            .route("/health", web::get().to(health_check))
-            // Future routes will be added here
+        .route("/health", web::get().to(health_check))
+        .route("/execute_python", web::post().to(execute_python_handler))
     })
     .bind("127.0.0.1:8080")?
     .run()
@@ -246,15 +194,14 @@ fn read_json_from_file<P: AsRef<Path>>(path: P) -> Result<Value> {
     let mut contents = String::new();
     file.read_to_string(&mut contents)
         .map_err(|e| anyhow!("Failed to read file: {}", e))?;
-    let json: Value = serde_json::from_str(&contents)
-        .map_err(|e| anyhow!("Failed to parse JSON: {}", e))?;
+    let json: Value =
+        serde_json::from_str(&contents).map_err(|e| anyhow!("Failed to parse JSON: {}", e))?;
     Ok(json)
 }
 
 /// Helper function to write JSON to a file
 fn write_json_to_file(json_data: &Value, file_path: &str) -> Result<()> {
-    let mut file = File::create(file_path)
-        .map_err(|e| anyhow!("Failed to create file: {}", e))?;
+    let mut file = File::create(file_path).map_err(|e| anyhow!("Failed to create file: {}", e))?;
     let json_string = serde_json::to_string_pretty(json_data)
         .map_err(|e| anyhow!("Failed to serialize JSON: {}", e))?;
     file.write_all(json_string.as_bytes())
@@ -274,10 +221,57 @@ fn handle_wasm_error(error: Error, operation: &str) {
         );
     } else {
         // Handle other errors
-        eprintln!(
-            "[!] Error during '{}' operation: {}",
-            operation,
-            error
-        );
+        eprintln!("[!] Error during '{}' operation: {}", operation, error);
     }
 }
+
+/// Structure to deserialize incoming API requests
+#[derive(Deserialize)]
+struct ExecutePythonRequest {
+    github_url: String, // GitHub URL to the script
+    expected_hash: String, // Expected SHA256 hash of the script
+}
+
+/// HTTP POST handler to execute a Python script from a GitHub URL
+async fn execute_python_handler(body: web::Json<ExecutePythonRequest>) -> impl Responder {
+    let github_url = &body.github_url;
+    let expected_hash = &body.expected_hash;
+
+    // TODO: Verify DRT redemption
+
+    // TODO: Unseal input data
+    let input_data = read_json_from_file("test-data/1_test_data.json").unwrap();
+
+    match execute_python_script(github_url, expected_hash, &input_data) {
+        Ok(result) => HttpResponse::Ok().json(result), // Return the script's output
+        Err(e) => {
+            eprintln!("[!] Error executing Python script: {}", e);
+            HttpResponse::InternalServerError().body(format!("Execution error: {}", e)) // Return error details
+        }
+    }
+}
+
+fn execute_python_script(
+    github_url: &str,
+    expected_hash: &str,
+    input_data: &Value,
+) -> Result<Value> {
+
+    // Temporary path to save the downloaded Python script
+    let script_path = "/tmp/downloaded_script.py";
+
+    // Step 1: Download and verify the script
+    verify_and_download_python_github(&github_url, script_path, expected_hash)
+        .map_err(|e| anyhow!("Failed to download or verify script: {}", e))?;
+
+    // Step 2: Execute the Python script
+    let result = run_python(input_data, script_path)
+        .map_err(|e| anyhow!("Python execution error: {}", e))?;
+
+    // Step 3: Format script output
+    println!("[+] Python Script Result: {}", serde_json::to_string_pretty(&result)?);
+
+    Ok(result)
+}
+
+

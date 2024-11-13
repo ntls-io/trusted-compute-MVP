@@ -1,15 +1,14 @@
+use anyhow::Result;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use serde_json::Value;
-use anyhow::Result;
 
 pub fn run_python(json_data: &Value, py_file_path: &'static str) -> Result<Value> {
     Python::with_gil(|py| {
-        
         // Open and read the Python file contents
         let code = std::fs::read_to_string(py_file_path)
             .map_err(|e| anyhow::anyhow!("Failed to read Python script: {}", e))?;
-        
+
         // Create a Python dictionary to hold the data
         let locals = PyDict::new(py);
 
@@ -30,5 +29,3 @@ pub fn run_python(json_data: &Value, py_file_path: &'static str) -> Result<Value
         Ok(python_result)
     })
 }
-
-
