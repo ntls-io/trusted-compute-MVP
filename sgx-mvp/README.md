@@ -167,6 +167,48 @@ The body must include the GitHub URL of the Python script and its expected SHA25
 
 ---
 
+## Execute WASM API
+
+### Endpoint
+
+- **URL**: `http://127.0.0.1:8080/execute_wasm`
+- **Method**: `POST`
+- **Headers**: 
+  - `Content-Type: application/json`
+
+### Request Body Format
+
+The body must include the GitHub URL of the WASM binary and its expected SHA256 hash. This ensures the WASM binary is verified before execution.
+
+```json
+{
+  "github_url": "URL to the WASM binary on GitHub",
+  "expected_hash": "SHA256 hash of the WASM binary"
+}
+```
+
+### Response
+
+- **Success** (`200 OK`):
+
+```json
+{
+  "result": {
+    "Column_1": X,
+    "Column_2": Y
+  }
+}
+```
+
+- **Failure** (`500 Internal Server Error`):
+```json
+{
+  "error": "Detailed error message"
+}
+```
+
+---
+
 # Cleaning Up
 
 To maintain a clean workspace, you can use the following commands:

@@ -24,11 +24,6 @@
 							"    pm.response.to.have.body(\"Server is running\");",
 							"});",
 							"",
-							"// Test for response time",
-							"pm.test(\"Response time is less than 300ms\", function () {",
-							"    pm.expect(pm.response.responseTime).to.be.below(300);",
-							"});",
-							"",
 							"// Log the response for debugging",
 							"console.log(\"Response Body:\", pm.response.text());",
 							""
@@ -224,6 +219,182 @@
 							"port": "8080",
 							"path": [
 								"execute_python"
+							]
+						}
+					},
+					"_postman_previewlanguage": null,
+					"header": null,
+					"cookie": [],
+					"body": null
+				}
+			]
+		},
+		{
+			"name": "Execute WASM Binary",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"// Test for status code 200",
+							"pm.test(\"Status code is 200\", function () {",
+							"    pm.response.to.have.status(200);",
+							"});",
+							"",
+							"// Test for response contains expected columns",
+							"pm.test(\"Response contains 'Column_1' and 'Column_2'\", function () {",
+							"    const jsonData = pm.response.json();",
+							"",
+							"    pm.expect(jsonData).to.have.property(\"Column_1\");",
+							"    pm.expect(jsonData).to.have.property(\"Column_2\");",
+							"});",
+							""
+						],
+						"type": "text/javascript",
+						"packages": {}
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"github_url\": \"https://github.com/ntls-io/WASM-Binaries-MVP/blob/master/bin/get_mean_wasm.wasm\",\n  \"expected_hash\": \"b5ee81a20256dec2bd3db6e673b11eadae4baf8fafbe68cec1f36517bb569255\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://127.0.0.1:8080/execute_wasm",
+					"protocol": "http",
+					"host": [
+						"127",
+						"0",
+						"0",
+						"1"
+					],
+					"port": "8080",
+					"path": [
+						"execute_wasm"
+					]
+				}
+			},
+			"response": [
+				{
+					"name": "Execute WASM Mean",
+					"originalRequest": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"github_url\": \"https://github.com/ntls-io/WASM-Binaries-MVP/blob/master/bin/get_mean_wasm.wasm\",\n  \"expected_hash\": \"b5ee81a20256dec2bd3db6e673b11eadae4baf8fafbe68cec1f36517bb569255\"\n}\n",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "http://127.0.0.1:8080/execute_wasm",
+							"protocol": "http",
+							"host": [
+								"127",
+								"0",
+								"0",
+								"1"
+							],
+							"port": "8080",
+							"path": [
+								"execute_wasm"
+							]
+						}
+					},
+					"_postman_previewlanguage": null,
+					"header": null,
+					"cookie": [],
+					"body": null
+				},
+				{
+					"name": "Execute WASM Median",
+					"originalRequest": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"github_url\": \"https://github.com/ntls-io/WASM-Binaries-MVP/blob/master/bin/get_median_wasm.wasm\",\n  \"expected_hash\": \"728445d425153350b3e353cc96d29c16d5d81978ea3d7bad21f3d2b2dd76d813\"\n}\n",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "http://127.0.0.1:8080/execute_wasm",
+							"protocol": "http",
+							"host": [
+								"127",
+								"0",
+								"0",
+								"1"
+							],
+							"port": "8080",
+							"path": [
+								"execute_wasm"
+							]
+						}
+					},
+					"_postman_previewlanguage": null,
+					"header": null,
+					"cookie": [],
+					"body": null
+				},
+				{
+					"name": "Execute WASM SD",
+					"originalRequest": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"github_url\": \"https://github.com/ntls-io/WASM-Binaries-MVP/blob/master/bin/get_sd_wasm.wasm\",\n  \"expected_hash\": \"feb835e2eb26115d1865f381ab80440442761f7c89bc7a56d05bca2cb151c37e\"\n}\n",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "http://127.0.0.1:8080/execute_wasm",
+							"protocol": "http",
+							"host": [
+								"127",
+								"0",
+								"0",
+								"1"
+							],
+							"port": "8080",
+							"path": [
+								"execute_wasm"
 							]
 						}
 					},

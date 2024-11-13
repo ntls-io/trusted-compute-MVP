@@ -23,17 +23,6 @@ static WASM_FILE_MEAN: &str = "/tmp/get_mean_wasm.wasm";
 static WASM_FILE_MEDIAN: &str = "/tmp/get_median_wasm.wasm";
 static WASM_FILE_STD_DEV: &str = "/tmp/get_sd_wasm.wasm";
 
-// Expected SHA256 hashes for the WASM binaries
-const EXPECTED_WASM_HASH_MEAN: &str = "b5ee81a20256dec2bd3db6e673b11eadae4baf8fafbe68cec1f36517bb569255";
-const EXPECTED_WASM_HASH_MEDIAN: &str = "728445d425153350b3e353cc96d29c16d5d81978ea3d7bad21f3d2b2dd76d813";
-const EXPECTED_WASM_HASH_SD: &str = "feb835e2eb26115d1865f381ab80440442761f7c89bc7a56d05bca2cb151c37e";
-
-// URLs for WASM binaries on GitHub
-const GITHUB_WASM_BASE_URL: &str = "https://raw.githubusercontent.com/ntls-io/WASM-Binaries-MVP/master/bin/";
-const WASM_FILE_MEAN_URL: &str = "get_mean_wasm.wasm";
-const WASM_FILE_MEDIAN_URL: &str = "get_median_wasm.wasm";
-const WASM_FILE_STD_DEV_URL: &str = "get_sd_wasm.wasm";
-
 // File paths to save the downloaded Python scripts
 const PYTHON_FILE_MEAN: &str = "/tmp/calculate_mean.py";
 const PYTHON_FILE_MEDIAN: &str = "/tmp/calculate_median.py";
@@ -44,7 +33,7 @@ async fn health_check() -> impl Responder {
     HttpResponse::Ok().body("Server is running")
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     println!("[+] Enclave created successfully");
 
@@ -60,28 +49,6 @@ async fn main() -> Result<()> {
     env::remove_var("DATABASE_NAME");
     env::remove_var("COLLECTION_NAME");
     env::remove_var("COSMOSDB_URI");
-
-    println!("[+] Start downloading and verifying WASM binaries");
-    // Download and verify WASM binaries
-    verify_and_download_wasm(
-        GITHUB_WASM_BASE_URL,
-        WASM_FILE_MEAN_URL,
-        WASM_FILE_MEAN,
-        EXPECTED_WASM_HASH_MEAN,
-    )?;
-    verify_and_download_wasm(
-        GITHUB_WASM_BASE_URL,
-        WASM_FILE_MEDIAN_URL,
-        WASM_FILE_MEDIAN,
-        EXPECTED_WASM_HASH_MEDIAN,
-    )?;
-    verify_and_download_wasm(
-        GITHUB_WASM_BASE_URL,
-        WASM_FILE_STD_DEV_URL,
-        WASM_FILE_STD_DEV,
-        EXPECTED_WASM_HASH_SD,
-    )?;
-    println!("[+] WASM binaries downloaded and verified successfully");
 
     // Construct the path to the JSON data and schema files
     let json_data_1_path = "test-data/1_test_data.json";
@@ -103,52 +70,6 @@ async fn main() -> Result<()> {
         "[+] Successfully read JSON schema from MongoDB: {}",
         serde_json::to_string_pretty(&json_schema_1)?
     );
-
-    // Execute Mean WASM Module
-    println!("[+] Execute WASM mean binary with JSON data and schema");
-    match wasm_execution(WASM_FILE_MEAN, json_data_1.clone(), json_schema_1.clone()) {
-        Ok(result_mean) => {
-            println!(
-                "[+] Mean Result: {}",
-                serde_json::to_string_pretty(&result_mean)?
-            );
-        }
-        Err(error) => {
-            handle_wasm_error(error, "Mean");
-        }
-    }
-
-    // Execute Median WASM Module
-    println!("[+] Execute WASM median binary with JSON data and schema");
-    match wasm_execution(WASM_FILE_MEDIAN, json_data_1.clone(), json_schema_1.clone()) {
-        Ok(result_median) => {
-            println!(
-                "[+] Median Result: {}",
-                serde_json::to_string_pretty(&result_median)?
-            );
-        }
-        Err(error) => {
-            handle_wasm_error(error, "Median");
-        }
-    }
-
-    // Execute Standard Deviation WASM Module
-    println!("[+] Execute WASM standard deviation binary with JSON data and schema");
-    match wasm_execution(
-        WASM_FILE_STD_DEV,
-        json_data_1.clone(),
-        json_schema_1.clone(),
-    ) {
-        Ok(result_std_dev) => {
-            println!(
-                "[+] Standard Deviation Result: {}",
-                serde_json::to_string_pretty(&result_std_dev)?
-            );
-        }
-        Err(error) => {
-            handle_wasm_error(error, "Standard Deviation");
-        }
-    }
 
     println!("[+] Append JSON files");
     let json_data_2 = read_json_from_file(&json_data_2_path)?;
@@ -179,8 +100,9 @@ async fn main() -> Result<()> {
     // Start the Actix Web server
     HttpServer::new(|| {
         App::new()
-        .route("/health", web::get().to(health_check))
-        .route("/execute_python", web::post().to(execute_python_handler))
+        .route("/health", web::get().to(health_check)) // Health check route
+        .route("/execute_python", web::post().to(execute_python_handler)) // Python execution route
+        .route("/execute_wasm", web::post().to(execute_wasm_handler)) // WASM execution route
     })
     .bind("127.0.0.1:8080")?
     .run()
@@ -209,21 +131,57 @@ fn write_json_to_file(json_data: &Value, file_path: &str) -> Result<()> {
     Ok(())
 }
 
-/// Helper function to handle WASM errors
-fn handle_wasm_error(error: Error, operation: &str) {
-    // Attempt to downcast the error to WasmErrorCode
-    if let Some(wasm_error) = error.downcast_ref::<WasmErrorCode>() {
-        eprintln!(
-            "[!] Error during '{}' operation: {} (Error code: {})",
-            operation,
-            wasm_error,
-            wasm_error.code()
-        );
-    } else {
-        // Handle other errors
-        eprintln!("[!] Error during '{}' operation: {}", operation, error);
+/// Structure to deserialize incoming API requests
+#[derive(Deserialize)]
+struct ExecuteWasmRequest {
+    github_url: String,      // GitHub URL to the WASM binary
+    expected_hash: String,   // Expected SHA256 hash of the WASM binary
+}
+
+async fn execute_wasm_handler(body: web::Json<ExecuteWasmRequest>) -> impl Responder {
+    let github_url = &body.github_url;
+    let expected_hash = &body.expected_hash;
+    
+    // TODO: Verify DRT redemption
+
+    // TODO: Unseal input data
+    let input_data = read_json_from_file("test-data/1_test_data.json").unwrap();
+
+    // TODO: Schema handling
+    let input_schema = read_json_from_file("test-data/1_test_schema.json").unwrap();
+
+    match execute_wasm_binary(github_url, expected_hash, &input_data, &input_schema) {
+        Ok(result) => HttpResponse::Ok().json(result), // Return the WASM execution result
+        Err(e) => {
+            eprintln!("[!] Error executing WASM binary: {}", e);
+            HttpResponse::InternalServerError().body(format!("Execution error: {}", e)) // Return error details
+        }
     }
 }
+
+fn execute_wasm_binary(
+    github_url: &str,
+    expected_hash: &str,
+    input_data: &Value,
+    input_schema: &Value,
+) -> Result<Value> {
+
+    // Temporary path to save the downloaded WASM binary
+    let wasm_path = "/tmp/downloaded_wasm.wasm";
+
+    // Step 1: Download and verify the WASM binary
+    verify_and_download_wasm(&github_url, wasm_path, expected_hash)
+        .map_err(|e| anyhow!("Failed to download or verify WASM binary: {}", e))?;
+
+    // Step 2: Execute the WASM binary
+    let result = wasm_execution(wasm_path, input_data.clone(), input_schema.clone())
+        .map_err(|e| anyhow!("WASM execution error: {}", e))?;
+
+    // Step 3: Log and return the result
+    println!("[+] WASM Execution Result: {}", serde_json::to_string_pretty(&result)?);
+    Ok(result)
+}
+
 
 /// Structure to deserialize incoming API requests
 #[derive(Deserialize)]
