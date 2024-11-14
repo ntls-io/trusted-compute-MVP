@@ -7,11 +7,10 @@ This directory contains all the relevant SGX code for NTC-MVP.
 - `test-data` contains sample JSON data and schemas
 - `json-append` contains code for the append functionality
 - `github-download` contains the code needed to download GitHub hosted schema/binaries
-- `sgx-cosmos-db` contains the code to download the schemas from CosmosDB
 
 # Quick Start
 
-## Step 0
+## Step 1
 
 1. Follow the instructions in the [Gramine Installation Guide](https://gramine.readthedocs.io/en/stable/installation.html#install-gramine-packages-1) under "Install Gramine packages" and [Prepare a signing key](https://gramine.readthedocs.io/en/stable/quickstart.html#prepare-a-signing-key).
 
@@ -34,25 +33,37 @@ sudo apt-get update
 sudo apt-get install -y libssl-dev ca-certificates
 ```
 
-## Step 1
-
-Before running the program, you need to set the required environment variables. Ensure that you replace the placeholder values with your actual database information before running the script.
-
-Create a script `start.sh` with the following contents:
+5. Install Azure DCAP Attestation dependancies
 
 ```sh
-export DATABASE_NAME="database_name"
-export COLLECTION_NAME="collection_name"
-export COSMOSDB_URI="connection_string"
+wget -qO- https://packages.microsoft.com/keys/microsoft.asc | sudo apt-key add
+sudo add-apt-repository "deb [arch=amd64] https://packages.microsoft.com/ubuntu/`lsb_release -rs`/prod `lsb_release -cs` main"
+sudo apt install az-dcap-client
+
+sudo apt update
+sudo apt-get install pkg-config
+sudo apt install sgx-aesm-service libsgx-aesm-ecdsa-plugin libsgx-aesm-quote-ex-plugin
 ```
 
-Allow execution of the new script `chmod +x start.sh`
-
-To load these environment variables, run the following command:
+The AESM service should be up and running. To confirm that, use:
 
 ```sh
-source ./start.sh
+sudo systemctl status aesmd.service
 ```
+
+Setup Azure DCAP
+```sh
+export AZDCAP_COLLATERAL_VERSION=v4
+export AZDCAP_DEBUG_LOG_LEVEL=INFO
+```
+
+Make sure to always restart the `aesmd.service` after updating the configuration, via:
+
+```sh
+sudo systemctl restart aesmd.service
+```
+
+---
 
 ## Step 2
 
@@ -62,12 +73,14 @@ make SGX=1
 
 # Run the program
 make SGX=1 mvp
+```
+To test with non-SGX Gramine instead, omit `SGX=1` in both commands.
 
-# Run with DCAP attestation
+
+### Run with Azure DCAP Attestation
+```sh
 make SGX=1 mvp RA_TYPE=dcap
 ```
-
-To test with non-SGX Gramine instead, omit `SGX=1` in both commands.
 
 # Alternate Gramine use
 
@@ -123,8 +136,98 @@ The `health` endpoint verifies that the server is running and responsive. It ret
 ### Response
 
 - **Success** (`200 OK`):
-  ```text
+  ```sh
   Server is running
+  ```
+
+---
+
+## Create Data Pool
+
+### Endpoint
+
+- **URL**: `http://127.0.0.1:8080/create_data_pool`
+- **Method**: `POST`
+- **Headers**: 
+  - `Content-Type: application/json`
+
+### Request Body Format
+
+The body must include the JSON data for the new pool
+
+```json
+{
+    "data": {
+        "Column_1": [
+            X,
+            Y,
+            Z
+        ],
+        "Column_2": [
+            A,
+            B,
+            C
+        ]
+    }
+}
+```
+
+### Response
+
+- **Success** (`200 OK`):
+
+```sh
+Data sealed and saved successfully
+```
+
+
+- **Failure** (`500 Internal Server Error`):
+```sh
+"error": "Detailed error message"
+```
+
+## Append Data Pool
+
+### Endpoint
+
+- **URL**: `http://127.0.0.1:8080/append_data`
+- **Method**: `POST`
+- **Headers**: 
+  - `Content-Type: application/json`
+
+### Request Body Format
+
+The body must include the JSON data that is appended to the existing data pool
+
+```json
+{
+    "data": {
+        "Column_1": [
+            X,
+            Y,
+            Z
+        ],
+        "Column_2": [
+            A,
+            B,
+            C
+        ]
+    }
+}
+```
+
+### Response
+
+- **Success** (`200 OK`):
+
+```sh
+Data merged, sealed, and saved successfully
+```
+
+- **Failure** (`500 Internal Server Error`):
+```sh
+"error": "Detailed error message"
+```
 
 ---
 
