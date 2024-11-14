@@ -174,7 +174,7 @@ pub fn wasm_execution(binary: &str, data: JsonValue, schema: JsonValue) -> Resul
     // Prepare a place to store the result
     let mut results = [Val::I32(0)];
 
-    // Call the function
+    // Call the `exec` function
     exec_func
         .call(&mut store, &args, &mut results)
         .map_err(|e| anyhow!("Failed to execute `exec` function: {}", e))?;
@@ -188,8 +188,10 @@ pub fn wasm_execution(binary: &str, data: JsonValue, schema: JsonValue) -> Resul
     if result_code != WasmErrorCode::Success.code() {
         // Map the error code to a WasmErrorCode variant
         let wasm_error = WasmErrorCode::from_code(result_code);
-        // Return the error as anyhow::Error, embedding the WasmErrorCode
-        return Err(anyhow!(wasm_error));
+        // Log the error for debugging
+        eprintln!("[!] WASM Execution failed with error: {}", wasm_error);
+        // Return the error as anyhow::Error
+        return Err(anyhow!(wasm_error.to_string()));
     }
 
     // Read the actual output length from WASM memory

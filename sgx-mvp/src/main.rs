@@ -1,21 +1,17 @@
 extern crate github_download;
 extern crate json_append;
 extern crate python_rust_impl;
-extern crate sgx_cosmos_db;
 extern crate wasmi_impl;
 
 use actix_web::{web, App, HttpResponse, HttpServer, Responder};
-use anyhow::{anyhow, Error, Result};
+use anyhow::{anyhow, Result};
 use github_download::{verify_and_download_python_github, verify_and_download_wasm};
-use json_append::{append_json, validate_json_schemas};
+use json_append::append_json;
 use python_rust_impl::run_python;
 use serde_json::Value;
-use sgx_cosmos_db::read_json_schema_from_mongodb;
-use std::env;
 use std::fs::{read, File};
-use std::io::{Read, Write};
-use std::path::Path;
-use wasmi_impl::{wasm_execution, WasmErrorCode};
+use std::io::Write;
+use wasmi_impl::wasm_execution;
 use serde::Deserialize;
 use aes_gcm::{Aes128Gcm, KeyInit, Nonce}; // AES-GCM for encryption
 use aes_gcm::aead::Aead;
@@ -181,60 +177,37 @@ async fn create_data_pool_handler(body: web::Json<CreateDataPoolRequest>) -> imp
     HttpResponse::Ok().body("Data sealed and saved successfully")
 }
 
-/// Helper function to read JSON from a file
-fn read_json_from_file<P: AsRef<Path>>(path: P) -> Result<Value> {
-    let mut file = File::open(&path).map_err(|e| anyhow!("Failed to open file: {}", e))?;
-    let mut contents = String::new();
-    file.read_to_string(&mut contents)
-        .map_err(|e| anyhow!("Failed to read file: {}", e))?;
-    let json: Value =
-        serde_json::from_str(&contents).map_err(|e| anyhow!("Failed to parse JSON: {}", e))?;
-    Ok(json)
-}
-
-/// Helper function to write JSON to a file
-fn write_json_to_file(json_data: &Value, file_path: &str) -> Result<()> {
-    let mut file = File::create(file_path).map_err(|e| anyhow!("Failed to create file: {}", e))?;
-    let json_string = serde_json::to_string_pretty(json_data)
-        .map_err(|e| anyhow!("Failed to serialize JSON: {}", e))?;
-    file.write_all(json_string.as_bytes())
-        .map_err(|e| anyhow!("Failed to write to file: {}", e))?;
-    Ok(())
-}
-
 /// Structure to deserialize incoming API requests
 #[derive(Deserialize)]
 struct ExecuteWasmRequest {
     github_url: String,      // GitHub URL to the WASM binary
     expected_hash: String,   // Expected SHA256 hash of the WASM binary
+    json_schema: Value,      // JSON schema for the input data
 }
 
+/// Handler for the `execute_wasm` API
 async fn execute_wasm_handler(body: web::Json<ExecuteWasmRequest>) -> impl Responder {
     let github_url = &body.github_url;
     let expected_hash = &body.expected_hash;
-    
-    // TODO: Verify DRT redemption
+    let json_schema = &body.json_schema;
 
-    // Unseal data pool
+    // Unseal the data pool
     match unseal_data() {
         Ok(json_data) => {
-            // TODO: Schema handling
-            let input_schema = read_json_from_file("test-data/1_test_schema.json").unwrap();
-
-            match execute_wasm_binary(github_url, expected_hash, &json_data, &input_schema) {
-                Ok(result) => HttpResponse::Ok().json(result), // Return the WASM execution result
+            match execute_wasm_binary(github_url, expected_hash, &json_data, json_schema) {
+                Ok(result) => HttpResponse::Ok().json(result), // Return successful result
                 Err(e) => {
                     eprintln!("[!] Error executing WASM binary: {}", e);
-                    HttpResponse::InternalServerError().body(format!("Execution error: {}", e)) // Return error details
+                    HttpResponse::InternalServerError()
+                        .body(format!("WASM execution error: {}", e)) // Return detailed error
                 }
             }
-        }, 
+        }
         Err(e) => {
             eprintln!("[!] Error unsealing data: {}", e);
             HttpResponse::InternalServerError().body("Failed to unseal data")
         }
     }
-
 }
 
 fn execute_wasm_binary(
@@ -243,7 +216,6 @@ fn execute_wasm_binary(
     input_data: &Value,
     input_schema: &Value,
 ) -> Result<Value> {
-
     // Temporary path to save the downloaded WASM binary
     let wasm_path = "/tmp/downloaded_wasm.wasm";
 
@@ -251,11 +223,21 @@ fn execute_wasm_binary(
     verify_and_download_wasm(&github_url, wasm_path, expected_hash)
         .map_err(|e| anyhow!("Failed to download or verify WASM binary: {}", e))?;
 
-    // Step 2: Execute the WASM binary
-    let result = wasm_execution(wasm_path, input_data.clone(), input_schema.clone())
-        .map_err(|e| anyhow!("WASM execution error: {}", e))?;
+    // Step 2: Execute the WASM binary with the data and schema
+    let result = match wasm_execution(wasm_path, input_data.clone(), input_schema.clone()) {
+        Ok(res) => res,
+        Err(e) => {
+            eprintln!("[!] WASM execution error: {}", e);
+            return Err(anyhow!("WASM execution failed with error: {}", e));
+        }
+    };
 
-    // Step 3: Log and return the result
+    // Step 3: Delete the temporary file
+    if let Err(e) = std::fs::remove_file(wasm_path) {
+        eprintln!("[!] Warning: Failed to delete temporary file {}: {}", wasm_path, e);
+    }
+
+    // Step 4: Log and return the result
     println!("[+] WASM Execution Result: {}", serde_json::to_string_pretty(&result)?);
     Ok(result)
 }
@@ -311,7 +293,13 @@ fn execute_python_script(
     let result = run_python(input_data, script_path)
         .map_err(|e| anyhow!("Python execution error: {}", e))?;
 
-    // Step 3: Format script output
+    // Step 3: Delete the temporary file
+    if let Err(e) = std::fs::remove_file(script_path) {
+        eprintln!("[!] Warning: Failed to delete temporary file {}: {}", script_path, e);
+    }
+
+    // Step 4: Format script output
+    // Debug print the result, remove in production
     println!("[+] Python Script Result: {}", serde_json::to_string_pretty(&result)?);
 
     Ok(result)

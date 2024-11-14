@@ -8,7 +8,6 @@ wasmi-impl = { path = "wasmi-impl" }
 python-rust-impl = { path = "python-rust-impl" }
 json-append = { path = "json-append" }
 github-download = { path = "github-download" }
-sgx-cosmos-db = { path = "sgx-cosmos-db" }
 serde_json = "1.0.127"
 anyhow = "1.0"
 tokio = { version = "1.40.0", features = ["full"] }
