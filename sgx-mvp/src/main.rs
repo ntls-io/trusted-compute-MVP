@@ -62,67 +62,7 @@ fn save_to_file(data: &[u8], file_path: &str) -> Result<()> {
 // TODO Update threading
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
-    println!("[+] Enclave created successfully");
-
-    // Fetch environment variables with proper error handling
-    let database_name = env::var("DATABASE_NAME")
-        .map_err(|_| anyhow!("DATABASE_NAME environment variable is not set"))?;
-    let collection_name = env::var("COLLECTION_NAME")
-        .map_err(|_| anyhow!("COLLECTION_NAME environment variable is not set"))?;
-    let cosmosdb_uri = env::var("COSMOSDB_URI")
-        .map_err(|_| anyhow!("COSMOSDB_URI environment variable is not set"))?;
-
-    // Remove the environment variables to ensure they are no longer available
-    env::remove_var("DATABASE_NAME");
-    env::remove_var("COLLECTION_NAME");
-    env::remove_var("COSMOSDB_URI");
-
-    // Construct the path to the JSON data and schema files
-    let json_data_1_path = "test-data/1_test_data.json";
-    let json_data_2_path = "test-data/2_test_data.json";
-
-    // Read the JSON data and schema from their respective files
-    let json_data_1 = read_json_from_file(&json_data_1_path)?;
-    println!("[+] Successfully read JSON data file");
-
-    // Read the JSON schema from MongoDB using the _id field
-    let json_schema_1 = read_json_schema_from_mongodb(
-        "67064270f0d88c22c4c21169",
-        &database_name,
-        &collection_name,
-        &cosmosdb_uri,
-    )
-    .await?;
-    println!(
-        "[+] Successfully read JSON schema from MongoDB: {}",
-        serde_json::to_string_pretty(&json_schema_1)?
-    );
-
-    println!("[+] Append JSON files");
-    let json_data_2 = read_json_from_file(&json_data_2_path)?;
-
-    // Read the JSON schema from MongoDB using the _id field
-    let json_schema_2 = read_json_schema_from_mongodb(
-        "67064270f0d88c22c4c21169",
-        &database_name,
-        &collection_name,
-        &cosmosdb_uri,
-    )
-    .await?;
-
-    // Validate the schemas before appending
-    if validate_json_schemas(&json_schema_1, &json_schema_2) {
-        let appended_json = append_json(&json_data_1, &json_data_2)?;
-        // Save the appended JSON data to /tmp/merged_json.json
-        let output_file_path = "/tmp/merged_json.json";
-        write_json_to_file(&appended_json, output_file_path)?;
-        println!("[+] Appended JSON data saved to '{}'", output_file_path);
-    } else {
-        eprintln!("[!] JSON schemas do not match. Cannot append the data.");
-        return Err(anyhow!("JSON schema validation failed"));
-    }
-
-    println!("[+] Successfully ran enclave code");
+    println!("[+] Enclave created successfully, starting server...");
 
     // Start the Actix Web server
     HttpServer::new(|| {
@@ -131,12 +71,73 @@ async fn main() -> Result<()> {
         .route("/execute_python", web::post().to(execute_python_handler)) // Python execution route
         .route("/execute_wasm", web::post().to(execute_wasm_handler)) // WASM execution route
         .route("/create_data_pool", web::post().to(create_data_pool_handler)) // Create new data pool
-        .route("/view_data", web::get().to(view_data_handler)) // View decrypted data
+        .route("/view_data", web::get().to(view_data_handler)) // View decrypted data, remove in production
+        .route("/append_data", web::post().to(append_data_handler)) // Append data into data pool
     })
     .bind("127.0.0.1:8080")?
     .run()
     .await
     .map_err(|e| anyhow!("Actix web server error: {}", e))
+}
+
+
+/// Request structure for the `append_data` API
+#[derive(Deserialize)]
+struct AppendDataRequest {
+    data: Value, // JSON data to append
+}
+
+/// Handler for the `append_data` API
+async fn append_data_handler(body: web::Json<AppendDataRequest>) -> impl Responder {
+    
+    // TODO: Verify DRT redemption
+    
+    let key_path = "/dev/attestation/keys/_sgx_mrenclave"; // Enclave-specific key
+    let sealed_data_path = "/data/data_pool"; // Path to sealed data
+
+    // Read the attestation key
+    let sealing_key = match read_attestation_key(key_path) {
+        Ok(key) => key,
+        Err(e) => {
+            eprintln!("[!] Error reading key: {}", e);
+            return HttpResponse::InternalServerError().body("Failed to read attestation key");
+        }
+    };
+
+    // Unseal the existing data
+    let unsealed_data = match unseal_data() {
+        Ok(data) => data,
+        Err(e) => {
+            eprintln!("[!] Error unsealing data: {}", e);
+            return HttpResponse::InternalServerError().body("Failed to unseal data");
+        }
+    };
+
+    // Append the new data to the unsealed data
+    let updated_data = match append_json(&unsealed_data, &body.data) {
+        Ok(data) => data,
+        Err(e) => {
+            eprintln!("[!] Error appending JSON: {}", e);
+            return HttpResponse::InternalServerError().body("Failed to append data");
+        }
+    };
+
+    // Seal the updated data
+    let sealed_data = match seal_data(&updated_data, &sealing_key) {
+        Ok(data) => data,
+        Err(e) => {
+            eprintln!("[!] Error sealing data: {}", e);
+            return HttpResponse::InternalServerError().body("Failed to seal data");
+        }
+    };
+
+    // Save the sealed data back to the file
+    if let Err(e) = save_to_file(&sealed_data, sealed_data_path) {
+        eprintln!("[!] Error saving sealed data: {}", e);
+        return HttpResponse::InternalServerError().body("Failed to save sealed data");
+    }
+
+    HttpResponse::Ok().body("Data merged, sealed, and saved successfully")
 }
 
 /// Request structure for the `create_data_pool` API
