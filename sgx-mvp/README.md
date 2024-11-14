@@ -62,6 +62,9 @@ make SGX=1
 
 # Run the program
 make SGX=1 mvp
+
+# Run with DCAP attestation
+make SGX=1 mvp RA_TYPE=dcap
 ```
 
 To test with non-SGX Gramine instead, omit `SGX=1` in both commands.

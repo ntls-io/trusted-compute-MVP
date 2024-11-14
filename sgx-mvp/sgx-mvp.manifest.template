@@ -92,3 +92,9 @@ sgx.trusted_files = [
   "file:build.rs",
   "file:/etc/ssl/certs/ca-certificates.crt",
 ]
+
+############################# SGX: ALLOWED FILES ###############################
+
+sgx.allowed_files = [
+  "file:data/",
+]

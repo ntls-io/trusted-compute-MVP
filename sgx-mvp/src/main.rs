@@ -12,27 +12,54 @@ use python_rust_impl::run_python;
 use serde_json::Value;
 use sgx_cosmos_db::read_json_schema_from_mongodb;
 use std::env;
-use std::fs::File;
+use std::fs::{read, File};
 use std::io::{Read, Write};
 use std::path::Path;
 use wasmi_impl::{wasm_execution, WasmErrorCode};
 use serde::Deserialize;
-
-// WASM binary files
-static WASM_FILE_MEAN: &str = "/tmp/get_mean_wasm.wasm";
-static WASM_FILE_MEDIAN: &str = "/tmp/get_median_wasm.wasm";
-static WASM_FILE_STD_DEV: &str = "/tmp/get_sd_wasm.wasm";
-
-// File paths to save the downloaded Python scripts
-const PYTHON_FILE_MEAN: &str = "/tmp/calculate_mean.py";
-const PYTHON_FILE_MEDIAN: &str = "/tmp/calculate_median.py";
-const PYTHON_FILE_SD: &str = "/tmp/calculate_sd.py";
+use aes_gcm::{Aes128Gcm, KeyInit, Nonce}; // AES-GCM for encryption
+use aes_gcm::aead::Aead;
+use rand;
 
 // Define a health check route
 async fn health_check() -> impl Responder {
     HttpResponse::Ok().body("Server is running")
 }
 
+/// Read the attestation key from the specified path
+fn read_attestation_key(key_path: &str) -> Result<[u8; 16]> {
+    let key_data = read(key_path).map_err(|e| anyhow!("Failed to read key: {}", e))?;
+    if key_data.len() != 16 {
+        return Err(anyhow!("Invalid key length: expected 16 bytes, got {}", key_data.len()));
+    }
+    let mut key = [0u8; 16];
+    key.copy_from_slice(&key_data);
+    Ok(key)
+}
+
+/// Encrypt the JSON data using AES-GCM with a 128-bit key
+fn seal_data(data: &Value, key: &[u8; 16]) -> Result<Vec<u8>> {
+    let cipher = Aes128Gcm::new_from_slice(key).map_err(|e| anyhow!("Failed to initialize AES-GCM: {}", e))?;
+    let nonce = rand::random::<[u8; 12]>(); // Generate a random 12-byte nonce
+    let serialized_data = serde_json::to_vec(data).map_err(|e| anyhow!("Failed to serialize JSON: {}", e))?;
+    let ciphertext = cipher
+        .encrypt(&Nonce::from_slice(&nonce), serialized_data.as_ref())
+        .map_err(|e| anyhow!("Encryption failed: {}", e))?;
+    // Combine nonce and ciphertext for storage
+    let mut sealed_data = Vec::with_capacity(nonce.len() + ciphertext.len());
+    sealed_data.extend_from_slice(&nonce);
+    sealed_data.extend_from_slice(&ciphertext);
+    Ok(sealed_data)
+}
+
+/// Save sealed data to the specified path
+fn save_to_file(data: &[u8], file_path: &str) -> Result<()> {
+    let mut file = File::create(file_path).map_err(|e| anyhow!("Failed to create file: {}", e))?;
+    file.write_all(data).map_err(|e| anyhow!("Failed to write to file: {}", e))?;
+    Ok(())
+}
+
+// TODO Update threading
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     println!("[+] Enclave created successfully");
@@ -103,11 +130,54 @@ async fn main() -> Result<()> {
         .route("/health", web::get().to(health_check)) // Health check route
         .route("/execute_python", web::post().to(execute_python_handler)) // Python execution route
         .route("/execute_wasm", web::post().to(execute_wasm_handler)) // WASM execution route
+        .route("/create_data_pool", web::post().to(create_data_pool_handler)) // Create new data pool
+        .route("/view_data", web::get().to(view_data_handler)) // View decrypted data
     })
     .bind("127.0.0.1:8080")?
     .run()
     .await
     .map_err(|e| anyhow!("Actix web server error: {}", e))
+}
+
+/// Request structure for the `create_data_pool` API
+#[derive(Deserialize)]
+struct CreateDataPoolRequest {
+    data: Value, // JSON data to be sealed
+}
+
+/// Handler for the `create_data_pool` API
+async fn create_data_pool_handler(body: web::Json<CreateDataPoolRequest>) -> impl Responder {
+    let key_path = "/dev/attestation/keys/_sgx_mrenclave"; // Enclave-specific key
+    let save_path = "/data/data_pool"; // Path to save sealed data
+
+    // TODO: DRT Verification, only the first user can call execute function
+
+    // Read the attestation key
+    let sealing_key = match read_attestation_key(key_path) {
+        Ok(key) => key,
+        Err(e) => {
+            eprintln!("[!] Error reading key: {}", e);
+            return HttpResponse::InternalServerError().body("Failed to read attestation key");
+        }
+    };
+
+    // Seal the data
+    let sealed_data = match seal_data(&body.data, &sealing_key) {
+        Ok(data) => data,
+        Err(e) => {
+            eprintln!("[!] Error sealing data: {}", e);
+            return HttpResponse::InternalServerError().body("Failed to seal data");
+        }
+    };
+
+    // TODO: Save the sealed data to IPFS or other cloud storage
+    // Save the sealed data to the specified path
+    if let Err(e) = save_to_file(&sealed_data, save_path) {
+        eprintln!("[!] Error saving sealed data: {}", e);
+        return HttpResponse::InternalServerError().body("Failed to save sealed data");
+    }
+
+    HttpResponse::Ok().body("Data sealed and saved successfully")
 }
 
 /// Helper function to read JSON from a file
@@ -144,19 +214,26 @@ async fn execute_wasm_handler(body: web::Json<ExecuteWasmRequest>) -> impl Respo
     
     // TODO: Verify DRT redemption
 
-    // TODO: Unseal input data
-    let input_data = read_json_from_file("test-data/1_test_data.json").unwrap();
+    // Unseal data pool
+    match unseal_data() {
+        Ok(json_data) => {
+            // TODO: Schema handling
+            let input_schema = read_json_from_file("test-data/1_test_schema.json").unwrap();
 
-    // TODO: Schema handling
-    let input_schema = read_json_from_file("test-data/1_test_schema.json").unwrap();
-
-    match execute_wasm_binary(github_url, expected_hash, &input_data, &input_schema) {
-        Ok(result) => HttpResponse::Ok().json(result), // Return the WASM execution result
+            match execute_wasm_binary(github_url, expected_hash, &json_data, &input_schema) {
+                Ok(result) => HttpResponse::Ok().json(result), // Return the WASM execution result
+                Err(e) => {
+                    eprintln!("[!] Error executing WASM binary: {}", e);
+                    HttpResponse::InternalServerError().body(format!("Execution error: {}", e)) // Return error details
+                }
+            }
+        }, 
         Err(e) => {
-            eprintln!("[!] Error executing WASM binary: {}", e);
-            HttpResponse::InternalServerError().body(format!("Execution error: {}", e)) // Return error details
+            eprintln!("[!] Error unsealing data: {}", e);
+            HttpResponse::InternalServerError().body("Failed to unseal data")
         }
     }
+
 }
 
 fn execute_wasm_binary(
@@ -197,16 +274,23 @@ async fn execute_python_handler(body: web::Json<ExecutePythonRequest>) -> impl R
 
     // TODO: Verify DRT redemption
 
-    // TODO: Unseal input data
-    let input_data = read_json_from_file("test-data/1_test_data.json").unwrap();
-
-    match execute_python_script(github_url, expected_hash, &input_data) {
-        Ok(result) => HttpResponse::Ok().json(result), // Return the script's output
+    // Unseal data pool
+    match unseal_data() {
+        Ok(json_data) => {
+            match execute_python_script(github_url, expected_hash, &json_data) {
+                Ok(result) => HttpResponse::Ok().json(result), // Return the script's output
+                Err(e) => {
+                    eprintln!("[!] Error executing Python script: {}", e);
+                    HttpResponse::InternalServerError().body(format!("Execution error: {}", e)) // Return error details
+                }
+            }
+        }, 
         Err(e) => {
-            eprintln!("[!] Error executing Python script: {}", e);
-            HttpResponse::InternalServerError().body(format!("Execution error: {}", e)) // Return error details
+            eprintln!("[!] Error unsealing data: {}", e);
+            HttpResponse::InternalServerError().body("Failed to unseal data")
         }
     }
+    
 }
 
 fn execute_python_script(
@@ -232,4 +316,64 @@ fn execute_python_script(
     Ok(result)
 }
 
+/// Decrypt sealed data using AES-GCM with a 128-bit key
+fn unseal_data() -> Result<Value> {
+    let key_path = "/dev/attestation/keys/_sgx_mrenclave"; // Path to the key
 
+    // TODO: Download the sealed data from IPFS or other cloud storage
+    let sealed_data_path = "/data/data_pool"; // Path to the sealed data file
+
+    // Read the attestation key
+    let sealing_key = read_attestation_key(key_path).map_err(|e| {
+        eprintln!("[!] Error reading key: {}", e);
+        anyhow!("Failed to read attestation key")
+    })?;
+
+    // Read the sealed data from file
+    let sealed_data = std::fs::read(sealed_data_path).map_err(|e| {
+        eprintln!("[!] Error reading sealed data: {}", e);
+        anyhow!("Failed to read sealed data")
+    })?;
+
+    // Ensure sealed data contains a nonce and ciphertext
+    if sealed_data.len() < 12 {
+        return Err(anyhow!("Invalid sealed data: insufficient length for nonce and ciphertext"));
+    }
+
+    // Extract nonce (first 12 bytes) and ciphertext
+    let nonce = &sealed_data[..12];
+    let ciphertext = &sealed_data[12..];
+
+    // Initialize AES-GCM cipher
+    let cipher = Aes128Gcm::new_from_slice(&sealing_key).map_err(|e| {
+        eprintln!("[!] Error initializing AES-GCM: {}", e);
+        anyhow!("Failed to initialize AES-GCM")
+    })?;
+
+    // Decrypt the ciphertext
+    let plaintext = cipher
+        .decrypt(Nonce::from_slice(nonce), ciphertext)
+        .map_err(|e| {
+            eprintln!("[!] Error decrypting data: {}", e);
+            anyhow!("Decryption failed")
+        })?;
+
+    // Deserialize the plaintext back into JSON
+    serde_json::from_slice(&plaintext).map_err(|e| {
+        eprintln!("[!] Error parsing JSON: {}", e);
+        anyhow!("Failed to parse JSON")
+    })
+}
+
+/// Handler for the `view_data` API
+/// Debug function - will be removed in production
+async fn view_data_handler() -> impl Responder {
+    // Unseal (decrypt) the data
+    match unseal_data() {
+        Ok(json_data) => HttpResponse::Ok().json(json_data), // Return the JSON data
+        Err(e) => {
+            eprintln!("[!] Error unsealing data: {}", e);
+            HttpResponse::InternalServerError().body("Failed to unseal data")
+        }
+    }
+}

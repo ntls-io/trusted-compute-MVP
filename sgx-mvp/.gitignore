@@ -10,3 +10,5 @@ sgx-mvp.manifest.sgx
 temp/*
 
 !temp/.gitkeep
+
+data/data_pool

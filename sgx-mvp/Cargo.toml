@@ -15,3 +15,5 @@ tokio = { version = "1.40.0", features = ["full"] }
 futures = "0.3" 
 actix-web = "4.9.0"
 serde = { version = "1.0", features = ["derive"] }
+aes-gcm = "0.10.3"
+rand = "0.8.5"

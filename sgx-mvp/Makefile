@@ -55,7 +55,7 @@ mvp: all
 
 .PHONY: clean
 clean:
-	$(RM) -rf *.token *.sig *.manifest.sgx *.manifest result-* OUTPUT
+	$(RM) -rf *.token *.sig *.manifest.sgx *.manifest result-* OUTPUT data/data_pool
 
 .PHONY: distclean
 distclean: clean
