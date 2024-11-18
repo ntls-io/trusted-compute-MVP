@@ -15,42 +15,77 @@ use wasmi_impl::wasm_execution;
 use serde::Deserialize;
 use aes_gcm::{Aes128Gcm, KeyInit, Nonce}; // AES-GCM for encryption
 use aes_gcm::aead::Aead;
-use rand;
+use rand::RngCore;
+use hkdf::Hkdf;
+use sha2::Sha256;
 
 // Define a health check route
 async fn health_check() -> impl Responder {
     HttpResponse::Ok().body("Server is running")
 }
 
-/// Read the attestation key from the specified path
-fn read_attestation_key(key_path: &str) -> Result<[u8; 16]> {
-    let key_data = read(key_path).map_err(|e| anyhow!("Failed to read key: {}", e))?;
-    if key_data.len() != 16 {
-        return Err(anyhow!("Invalid key length: expected 16 bytes, got {}", key_data.len()));
-    }
-    let mut key = [0u8; 16];
-    key.copy_from_slice(&key_data);
-    Ok(key)
+/// Derives a new key using HKDF with a given base key, salt, and purpose.
+fn derive_key(base_key: &[u8], salt: &[u8]) -> Result<[u8; 16]> {
+    let hkdf = Hkdf::<Sha256>::new(Some(salt), base_key);
+    let mut derived_key = [0u8; 16];
+    hkdf.expand(b"sealing", &mut derived_key)
+        .map_err(|e| anyhow!("Key derivation failed: {}", e))?;
+    Ok(derived_key)
 }
 
-/// Encrypt the JSON data using AES-GCM with a 128-bit key
-fn seal_data(data: &Value, key: &[u8; 16]) -> Result<Vec<u8>> {
-    let cipher = Aes128Gcm::new_from_slice(key).map_err(|e| anyhow!("Failed to initialize AES-GCM: {}", e))?;
-    let nonce = rand::random::<[u8; 12]>(); // Generate a random 12-byte nonce
+/// Generates a 16-byte random salt.
+fn generate_salt() -> [u8; 16] {
+    let mut salt = [0u8; 16];
+    rand::rngs::OsRng.fill_bytes(&mut salt);
+    salt
+}
+
+/// Reads the attestation key and derives the encryption key using a salt.
+fn read_and_derive_key(salt: &[u8]) -> Result<[u8; 16]> {
+    let base_key = read("/dev/attestation/keys/_sgx_mrenclave").map_err(|e| anyhow!("Failed to read key: {}", e))?;
+    if base_key.len() != 16 {
+        return Err(anyhow!("Invalid key length: expected 16 bytes, got {}", base_key.len()));
+    }
+    derive_key(&base_key, salt)
+}
+
+/// Encrypts and seals the data.
+fn seal_data(data: &Value, salt: Option<&[u8]>) -> Result<Vec<u8>> {
+    // Generate or use the provided salt
+    let salt = match salt {
+        Some(existing_salt) => existing_salt.to_vec(),
+        None => generate_salt().to_vec(),
+    };
+
+    // Derive the encryption key
+    let derived_key = read_and_derive_key(&salt)?;
+    let cipher = Aes128Gcm::new_from_slice(&derived_key).map_err(|e| anyhow!("Failed to initialize AES-GCM: {}", e))?;
+
+    // Generate a secure nonce (12 bytes as required by AES-GCM)
+    let mut nonce_bytes = [0u8; 12];
+    rand::rngs::OsRng.fill_bytes(&mut nonce_bytes);
+    let nonce = Nonce::from_slice(&nonce_bytes);
+
+    // Serialize the data to JSON
     let serialized_data = serde_json::to_vec(data).map_err(|e| anyhow!("Failed to serialize JSON: {}", e))?;
+
+    // Encrypt the serialized data
     let ciphertext = cipher
-        .encrypt(&Nonce::from_slice(&nonce), serialized_data.as_ref())
+        .encrypt(nonce, serialized_data.as_ref())
         .map_err(|e| anyhow!("Encryption failed: {}", e))?;
-    // Combine nonce and ciphertext for storage
-    let mut sealed_data = Vec::with_capacity(nonce.len() + ciphertext.len());
-    sealed_data.extend_from_slice(&nonce);
+
+    // Combine salt, nonce, and ciphertext into a single Vec<u8>
+    let mut sealed_data = Vec::with_capacity(salt.len() + nonce_bytes.len() + ciphertext.len());
+    sealed_data.extend_from_slice(&salt);
+    sealed_data.extend_from_slice(&nonce_bytes);
     sealed_data.extend_from_slice(&ciphertext);
+
     Ok(sealed_data)
 }
 
-/// Save sealed data to the specified path
-fn save_to_file(data: &[u8], file_path: &str) -> Result<()> {
-    let mut file = File::create(file_path).map_err(|e| anyhow!("Failed to create file: {}", e))?;
+/// Saves data to a file.
+fn save_to_file(data: &[u8]) -> Result<()> {
+    let mut file = File::create("/data/data_pool").map_err(|e| anyhow!("Failed to create file: {}", e))?;
     file.write_all(data).map_err(|e| anyhow!("Failed to write to file: {}", e))?;
     Ok(())
 }
@@ -87,18 +122,6 @@ struct AppendDataRequest {
 async fn append_data_handler(body: web::Json<AppendDataRequest>) -> impl Responder {
     
     // TODO: Verify DRT redemption
-    
-    let key_path = "/dev/attestation/keys/_sgx_mrenclave"; // Enclave-specific key
-    let sealed_data_path = "/data/data_pool"; // Path to sealed data
-
-    // Read the attestation key
-    let sealing_key = match read_attestation_key(key_path) {
-        Ok(key) => key,
-        Err(e) => {
-            eprintln!("[!] Error reading key: {}", e);
-            return HttpResponse::InternalServerError().body("Failed to read attestation key");
-        }
-    };
 
     // Unseal the existing data
     let unsealed_data = match unseal_data() {
@@ -119,21 +142,22 @@ async fn append_data_handler(body: web::Json<AppendDataRequest>) -> impl Respond
     };
 
     // Seal the updated data
-    let sealed_data = match seal_data(&updated_data, &sealing_key) {
+    let sealed_data = match seal_data(&updated_data, None) {
         Ok(data) => data,
         Err(e) => {
             eprintln!("[!] Error sealing data: {}", e);
             return HttpResponse::InternalServerError().body("Failed to seal data");
         }
-    };
+    };    
 
+    // TODO save to IPFS or other cloud storage
     // Save the sealed data back to the file
-    if let Err(e) = save_to_file(&sealed_data, sealed_data_path) {
+    if let Err(e) = save_to_file(&sealed_data) {
         eprintln!("[!] Error saving sealed data: {}", e);
         return HttpResponse::InternalServerError().body("Failed to save sealed data");
-    }
+    }    
 
-    HttpResponse::Ok().body("Data merged, sealed, and saved successfully")
+    HttpResponse::Ok().body("Data appended, sealed, and saved successfully")
 }
 
 /// Request structure for the `create_data_pool` API
@@ -144,22 +168,10 @@ struct CreateDataPoolRequest {
 
 /// Handler for the `create_data_pool` API
 async fn create_data_pool_handler(body: web::Json<CreateDataPoolRequest>) -> impl Responder {
-    let key_path = "/dev/attestation/keys/_sgx_mrenclave"; // Enclave-specific key
-    let save_path = "/data/data_pool"; // Path to save sealed data
+    
+    // TODO DRT redemption verification
 
-    // TODO: DRT Verification, only the first user can call execute function
-
-    // Read the attestation key
-    let sealing_key = match read_attestation_key(key_path) {
-        Ok(key) => key,
-        Err(e) => {
-            eprintln!("[!] Error reading key: {}", e);
-            return HttpResponse::InternalServerError().body("Failed to read attestation key");
-        }
-    };
-
-    // Seal the data
-    let sealed_data = match seal_data(&body.data, &sealing_key) {
+    let sealed_data = match seal_data(&body.data, None) {
         Ok(data) => data,
         Err(e) => {
             eprintln!("[!] Error sealing data: {}", e);
@@ -167,14 +179,14 @@ async fn create_data_pool_handler(body: web::Json<CreateDataPoolRequest>) -> imp
         }
     };
 
-    // TODO: Save the sealed data to IPFS or other cloud storage
+    // TODO save to IPFS or other cloud storage
     // Save the sealed data to the specified path
-    if let Err(e) = save_to_file(&sealed_data, save_path) {
+    if let Err(e) = save_to_file(&sealed_data) {
         eprintln!("[!] Error saving sealed data: {}", e);
         return HttpResponse::InternalServerError().body("Failed to save sealed data");
-    }
+    }    
 
-    HttpResponse::Ok().body("Data sealed and saved successfully")
+    HttpResponse::Ok().body("Data pool created, sealed, and saved successfully")
 }
 
 /// Structure to deserialize incoming API requests
@@ -305,53 +317,21 @@ fn execute_python_script(
     Ok(result)
 }
 
-/// Decrypt sealed data using AES-GCM with a 128-bit key
+/// Decrypts and unseals the data.
 fn unseal_data() -> Result<Value> {
-    let key_path = "/dev/attestation/keys/_sgx_mrenclave"; // Path to the key
-
-    // TODO: Download the sealed data from IPFS or other cloud storage
-    let sealed_data_path = "/data/data_pool"; // Path to the sealed data file
-
-    // Read the attestation key
-    let sealing_key = read_attestation_key(key_path).map_err(|e| {
-        eprintln!("[!] Error reading key: {}", e);
-        anyhow!("Failed to read attestation key")
-    })?;
-
-    // Read the sealed data from file
-    let sealed_data = std::fs::read(sealed_data_path).map_err(|e| {
-        eprintln!("[!] Error reading sealed data: {}", e);
-        anyhow!("Failed to read sealed data")
-    })?;
-
-    // Ensure sealed data contains a nonce and ciphertext
-    if sealed_data.len() < 12 {
-        return Err(anyhow!("Invalid sealed data: insufficient length for nonce and ciphertext"));
+    let sealed_data = std::fs::read("/data/data_pool").map_err(|e| anyhow!("Failed to read sealed data: {}", e))?;
+    if sealed_data.len() < 28 {
+        return Err(anyhow!("Invalid sealed data: insufficient length for salt, nonce, and ciphertext"));
     }
+    let (salt, remaining) = sealed_data.split_at(16);
+    let (nonce, ciphertext) = remaining.split_at(12);
 
-    // Extract nonce (first 12 bytes) and ciphertext
-    let nonce = &sealed_data[..12];
-    let ciphertext = &sealed_data[12..];
-
-    // Initialize AES-GCM cipher
-    let cipher = Aes128Gcm::new_from_slice(&sealing_key).map_err(|e| {
-        eprintln!("[!] Error initializing AES-GCM: {}", e);
-        anyhow!("Failed to initialize AES-GCM")
-    })?;
-
-    // Decrypt the ciphertext
+    let derived_key = read_and_derive_key(salt)?;
+    let cipher = Aes128Gcm::new_from_slice(&derived_key).map_err(|e| anyhow!("Failed to initialize AES-GCM: {}", e))?;
     let plaintext = cipher
         .decrypt(Nonce::from_slice(nonce), ciphertext)
-        .map_err(|e| {
-            eprintln!("[!] Error decrypting data: {}", e);
-            anyhow!("Decryption failed")
-        })?;
-
-    // Deserialize the plaintext back into JSON
-    serde_json::from_slice(&plaintext).map_err(|e| {
-        eprintln!("[!] Error parsing JSON: {}", e);
-        anyhow!("Failed to parse JSON")
-    })
+        .map_err(|e| anyhow!("Decryption failed: {}", e))?;
+    serde_json::from_slice(&plaintext).map_err(|e| anyhow!("Failed to parse JSON: {}", e))
 }
 
 /// Handler for the `view_data` API

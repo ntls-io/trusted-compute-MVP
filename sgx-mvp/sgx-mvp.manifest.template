@@ -49,6 +49,7 @@ fs.mounts = [
   { path = "/usr/lib/python3.8", uri = "file:/usr/lib/python3.8" },  # Python interpreter path
   { type = "tmpfs", path = "/tmp"},
   { path = "/etc", uri = "file:/etc" },
+  { path = "/data/", uri = "file:data/", type = "encrypted", key_name="_sgx_mrenclave" },
 ]
 
 ############################### SGX: GENERAL ##################################
@@ -87,8 +88,3 @@ sgx.trusted_files = [
   "file:/etc/ssl/certs/ca-certificates.crt",
 ]
 
-############################# SGX: ALLOWED FILES ###############################
-
-sgx.allowed_files = [
-  "file:data/",
-]

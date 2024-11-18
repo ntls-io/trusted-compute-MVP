@@ -16,3 +16,5 @@ actix-web = "4.9.0"
 serde = { version = "1.0", features = ["derive"] }
 aes-gcm = "0.10.3"
 rand = "0.8.5"
+hkdf = "0.12.4"
+sha2 = "0.10.8"
