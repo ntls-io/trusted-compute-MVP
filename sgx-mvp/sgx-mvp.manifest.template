@@ -2,8 +2,15 @@
 
 ################################## GRAMINE ####################################
 
+loader.argv = [
+    "gramine-ratls",
+    "/tmp/tlscert.pem",    # Path for the RA-TLS certificate
+    "/tmp/tlskey.pem",     # Path for the private key
+    "{{ self_exe }}"       # NTLS Rust application to execute after the certificate is created
+]
+
 # Entrypoint binary which Gramine invokes.
-libos.entrypoint = "{{ self_exe }}"
+libos.entrypoint = "/usr/bin/gramine-ratls"
 
 loader.log_level = "{{ log_level }}"
 
@@ -45,6 +52,8 @@ sys.enable_sigterm_injection = true
 fs.mounts = [
   { path = "/lib", uri = "file:{{ gramine.runtimedir() }}" },
   { path = "{{ arch_libdir }}", uri = "file:{{ arch_libdir }}" },
+  { path = "/gramine-ratls", uri = "file:{{ entrypoint }}" },
+  { path = "/{{ self_exe }}", uri = "file:{{ self_exe }}" },
   { path = "/usr", uri = "file:/usr" },  # Include Python libraries
   { path = "/usr/lib/python3.8", uri = "file:/usr/lib/python3.8" },  # Python interpreter path
   { type = "tmpfs", path = "/tmp"},
@@ -78,6 +87,7 @@ sgx.max_threads = {{ '1' if env.get('EDMM', '0') == '1' else '8' }}
 # Specify all files used by NTLS NTC and its dependencies
 
 sgx.trusted_files = [
+  "file:{{ entrypoint }}",
   "file:{{ self_exe }}",
   "file:{{ gramine.runtimedir() }}/",
   "file:{{ arch_libdir }}/",

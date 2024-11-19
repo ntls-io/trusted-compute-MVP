@@ -37,8 +37,8 @@
 				"method": "GET",
 				"header": [],
 				"url": {
-					"raw": "http://127.0.0.1:8080/health",
-					"protocol": "http",
+					"raw": "https://127.0.0.1:8080/health",
+					"protocol": "https",
 					"host": [
 						"127",
 						"0",
@@ -92,8 +92,8 @@
 					}
 				},
 				"url": {
-					"raw": "http://127.0.0.1:8080/execute_python",
-					"protocol": "http",
+					"raw": "https://127.0.0.1:8080/execute_python",
+					"protocol": "https",
 					"host": [
 						"127",
 						"0",
@@ -128,8 +128,8 @@
 							}
 						},
 						"url": {
-							"raw": "http://127.0.0.1:8080/execute_python",
-							"protocol": "http",
+							"raw": "https://127.0.0.1:8080/execute_python",
+							"protocol": "https",
 							"host": [
 								"127",
 								"0",
@@ -168,8 +168,8 @@
 							}
 						},
 						"url": {
-							"raw": "http://127.0.0.1:8080/execute_python",
-							"protocol": "http",
+							"raw": "https://127.0.0.1:8080/execute_python",
+							"protocol": "https",
 							"host": [
 								"127",
 								"0",
@@ -208,8 +208,8 @@
 							}
 						},
 						"url": {
-							"raw": "http://127.0.0.1:8080/execute_python",
-							"protocol": "http",
+							"raw": "https://127.0.0.1:8080/execute_python",
+							"protocol": "https",
 							"host": [
 								"127",
 								"0",
@@ -260,7 +260,7 @@
 				"header": [],
 				"body": {
 					"mode": "raw",
-					"raw": "{\n  \"github_url\": \"https://github.com/ntls-io/WASM-Binaries-MVP/blob/master/bin/get_mean_wasm.wasm\",\n  \"expected_hash\": \"b5ee81a20256dec2bd3db6e673b11eadae4baf8fafbe68cec1f36517bb569255\"\n}",
+					"raw": "{\n  \"github_url\": \"https://github.com/ntls-io/WASM-Binaries-MVP/blob/master/bin/get_mean_wasm.wasm\",\n  \"expected_hash\": \"b5ee81a20256dec2bd3db6e673b11eadae4baf8fafbe68cec1f36517bb569255\",\n  \"json_schema\": {\n        \"$schema\": \"http://json-schema.org/draft-07/schema#\",\n        \"type\": \"object\",\n        \"properties\": {\n            \"Column_1\": {\n                \"type\": \"array\",\n                \"items\": {\n                    \"type\": \"number\"\n                }\n            },\n            \"Column_2\": {\n                \"type\": \"array\",\n                \"items\": {\n                    \"type\": \"number\"\n                }\n            }\n        },\n        \"required\": [\n            \"Column_1\",\n            \"Column_2\"\n        ]\n    }\n}",
 					"options": {
 						"raw": {
 							"language": "json"
@@ -268,8 +268,8 @@
 					}
 				},
 				"url": {
-					"raw": "http://127.0.0.1:8080/execute_wasm",
-					"protocol": "http",
+					"raw": "https://127.0.0.1:8080/execute_wasm",
+					"protocol": "https",
 					"host": [
 						"127",
 						"0",
@@ -296,7 +296,7 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n  \"github_url\": \"https://github.com/ntls-io/WASM-Binaries-MVP/blob/master/bin/get_mean_wasm.wasm\",\n  \"expected_hash\": \"b5ee81a20256dec2bd3db6e673b11eadae4baf8fafbe68cec1f36517bb569255\"\n}\n",
+							"raw": "{\n  \"github_url\": \"https://github.com/ntls-io/WASM-Binaries-MVP/blob/master/bin/get_mean_wasm.wasm\",\n  \"expected_hash\": \"b5ee81a20256dec2bd3db6e673b11eadae4baf8fafbe68cec1f36517bb569255\",\n  \"json_schema\": {\n        \"$schema\": \"http://json-schema.org/draft-07/schema#\",\n        \"type\": \"object\",\n        \"properties\": {\n            \"Column_1\": {\n                \"type\": \"array\",\n                \"items\": {\n                    \"type\": \"number\"\n                }\n            },\n            \"Column_2\": {\n                \"type\": \"array\",\n                \"items\": {\n                    \"type\": \"number\"\n                }\n            }\n        },\n        \"required\": [\n            \"Column_1\",\n            \"Column_2\"\n        ]\n    }\n}\n",
 							"options": {
 								"raw": {
 									"language": "json"
@@ -304,8 +304,8 @@
 							}
 						},
 						"url": {
-							"raw": "http://127.0.0.1:8080/execute_wasm",
-							"protocol": "http",
+							"raw": "https://127.0.0.1:8080/execute_wasm",
+							"protocol": "https",
 							"host": [
 								"127",
 								"0",
@@ -336,7 +336,7 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n  \"github_url\": \"https://github.com/ntls-io/WASM-Binaries-MVP/blob/master/bin/get_median_wasm.wasm\",\n  \"expected_hash\": \"728445d425153350b3e353cc96d29c16d5d81978ea3d7bad21f3d2b2dd76d813\"\n}\n",
+							"raw": "{\n  \"github_url\": \"https://github.com/ntls-io/WASM-Binaries-MVP/blob/master/bin/get_median_wasm.wasm\",\n  \"expected_hash\": \"728445d425153350b3e353cc96d29c16d5d81978ea3d7bad21f3d2b2dd76d813\",\n  \"json_schema\": {\n        \"$schema\": \"http://json-schema.org/draft-07/schema#\",\n        \"type\": \"object\",\n        \"properties\": {\n            \"Column_1\": {\n                \"type\": \"array\",\n                \"items\": {\n                    \"type\": \"number\"\n                }\n            },\n            \"Column_2\": {\n                \"type\": \"array\",\n                \"items\": {\n                    \"type\": \"number\"\n                }\n            }\n        },\n        \"required\": [\n            \"Column_1\",\n            \"Column_2\"\n        ]\n    }\n}\n",
 							"options": {
 								"raw": {
 									"language": "json"
@@ -344,8 +344,8 @@
 							}
 						},
 						"url": {
-							"raw": "http://127.0.0.1:8080/execute_wasm",
-							"protocol": "http",
+							"raw": "https://127.0.0.1:8080/execute_wasm",
+							"protocol": "https",
 							"host": [
 								"127",
 								"0",
@@ -376,7 +376,7 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n  \"github_url\": \"https://github.com/ntls-io/WASM-Binaries-MVP/blob/master/bin/get_sd_wasm.wasm\",\n  \"expected_hash\": \"feb835e2eb26115d1865f381ab80440442761f7c89bc7a56d05bca2cb151c37e\"\n}\n",
+							"raw": "{\n  \"github_url\": \"https://github.com/ntls-io/WASM-Binaries-MVP/blob/master/bin/get_sd_wasm.wasm\",\n  \"expected_hash\": \"feb835e2eb26115d1865f381ab80440442761f7c89bc7a56d05bca2cb151c37e\",\n  \"json_schema\": {\n        \"$schema\": \"http://json-schema.org/draft-07/schema#\",\n        \"type\": \"object\",\n        \"properties\": {\n            \"Column_1\": {\n                \"type\": \"array\",\n                \"items\": {\n                    \"type\": \"number\"\n                }\n            },\n            \"Column_2\": {\n                \"type\": \"array\",\n                \"items\": {\n                    \"type\": \"number\"\n                }\n            }\n        },\n        \"required\": [\n            \"Column_1\",\n            \"Column_2\"\n        ]\n    }\n}\n",
 							"options": {
 								"raw": {
 									"language": "json"
@@ -384,8 +384,8 @@
 							}
 						},
 						"url": {
-							"raw": "http://127.0.0.1:8080/execute_wasm",
-							"protocol": "http",
+							"raw": "https://127.0.0.1:8080/execute_wasm",
+							"protocol": "https",
 							"host": [
 								"127",
 								"0",
@@ -420,8 +420,8 @@
 					}
 				},
 				"url": {
-					"raw": "http://127.0.0.1:8080/create_data_pool",
-					"protocol": "http",
+					"raw": "https://127.0.0.1:8080/create_data_pool",
+					"protocol": "https",
 					"host": [
 						"127",
 						"0",
@@ -451,8 +451,8 @@
 					}
 				},
 				"url": {
-					"raw": "http://127.0.0.1:8080/append_data",
-					"protocol": "http",
+					"raw": "https://127.0.0.1:8080/append_data",
+					"protocol": "https",
 					"host": [
 						"127",
 						"0",
@@ -471,7 +471,21 @@
 			"name": "DEV: View data",
 			"request": {
 				"method": "GET",
-				"header": []
+				"header": [],
+				"url": {
+					"raw": "https://127.0.0.1:8080/view_data",
+					"protocol": "https",
+					"host": [
+						"127",
+						"0",
+						"0",
+						"1"
+					],
+					"port": "8080",
+					"path": [
+						"view_data"
+					]
+				}
 			},
 			"response": []
 		}
