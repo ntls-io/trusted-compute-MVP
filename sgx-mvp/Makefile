@@ -64,4 +64,21 @@ clean:
 
 .PHONY: distclean
 distclean: clean
-	$(RM) -rf target/ Cargo.lock
+	$(RM) -rf target/ Cargo.lock attest mbedtls
+
+##################### REMOTE ATTESTATION CLIENT ##############################
+
+MBEDTLS_PATH = https://github.com/ARMmbed/mbedtls/archive/mbedtls-3.3.0.tar.gz
+
+CFLAGS += $(shell pkg-config --cflags mbedtls_gramine)
+LDFLAGS += -ldl -Wl,--enable-new-dtags $(shell pkg-config --libs mbedtls_gramine)
+
+mbedtls:
+	wget $(MBEDTLS_PATH) -O mbedtls.tgz
+	mkdir mbedtls
+	tar -xvzf mbedtls.tgz -C mbedtls --strip-components 1
+	rm mbedtls.tgz
+
+attest: attest.c mbedtls
+	C_INCLUDE_PATH=mbedtls/include $(CC) $< $(CFLAGS) $(LDFLAGS) -o $@
+

@@ -153,7 +153,9 @@ pub fn configure_ratls(cert_path: &str, key_path: &str) -> Result<ServerConfig> 
 
 // Define a health check route
 async fn health_check() -> impl Responder {
-    HttpResponse::Ok().body("Server is running")
+    HttpResponse::Ok()
+        .append_header(("Content-Type", "text/plain"))
+        .body("Server is running")
 }
 
 /// Derives a new key using HKDF with a given base key, salt, and purpose.
