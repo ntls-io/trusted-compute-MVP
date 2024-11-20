@@ -152,7 +152,6 @@ int main(int argc, char** argv) {
     mbedtls_ctr_drbg_context ctr_drbg;
     mbedtls_ssl_context ssl;
     mbedtls_ssl_config conf;
-    mbedtls_x509_crt cacert;
 
 #if defined(MBEDTLS_DEBUG_C)
     mbedtls_debug_set_threshold(DEBUG_LEVEL);
@@ -162,7 +161,6 @@ int main(int argc, char** argv) {
     mbedtls_ssl_init(&ssl);
     mbedtls_ssl_config_init(&conf);
     mbedtls_ctr_drbg_init(&ctr_drbg);
-    mbedtls_x509_crt_init(&cacert);
     mbedtls_entropy_init(&entropy);
 
 #if defined(MBEDTLS_USE_PSA_CRYPTO) || defined(MBEDTLS_SSL_PROTO_TLS1_3)
@@ -344,21 +342,17 @@ int main(int argc, char** argv) {
 
     mbedtls_printf(" ok\n");
 
-    mbedtls_printf("  . Loading the CA root certificate ...");
     fflush(stdout);
 
-    // ret = mbedtls_x509_crt_parse_file(&cacert, CA_CRT_PATH);
-    // if (ret < 0) {
-    //     mbedtls_printf( " failed\n  !  mbedtls_x509_crt_parse_file returned -0x%x\n\n", -ret );
-    //     goto exit;
-    // }
-
+    /* Set initial auth mode to VERIFY_OPTIONAL since we're using a custom RA-TLS verification callback.
+    * The actual certificate verification happens in my_verify_callback. */
+    mbedtls_printf("  . Setting certificate verification mode for RA-TLS...");
+    fflush(stdout);
     mbedtls_ssl_conf_authmode(&conf, MBEDTLS_SSL_VERIFY_OPTIONAL);
-    mbedtls_ssl_conf_ca_chain(&conf, &cacert, NULL);
     mbedtls_printf(" ok\n");
 
     if (ra_tls_verify_lib) {
-        /* use RA-TLS verification callback; this will overwrite CA chain set up above */
+        /* use RA-TLS verification callback */
         mbedtls_printf("  . Installing RA-TLS callback ...");
         mbedtls_ssl_conf_verify(&conf, &my_verify_callback, &my_verify_callback_results);
         mbedtls_printf(" ok\n");
@@ -381,7 +375,7 @@ int main(int argc, char** argv) {
 
     mbedtls_ssl_set_bio(&ssl, &server_fd, mbedtls_net_send, mbedtls_net_recv, NULL);
 
-    mbedtls_printf("  . Performing the SSL/TLS handshake...");
+    mbedtls_printf("  . Performing the SSL/TLS handshake... ");
     fflush(stdout);
 
     while ((ret = mbedtls_ssl_handshake(&ssl)) != 0) {
@@ -411,7 +405,7 @@ int main(int argc, char** argv) {
         }
     }
 
-    mbedtls_printf(" ok\n");
+    mbedtls_printf("  . Handshake completed... ok\n");
 
     mbedtls_printf("  . Verifying peer X.509 certificate...");
 
@@ -455,7 +449,7 @@ int main(int argc, char** argv) {
         if (ret > 0) {
             got_data = true;
             len = ret;
-            mbedtls_printf("\nReceived %lu bytes:\n%s\n", len, buf);
+            mbedtls_printf(" %lu bytes read\n\n%s", len, (char*)buf);
             continue;
         }
 
@@ -498,7 +492,6 @@ exit:
 
     mbedtls_net_free(&server_fd);
 
-    mbedtls_x509_crt_free(&cacert);
     mbedtls_ssl_free(&ssl);
     mbedtls_ssl_config_free(&conf);
     mbedtls_ctr_drbg_free(&ctr_drbg);

@@ -126,7 +126,7 @@ To test the APIs, you can import the Postman collection provided in this reposit
 
 ### Endpoint
 
-- **URL**: `http://127.0.0.1:8080/health`
+- **URL**: `https://127.0.0.1:8080/health`
 - **Method**: `GET`
 
 ### Description
@@ -146,7 +146,7 @@ The `health` endpoint verifies that the server is running and responsive. It ret
 
 ### Endpoint
 
-- **URL**: `http://127.0.0.1:8080/create_data_pool`
+- **URL**: `https://127.0.0.1:8080/create_data_pool`
 - **Method**: `POST`
 - **Headers**: 
   - `Content-Type: application/json`
@@ -190,7 +190,7 @@ Data sealed and saved successfully
 
 ### Endpoint
 
-- **URL**: `http://127.0.0.1:8080/append_data`
+- **URL**: `https://127.0.0.1:8080/append_data`
 - **Method**: `POST`
 - **Headers**: 
   - `Content-Type: application/json`
@@ -235,7 +235,7 @@ Data merged, sealed, and saved successfully
 
 ### Endpoint
 
-- **URL**: `http://127.0.0.1:8080/execute_python`
+- **URL**: `https://127.0.0.1:8080/execute_python`
 - **Method**: `POST`
 - **Headers**: 
   - `Content-Type: application/json`
@@ -277,7 +277,7 @@ The body must include the GitHub URL of the Python script and its expected SHA25
 
 ### Endpoint
 
-- **URL**: `http://127.0.0.1:8080/execute_wasm`
+- **URL**: `https://127.0.0.1:8080/execute_wasm`
 - **Method**: `POST`
 - **Headers**: 
   - `Content-Type: application/json`
@@ -314,6 +314,28 @@ The body must include the GitHub URL of the WASM binary and its expected SHA256 
 ```
 
 ---
+
+# Attestation Client (Attest enclave)
+
+Extract enclave measurements from Gramine signature
+
+```sh
+gramine-sgx-sigstruct-view sgx-mvp.sig
+```
+
+Build the `attest` tool
+
+```sh
+make attest
+```
+
+Attest the enclave via the https endpoint:
+
+```sh
+APPLICATION_HOST=<enclave host> APPLICATION_PORT=8080 ./attest dcap \
+        <expected mrenclave> <expected mrsigner> <expected isv_prod_id> <expected isv_svn>
+```
+
 
 # Cleaning Up
 
