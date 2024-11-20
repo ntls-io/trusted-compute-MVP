@@ -315,27 +315,103 @@ The body must include the GitHub URL of the WASM binary and its expected SHA256 
 
 ---
 
-# Attestation Client (Attest enclave)
+# Attestation Client
 
-Extract enclave measurements from Gramine signature
+The attestation client (`attest`) is a tool for verifying SGX enclaves using Remote Attestation TLS (RA-TLS). It verifies the enclave's identity and measurements before establishing a secure connection.
+
+## Prerequisites
+
+- Intel SGX DCAP driver and SDK installed
+- Gramine SDK installed
+- Access to the target enclave's signature file
+
+### Environment variables
+
+```sh
+export AZDCAP_COLLATERAL_VERSION=v4
+export AZDCAP_DEBUG_LOG_LEVEL=Info
+export RA_TLS_ALLOW_DEBUG_ENCLAVE_INSECURE=1
+export RA_TLS_ALLOW_OUTDATED_TCB_INSECURE=1
+export RA_TLS_ALLOW_HW_CONFIG_NEEDED=1
+export RA_TLS_ALLOW_SW_HARDENING_NEEDED=1
+```
+
+Required environment variables for proper operation:
+
+- `AZDCAP_COLLATERAL_VERSION=v4`: Specifies the Azure DCAP collateral version
+- `AZDCAP_DEBUG_LOG_LEVEL=Info`: Sets logging verbosity for debugging
+- `RA_TLS_ALLOW_DEBUG_ENCLAVE_INSECURE=1`: Permits connection to debug enclaves (development only)
+- `RA_TLS_ALLOW_OUTDATED_TCB_INSECURE=1`: Allows outdated Trusted Computing Base
+- `RA_TLS_ALLOW_HW_CONFIG_NEEDED=1`: Permits hardware configuration updates
+- `RA_TLS_ALLOW_SW_HARDENING_NEEDED=1`: Allows software requiring security updates
+
+
+**Note** The INSECURE flags should only be used in development/testing environments
+
+## Getting Started
+
+1. Extract Enclave Measurements
 
 ```sh
 gramine-sgx-sigstruct-view sgx-mvp.sig
 ```
 
-Build the `attest` tool
+2. Build the Attestation Client
 
 ```sh
 make attest
 ```
 
-Attest the enclave via the https endpoint:
+3 Attest the enclave via the https endpoint
 
 ```sh
 APPLICATION_HOST=<enclave host> APPLICATION_PORT=8080 ./attest dcap \
         <expected mrenclave> <expected mrsigner> <expected isv_prod_id> <expected isv_svn>
 ```
 
+Parameters:
+
+- `mrenclave`: Hash measurement of the enclave code/data
+- `mrsigner`: Identity of the enclave signer
+- `isv_prod_id`: Product ID (use 0 to skip verification)
+- `isv_svn`: Security Version Number (use 0 to skip verification)
+
+## Example
+
+```sh
+./attest dcap c5e34826d42766363286055750373441545bc601df37fab07231bca4324db319 eb33db710373cbf7c6bfa26e6e9d40e261cfd1f5adc38db6599bfe764e9180cc 0 0
+```
+
+Expected Output:
+
+```sh
+[ using our own SGX-measurement verification callback (via command line options) ]
+  - ignoring ISV_PROD_ID
+  - ignoring ISV_SVN
+
+  . Seeding the random number generator... ok
+  . Connecting to tcp/127.0.0.1/8080... ok
+  . Setting up the SSL/TLS structure... ok
+  . Setting certificate verification mode for RA-TLS... ok
+  . Installing RA-TLS callback ... ok
+  . Performing the SSL/TLS handshake... Allowing quote status SW_HARDENING_NEEDED
+  . Handshake completed... ok
+  . Verifying peer X.509 certificate... ok
+  > Write to server: 46 bytes written
+
+GET /health HTTP/1.1
+Host: 127.0.0.1:8080
+
+  < Read from server: 119 bytes read
+
+HTTP/1.1 200 OK
+content-length: 17
+content-type: text/plain
+date: Wed, 20 Nov 2024 08:23:58 GMT
+
+Server is running
+Connection closed by server after receiving data
+```
 
 # Cleaning Up
 
