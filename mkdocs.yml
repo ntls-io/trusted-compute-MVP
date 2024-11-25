@@ -1,0 +1,69 @@
+site_name: Nautiluis MVP Documentation
+site_description: Documentation for Nautiluis MVP
+repo_url: https://github.com/ntls-io/trusted-compute-MVP
+repo_name: ntls-io/trusted-compute-MVP
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - navigation.expand
+    - navigation.indexes
+    - navigation.instant 
+    - toc.follow
+    - toc.integrate
+    - search.highlight
+    - search.share
+    - search.suggest
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/toggle-switch-off-outline
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/toggle-switch
+        name: Switch to light mode
+
+plugins:
+  - search
+  - minify:
+      minify_html: true
+  - git-revision-date-localized:
+      type: date
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - admonition
+  - pymdownx.details
+  - pymdownx.tabbed:
+      alternate_style: true
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Installation:
+    - SGX MVP Installation Guide: installation/sgx-mvp.md
+  - API Documentation:
+    - Overview: api/overview.md
+    - Endpoints:
+      - Health Check: api/endpoints/health.md
+      - Data Pool: api/endpoints/data-pool.md
+      - Python Execution: api/endpoints/python-execution.md
+      - WASM Execution: api/endpoints/wasm-execution.md
+    - Postman Guide: api/postman-collection/usage-guide.md
+  - Attestation:
+    - Guide: attestation/guide.md
+    - Client Setup: attestation/client-setup.md

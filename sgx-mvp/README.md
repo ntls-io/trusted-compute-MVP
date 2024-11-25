@@ -55,6 +55,10 @@ Setup Azure DCAP
 ```sh
 export AZDCAP_COLLATERAL_VERSION=v4
 export AZDCAP_DEBUG_LOG_LEVEL=INFO
+export RA_TLS_ALLOW_DEBUG_ENCLAVE_INSECURE=1
+export RA_TLS_ALLOW_OUTDATED_TCB_INSECURE=1
+export RA_TLS_ALLOW_HW_CONFIG_NEEDED=1
+export RA_TLS_ALLOW_SW_HARDENING_NEEDED=1
 ```
 
 Make sure to always restart the `aesmd.service` after updating the configuration, via:
@@ -69,251 +73,21 @@ sudo systemctl restart aesmd.service
 
 ```sh
 # Build the program and the final Gramine manifest
-make SGX=1
+make SGX=1 RA_TYPE=dcap
 
-# Run the program
-make SGX=1 mvp
-```
-To test with non-SGX Gramine instead, omit `SGX=1` in both commands.
-
-
-### Run with Azure DCAP Attestation
-```sh
+# Run the program with Azure DCAP Attestation
 make SGX=1 mvp RA_TYPE=dcap
 ```
 
 # Alternate Gramine use
 
 ```sh
-# Run program with Gramine SGX
+# Run program with Gramine SGX after building
 gramine-sgx sgx-mvp
-
-# Run program without SGX
-gramine-direct sgx-mvp
 ```
 
 Note that _gramine-sgx_ requires all files we use in `sgx.trusted_files`
 
-# Postman API Samples
-
-This guide provides details for importing Postman collections to test the API endpoints
-
----
-
-## Importing Postman Collection
-
-To test the APIs, you can import the Postman collection provided in this repository.
-
-### Steps to Import
-
-1. **Locate the Postman Collection**:
-   - The Postman collection is saved in the `postman/` directory of this repository.
-   - File: `postman/collection.json`
-
-2. **Open Postman**:
-   - Launch the Postman application on your system.
-
-3. **Import the Collection**:
-   - Click **Import** in the top-left corner of Postman.
-   - Drag and drop the `collection.json` file or click **Upload Files** and select it.
-
-4. **Verify Imported Requests**:
-   - After import, you should see all API endpoints organized under the collection.
-
----
-
-## Health Check API
-
-### Endpoint
-
-- **URL**: `https://127.0.0.1:8080/health`
-- **Method**: `GET`
-
-### Description
-
-The `health` endpoint verifies that the server is running and responsive. It returns a simple success message.
-
-### Response
-
-- **Success** (`200 OK`):
-  ```sh
-  Server is running
-  ```
-
----
-
-## Create Data Pool
-
-### Endpoint
-
-- **URL**: `https://127.0.0.1:8080/create_data_pool`
-- **Method**: `POST`
-- **Headers**: 
-  - `Content-Type: application/json`
-
-### Request Body Format
-
-The body must include the JSON data for the new pool
-
-```json
-{
-    "data": {
-        "Column_1": [
-            X,
-            Y,
-            Z
-        ],
-        "Column_2": [
-            A,
-            B,
-            C
-        ]
-    }
-}
-```
-
-### Response
-
-- **Success** (`200 OK`):
-
-```sh
-Data sealed and saved successfully
-```
-
-
-- **Failure** (`500 Internal Server Error`):
-```sh
-"error": "Detailed error message"
-```
-
-## Append Data Pool
-
-### Endpoint
-
-- **URL**: `https://127.0.0.1:8080/append_data`
-- **Method**: `POST`
-- **Headers**: 
-  - `Content-Type: application/json`
-
-### Request Body Format
-
-The body must include the JSON data that is appended to the existing data pool
-
-```json
-{
-    "data": {
-        "Column_1": [
-            X,
-            Y,
-            Z
-        ],
-        "Column_2": [
-            A,
-            B,
-            C
-        ]
-    }
-}
-```
-
-### Response
-
-- **Success** (`200 OK`):
-
-```sh
-Data merged, sealed, and saved successfully
-```
-
-- **Failure** (`500 Internal Server Error`):
-```sh
-"error": "Detailed error message"
-```
-
----
-
-## Execute Python API
-
-### Endpoint
-
-- **URL**: `https://127.0.0.1:8080/execute_python`
-- **Method**: `POST`
-- **Headers**: 
-  - `Content-Type: application/json`
-
-### Request Body Format
-
-The body must include the GitHub URL of the Python script and its expected SHA256 hash. This ensures the script is verified before execution.
-
-```json
-{
-  "github_url": "URL to the Python script on GitHub",
-  "expected_hash": "SHA256 hash of the Python script"
-}
-```
-
-### Response
-
-- **Success** (`200 OK`):
-
-```json
-{
-  "result": {
-    "Column_1": X,
-    "Column_2": Y
-  }
-}
-```
-
-- **Failure** (`500 Internal Server Error`):
-```json
-{
-  "error": "Detailed error message"
-}
-```
-
----
-
-## Execute WASM API
-
-### Endpoint
-
-- **URL**: `https://127.0.0.1:8080/execute_wasm`
-- **Method**: `POST`
-- **Headers**: 
-  - `Content-Type: application/json`
-
-### Request Body Format
-
-The body must include the GitHub URL of the WASM binary and its expected SHA256 hash. This ensures the WASM binary is verified before execution.
-
-```json
-{
-  "github_url": "URL to the WASM binary on GitHub",
-  "expected_hash": "SHA256 hash of the WASM binary"
-}
-```
-
-### Response
-
-- **Success** (`200 OK`):
-
-```json
-{
-  "result": {
-    "Column_1": X,
-    "Column_2": Y
-  }
-}
-```
-
-- **Failure** (`500 Internal Server Error`):
-```json
-{
-  "error": "Detailed error message"
-}
-```
-
----
 
 # Attestation Client
 
