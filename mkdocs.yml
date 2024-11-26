@@ -1,4 +1,4 @@
-site_name: Nautiluis MVP Documentation
+site_name: Nautiluis Documentation
 site_description: Documentation for Nautiluis MVP
 repo_url: https://github.com/ntls-io/trusted-compute-MVP
 site_url: https://ntls-io.github.io/trusted-compute-MVP/
@@ -6,6 +6,9 @@ repo_name: ntls-io/trusted-compute-MVP
 
 theme:
   name: material
+  custom_dir: docs/overrides
+  logo: assets/images/logo.png
+  favicon: assets/images/logo.ico
   features:
     - navigation.sections
     - navigation.top
@@ -13,24 +16,37 @@ theme:
     - navigation.expand
     - navigation.indexes
     - navigation.instant 
+    - navigation.preload
     - toc.follow
     - toc.integrate
     - search.highlight
     - search.share
     - search.suggest
+    - content.tabs.link
+    - content.code.copy
+    - toc.sticky
+    - navigation.breadcrumbs
   palette:
-    - scheme: default
-      primary: indigo
-      accent: indigo
+    # Light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
       toggle:
         icon: material/toggle-switch-off-outline
         name: Switch to dark mode
-    - scheme: slate
-      primary: indigo
-      accent: indigo
+    # Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
       toggle:
         icon: material/toggle-switch
         name: Switch to light mode
+
+extra_css:
+  - stylesheets/extra.css
+  - stylesheets/fonts.css
 
 plugins:
   - search
@@ -52,7 +68,21 @@ markdown_extensions:
   - tables
   - toc:
       permalink: true
+  - attr_list
+  - md_in_html
 
+# Correct extra section structure
+extra:
+  generator: false
+  links:
+    - footer:
+      - title: Privacy Policy
+        link: /privacy/
+      - title: Terms of Service
+        link: /terms/
+
+copyright: Copyright &copy; 2024 Nautilus - All rights reserved
+  
 nav:
   - Home: index.md
   - Installation:
@@ -68,3 +98,6 @@ nav:
   - Attestation:
     - Guide: attestation/guide.md
     - Client Setup: attestation/client-setup.md
+  - Legal:
+    - Privacy Policy: privacy.md
+    - Terms of Service: terms.md

@@ -1,4 +1,4 @@
-# Nautilus MVP Documentation
+# **Nautilus Documentation**
 
 Welcome to the documentation for the Nautilus Trusted Compute MVP. This project implements secure data processing using Intel SGX enclaves.
 
@@ -23,4 +23,4 @@ The Nautilus MVP provides:
 
 This project is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0).
 
-The full license can be found in the [LICENSE](https://github.com/ntls-io/trusted-compute-MVP/blob/main/LICENSE) file in the repository.
+The full license can be found in the [**LICENSE**](https://github.com/ntls-io/trusted-compute-MVP/blob/main/LICENSE) file in the repository.
