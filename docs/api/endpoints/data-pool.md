@@ -1,4 +1,4 @@
-# Data Pool APIs
+# **Data Pool APIs**
 
 The Data Pool APIs allow you to create and manage data pools within the SGX enclave.
 
@@ -37,11 +37,11 @@ Content-Type: `application/json`
 
 ### Response
 
-#### Success Response
+**Success Response:**
 
 Status Code: `200 OK`
 
-#### Content
+Content:
 
 ```sh
 Data sealed and saved successfully
@@ -49,15 +49,17 @@ Data sealed and saved successfully
 
 ### Error Response
 
-#### In case of server issues:
+**In case of server issues:**
 
 Status Code: `500 Internal Server Error`
 
-#### Content:
+Content:
 
 ```sh
 "error": "Error message details"
 ```
+
+---
 
 ## Append Data Pool
 
@@ -92,11 +94,11 @@ Content-Type: `application/json`
 
 ### Response
 
-#### Success Response
+**Success Response:**
 
 Status Code: `200 OK`
 
-#### Content
+Content:
 
 ```sh
 Data merged, sealed, and saved successfully
@@ -104,11 +106,11 @@ Data merged, sealed, and saved successfully
 
 ### Error Response
 
-#### In case of server issues:
+**In case of server issues:**
 
 Status Code: `500 Internal Server Error`
 
-#### Content:
+Content:
 
 ```sh
 "error": "Error message details"

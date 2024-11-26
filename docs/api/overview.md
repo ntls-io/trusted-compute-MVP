@@ -1,4 +1,4 @@
-# Overview
+# **Overview**
 
 The Nautilus MVP provides a REST API for interacting with the SGX enclave and performing secure data operations. All endpoints are served over HTTPS and support remote attestation (RA-TLS).
 

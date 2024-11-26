@@ -1,4 +1,4 @@
-# Health Check API
+# **Health Check API**
 
 A simple endpoint to verify that the server is running and responsive.
 
@@ -13,11 +13,11 @@ None required
 
 ## Response
 
-### Success Response
+**Success Response:**
 
 Status Code: `200 OK`
 
-### Content
+Content:
 
 ```sh
 Server is running
@@ -25,11 +25,11 @@ Server is running
 
 ## Error Response
 
-### In case of server issues:
+**In case of server issues:**
 
 Status Code: `500 Internal Server Error`
 
-### Content
+Content:
 
 ```sh
 "error": "Error message details"

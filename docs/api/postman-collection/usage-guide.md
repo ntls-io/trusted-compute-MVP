@@ -1,4 +1,4 @@
-# Postman Collection Guide
+# **Postman Collection Guide**
 
 This guide helps you get started with testing the Nautilus MVP APIs using Postman.
 

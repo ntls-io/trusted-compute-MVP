@@ -1,7 +1,6 @@
-# WebAssembly Execution API
+# **WebAssembly Execution API**
 
-Execute WebAssembly (WASM) binaries (hosted on GitHub) within the SGX enclave on the secured data pool.
-The binary must be verified using its SHA256 hash before execution. The API also requires the JSON schema.
+Execute WebAssembly (WASM) binaries (hosted on GitHub) within the SGX enclave on the secured data pool. The binary must be verified using its SHA256 hash before execution. The API also requires the JSON schema.
 
 ## Endpoint
 
@@ -25,11 +24,11 @@ Content-Type: `application/json`
 
 ## Response
 
-### Success Response
+**Success Response:**
 
 Status Code: `200 OK`
 
-### Content
+Content:
 
 ```json
 {
@@ -42,11 +41,11 @@ Status Code: `200 OK`
 
 ## Error Response
 
-### In case of server issues:
+**In case of server issues:**
 
 Status Code: `500 Internal Server Error`
 
-### Content
+Content:
 
 ```sh
 "error": "Error message details"
