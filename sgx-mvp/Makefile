@@ -46,7 +46,8 @@ sgx-mvp.manifest.sgx sgx-mvp.sig: sgx_sign
 sgx_sign: sgx-mvp.manifest $(SELF_EXE)
 	gramine-sgx-sign \
 		--manifest $< \
-		--output $<.sgx
+		--output $<.sgx \
+		--key keys/enclave-key.pem
 
 ifeq ($(SGX),)
 GRAMINE = gramine-direct

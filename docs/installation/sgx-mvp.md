@@ -27,6 +27,11 @@ Before installing the Nautilus MVP, ensure your system meets the following requi
 
     Follow the instructions in the [Gramine Installation Guide](https://gramine.readthedocs.io/en/stable/installation.html#install-gramine-packages-1) under "Install Gramine packages" and [Prepare a signing key](https://gramine.readthedocs.io/en/stable/quickstart.html#prepare-a-signing-key).
 
+    ```sh
+    gramine-sgx-gen-private-key keys/enclave-key.pem
+    chmod 400 keys/enclave-key.pem
+    ```
+
 3. **Rust Environment**
 
     ```sh

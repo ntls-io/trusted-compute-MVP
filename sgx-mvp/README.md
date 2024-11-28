@@ -14,6 +14,11 @@ This directory contains all the relevant SGX code for NTC-MVP.
 
 1. Follow the instructions in the [Gramine Installation Guide](https://gramine.readthedocs.io/en/stable/installation.html#install-gramine-packages-1) under "Install Gramine packages" and [Prepare a signing key](https://gramine.readthedocs.io/en/stable/quickstart.html#prepare-a-signing-key).
 
+```sh
+gramine-sgx-gen-private-key keys/enclave-key.pem
+chmod 400 keys/enclave-key.pem
+```
+
 2. Ensure that Python 3.8 is installed. If necessary, modify the path(s) in the [sgx-mvp.manifest.template](https://github.com/ntls-io/trusted-compute-MVP/blob/main/sgx-mvp/sgx-mvp.manifest.template) to match your setup.
 
     Ensure that you have the necessary Python development package installed:
