@@ -87,3 +87,30 @@ make attest
     Server is running
     Connection closed by server after receiving data
     ```
+
+
+## Docker Container Attestation
+
+1. **Build Container and Get Signature**
+
+    Check [Docker Deployment Guide](installation/docker-deployment.md) for complete instructions on building and setting up the Docker environment.
+
+    ```sh
+    cd sgx-mvp/docker
+    # Build container - this will also create docker-sgx-mvp.sig
+    ./build.sh ubuntu20
+    ```
+
+2. **View Container Measurements**
+
+    ```sh
+    # View signature details
+    gramine-sgx-sigstruct-view docker-sgx-mvp.sig
+    ```
+
+3. **Verify Container**
+
+    ```sh
+    # Using measurements from docker container
+    ./attest dcap <mrenclave> <mrsigner> <isv_prod_id> <isv_svn>
+    ```

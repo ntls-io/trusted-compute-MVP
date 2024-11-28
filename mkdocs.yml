@@ -89,6 +89,7 @@ nav:
   - Home: index.md
   - Installation:
     - SGX MVP Installation Guide: installation/sgx-mvp.md
+    - Docker Deployment: installation/docker-deployment.md
   - API Documentation:
     - Overview: api/overview.md
     - Endpoints:
