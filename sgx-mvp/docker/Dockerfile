@@ -60,8 +60,10 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 
 # Clone only the sgx-mvp directory
 WORKDIR /app
-RUN git clone --depth 1 --sparse https://github.com/ntls-io/trusted-compute-MVP.git && \
+RUN git config --global core.sparseCheckout true && \
+    git clone --depth 1 --filter=blob:none https://github.com/ntls-io/trusted-compute-MVP.git && \
     cd trusted-compute-MVP && \
+    git sparse-checkout init --cone && \
     git sparse-checkout set sgx-mvp
 
 # Create necessary library directory
@@ -71,10 +73,20 @@ RUN mkdir -p /lib/x86_64-pc-linux-gnu && \
 RUN mkdir -p /var/run/aesmd/
 
 # Build the MVP with temporarily mounted key
-RUN --mount=type=secret,id=enclave_key,target=/app/trusted-compute-MVP/keys/enclave-key.pem \
+RUN --mount=type=secret,id=enclave_key,target=/app/trusted-compute-MVP/sgx-mvp/keys/enclave-key.pem \
     cd /app/trusted-compute-MVP/sgx-mvp && \
-    make SGX=1 RA_TYPE=dcap && \
-    rm -f /app/trusted-compute-MVP/keys/enclave-key.pem
+    make SGX=1 RA_TYPE=dcap
+
+# Verify signing key cleanup
+RUN echo "Verifying key cleanup..." && \
+    if [ -f /app/trusted-compute-MVP/sgx-mvp/keys/enclave-key.pem ]; then \
+        echo "ERROR: Signing key still present!" && \
+        ls -l /app/trusted-compute-MVP/sgx-mvp/keys/enclave-key.pem && \
+        exit 1; \
+    else \
+        echo "SUCCESS: Verified that signing key was properly removed." && \
+        ls -la /app/trusted-compute-MVP/sgx-mvp/keys/ || echo "keys directory does not exist (expected)"; \
+    fi
 
 COPY restart_aesm.sh /restart_aesm.sh
 
@@ -93,8 +105,12 @@ RUN apt-get update && \
 RUN echo '#!/bin/bash\n\
 /restart_aesm.sh\n\
 socat TCP-LISTEN:8081,fork TCP:127.0.0.1:8080 & \n\
+cd /app/trusted-compute-MVP/sgx-mvp && \
 gramine-sgx sgx-mvp\n'\
 > /start.sh && chmod +x /start.sh
+
+# Set the working directory where the manifest file is located
+WORKDIR /app/trusted-compute-MVP/sgx-mvp
 
 ENTRYPOINT ["/bin/sh", "-c"]
 CMD ["/start.sh"]
