@@ -3,11 +3,8 @@ import './globals.css'
 import LayoutClient from './LayoutClient'
 import {
   ClerkProvider,
-  SignInButton,
-  SignedIn,
-  SignedOut,
-  UserButton
 } from '@clerk/nextjs'
+import AuthLayout from './AuthLayout'  // Add this import
 
 const inter = Inter({ subsets: ['latin'] })
 
@@ -21,9 +18,9 @@ export default function RootLayout({
       <html lang="en" suppressHydrationWarning>
         <body className={inter.className} suppressHydrationWarning>
           <div id="app-root">
-            <LayoutClient>
+            <AuthLayout>
               {children}
-            </LayoutClient>
+            </AuthLayout>
           </div>
         </body>
       </html>
