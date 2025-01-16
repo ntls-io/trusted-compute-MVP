@@ -2,6 +2,14 @@
 
 import Image from 'next/image'
 import { PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { 
+  SignInButton, 
+  SignedIn, 
+  SignedOut, 
+  UserButton,
+  ClerkLoading,
+  ClerkLoaded 
+} from '@clerk/nextjs'
 
 interface TopBarProps {
   isNavOpen: boolean;
@@ -47,7 +55,22 @@ export default function TopBar({ isNavOpen, toggleNav }: TopBarProps) {
         )}
       </button>
 
-      <div className="flex-1 flex items-center">
+      <div className="flex-1 flex items-center justify-end pr-4">
+        <ClerkLoading>
+          <div className="w-24 h-8 bg-gray-100 animate-pulse rounded-lg"></div>
+        </ClerkLoading>
+        <ClerkLoaded>
+          <SignedOut>
+            <SignInButton>
+              <button className="px-4 py-1 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
+                Sign in
+              </button>
+            </SignInButton>
+          </SignedOut>
+          <SignedIn>
+            <UserButton afterSignOutUrl="/"/>
+          </SignedIn>
+        </ClerkLoaded>
       </div>
     </header>
   )
