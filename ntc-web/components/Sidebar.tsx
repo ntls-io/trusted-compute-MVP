@@ -14,10 +14,10 @@ export default function Sidebar({ isOpen, onHoverStart, onHoverEnd }: SidebarPro
   const pathname = usePathname()
 
   const navItems = [
-    { name: 'Home', href: '/', icon: Home },
-    { name: 'Pools', href: '/pools', icon: LayoutDashboard },
-    { name: 'Analysis', href: '/analysis', icon: LineChart },
-    { name: 'Market', href: '/market', icon: ShoppingCart },
+    { name: 'Home', href: '/', icon: Home, disabled: false },
+    { name: 'Pools', href: '/pools', icon: LayoutDashboard, disabled: false },
+    { name: 'Analysis', href: '/analysis', icon: LineChart, disabled: false },
+    { name: 'Market', href: '/market', icon: ShoppingCart, disabled: true },
   ]
 
   return (
@@ -29,25 +29,35 @@ export default function Sidebar({ isOpen, onHoverStart, onHoverEnd }: SidebarPro
       <nav className="p-2 space-y-2">
         {navItems.map((item) => {
           const isActive = pathname === item.href
+          const isDisabled = item.disabled
+
           return (
-            <Link
+            <div
               key={item.name}
-              href={item.href}
               className={`flex items-center rounded-lg transition-colors ${
-                isActive ? 'bg-gray-800 text-white' : 'text-gray-600 hover:bg-gray-100'
+                isActive ? 'bg-gray-800 text-white' : isDisabled ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'
               }`}
             >
               <div className="w-12 h-10 flex items-center justify-center flex-shrink-0">
                 <item.icon className="h-5 w-5" />
               </div>
-              <div className={`flex-1 overflow-hidden transition-all duration-300 ${
-                isOpen ? 'w-40 opacity-100' : 'w-0 opacity-0'
-              }`}>
-                <span className="whitespace-nowrap font-medium">
-                  {item.name}
-                </span>
-              </div>
-            </Link>
+              {isDisabled ? (
+                <div className={`flex-1 overflow-hidden transition-all duration-300 ${
+                  isOpen ? 'w-40 opacity-100' : 'w-0 opacity-0'
+                }`}>
+                  <span className="whitespace-nowrap font-medium">{item.name}</span>
+                </div>
+              ) : (
+                <Link
+                  href={item.href}
+                  className={`flex-1 overflow-hidden transition-all duration-300 ${
+                    isOpen ? 'w-40 opacity-100' : 'w-0 opacity-0'
+                  }`}
+                >
+                  <span className="whitespace-nowrap font-medium">{item.name}</span>
+                </Link>
+              )}
+            </div>
           )
         })}
       </nav>

@@ -1,17 +1,9 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -138,7 +130,7 @@ function DigitalRightsStep({ isActive, onNext, onPrev }: StepProps) {
       id: '1', 
       name: 'Append Data Pool', 
       description: 'Permits adding new data entries to existing pools while maintaining schema requirements',
-      github: null,
+      github: 'https://github.com/ntls-io/trusted-compute-MVP/blob/main/sgx-mvp/json-append/src/lib.rs',
       hash: null
     },
     { 
@@ -360,136 +352,15 @@ function CreatePool() {
   )
 }
 
-function JoinPool() {
-  const [dataFile, setDataFile] = useState<File | null>(null)
-  const [validation, setValidation] = useState<{
-    success: boolean | null;
-    error: string | null;
-  }>({
-    success: null,
-    error: null,
-  })
-  const [isValidating, setIsValidating] = useState(false)
-
-  // Dummy digital rights
-  const digitalRights = [
-    'Append data pool',
-    'Execute Median WASM',
-    'Execute Python Median',
-  ]
-
-  const handleJoinPool = async () => {
-    if (!dataFile) {
-      setValidation({ success: false, error: 'Please select a data file' })
-      return
-    }
-
-    setIsValidating(true)
-    try {
-      // Here you would validate against the pool's schema
-      // For now, we'll simulate validation
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      
-      setValidation({
-        success: true,
-        error: null,
-      })
-      alert('Successfully joined pool!')
-    } catch (error) {
-      setValidation({
-        success: false,
-        error: 'Failed to validate data file against pool schema',
-      })
-    } finally {
-      setIsValidating(false)
-    }
-  }
-
-  return (
-    <Card className="p-6">
-      <div className="space-y-6">
-        <div>
-          <h4 className="text-xl font-semibold">Pool Name</h4>
-          <p className="text-gray-600 mt-1">Pool Description</p>
-        </div>
-
-        <div>
-          <h5 className="text-lg font-semibold mb-3">Digital Rights</h5>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {digitalRights.map((right, index) => (
-              <Card key={index} className="p-3">
-                <p className="text-sm">{right}</p>
-              </Card>
-            ))}
-          </div>
-        </div>
-
-        <Button variant="outline" className={buttonOutlineClass}>
-          View Schema Definition
-        </Button>
-
-        <div className="space-y-4">
-          <FilePicker
-            label="Select Data File"
-            accept=".json"
-            onChange={(file) => {
-              setDataFile(file)
-              setValidation({
-                success: null,
-                error: null,
-              })
-            }}
-          />
-          
-          {validation.error && (
-            <Alert variant="destructive">
-              <AlertDescription>{validation.error}</AlertDescription>
-            </Alert>
-          )}
-
-          <Button 
-            onClick={handleJoinPool}
-            disabled={!dataFile || isValidating}
-            className={`w-full ${buttonBaseClass}`}
-          >
-            {isValidating ? 'Validating...' : 'Join Pool'}
-          </Button>
-        </div>
-      </div>
-    </Card>
-  )
-}
-
 export default function Pools() {
   return (
     <div className="space-y-6 container mx-auto px-4 max-w-7xl">
-      <h1 className="text-4xl font-bold text-gray-900">Pools</h1>
+      <h1 className="text-2xl font-bold text-gray-900 mb-4">Create Pool</h1>
       
       <div className="w-full">
-        <Tabs defaultValue="create" className="w-full">
-          <TabsList className="grid w-full grid-cols-2 p-1 bg-white rounded-lg border border-gray-200">
-            <TabsTrigger 
-              value="create" 
-              className="rounded-lg data-[state=active]:bg-gray-800 data-[state=active]:text-white data-[state=inactive]:text-gray-600 data-[state=inactive]:hover:bg-gray-100 transition-colors"
-            >
-              Create Pool
-            </TabsTrigger>
-            <TabsTrigger 
-              value="join"
-              className="rounded-lg data-[state=active]:bg-gray-800 data-[state=active]:text-white data-[state=inactive]:text-gray-600 data-[state=inactive]:hover:bg-gray-100 transition-colors"
-            >
-              Join Pool
-            </TabsTrigger>
-          </TabsList>
-          
-          <TabsContent value="create">
-            <CreatePool />
-          </TabsContent>
-          
-          <TabsContent value="join">
-            <JoinPool />
-          </TabsContent>
-        </Tabs>
+        <Card className="p-6">
+          <CreatePool />
+        </Card>
       </div>
 
       <div className="mt-8">

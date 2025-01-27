@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   Dialog,
   DialogContent,
@@ -15,7 +16,9 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { ExternalLink, Shield, Code2 } from 'lucide-react';
+import { ExternalLink, Shield, Code2, Upload, Eye } from 'lucide-react';
+import { FilePicker } from './FilePicker';
+import { SchemaPreview } from './SchemaPreview';
 
 interface Right {
   id: string;
@@ -70,7 +73,7 @@ const EnclaveDialog = ({ pool, onAttest }: { pool: Pool; onAttest: () => void })
           
           <div className="grid gap-4">
             <div>
-              <Label className="text-sm">MRENCLAVE (Identity of code and data)</Label>
+              <Label className="text-sm">MRENCLAVE (Unique identity of code and data)</Label>
               <div className="font-mono text-sm bg-gray-100 p-2 rounded break-all">
                 {pool.enclaveMeasurements.mrenclave}
               </div>
@@ -92,7 +95,7 @@ const EnclaveDialog = ({ pool, onAttest }: { pool: Pool; onAttest: () => void })
               </div>
               
               <div>
-                <Label className="text-sm">ISV_SVN (Security version)</Label>
+                <Label className="text-sm">ISV_SVN (Security Version Number)</Label>
                 <div className="font-mono text-sm bg-gray-100 p-2 rounded">
                   {pool.enclaveMeasurements.isvSvn}
                 </div>
@@ -131,6 +134,122 @@ const EnclaveDialog = ({ pool, onAttest }: { pool: Pool; onAttest: () => void })
   );
 };
 
+const JoinPoolDialog = ({ pool, availableRights }: { pool: Pool; availableRights: Right[] }) => {
+  const [dataFile, setDataFile] = useState<File | null>(null);
+  const [schemaPreviewOpen, setSchemaPreviewOpen] = useState(false);
+  const [validation, setValidation] = useState<{
+    success: boolean | null;
+    error: string | null;
+  }>({
+    success: null,
+    error: null,
+  });
+  const [isValidating, setIsValidating] = useState(false);
+
+  const handleJoinPool = async () => {
+    if (!dataFile) {
+      setValidation({ success: false, error: 'Please select a data file' });
+      return;
+    }
+
+    setIsValidating(true);
+    try {
+      // Here you would validate against the pool's schema
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      setValidation({
+        success: true,
+        error: null,
+      });
+      alert('Successfully joined pool!');
+    } catch (error) {
+      setValidation({
+        success: false,
+        error: 'Failed to validate data file against pool schema',
+      });
+    } finally {
+      setIsValidating(false);
+    }
+  };
+
+  return (
+    <DialogContent className="sm:max-w-lg">
+      <DialogHeader>
+        <DialogTitle>Join Pool - {pool.name}</DialogTitle>
+        <DialogDescription>{pool.description}</DialogDescription>
+      </DialogHeader>
+
+      <div className="space-y-6 py-4">
+        <div>
+          <h5 className="font-medium mb-2">Available Digital Rights</h5>
+          <div className="flex flex-wrap gap-2">
+            {pool.rights.map((rightId, index) => {
+              const right = availableRights.find(r => r.id === rightId);
+              return right && (
+                <Badge key={index} variant="secondary">
+                  {right.name}
+                </Badge>
+              );
+            })}
+          </div>
+        </div>
+
+        <Dialog open={schemaPreviewOpen} onOpenChange={setSchemaPreviewOpen}>
+          <DialogTrigger asChild>
+            <Button variant="outline" className="w-full border-2 border-gray-900 text-gray-900 hover:bg-gray-100">
+              View Schema Definition
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="max-w-4xl h-[80vh]">
+            <DialogHeader>
+              <DialogTitle>Schema Preview - {pool.name}</DialogTitle>
+            </DialogHeader>
+            <div className="flex-1 overflow-auto">
+              {/* <SchemaPreview schemaId={pool.id.toString()} /> */}
+              <Button 
+                variant="outline"
+                disabled
+                className="transition-colors text-gray-500 cursor-not-allowed"
+              >
+                <Eye className="mr-2 h-4 w-4" />
+                Preview Schema (Disabled)
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        <div className="space-y-4">
+          <FilePicker
+            label="Select Data File"
+            accept=".json"
+            onChange={(file) => {
+              setDataFile(file);
+              setValidation({
+                success: null,
+                error: null,
+              });
+            }}
+          />
+          
+          {validation.error && (
+            <Alert variant="destructive">
+              <AlertDescription>{validation.error}</AlertDescription>
+            </Alert>
+          )}
+
+          <Button 
+            onClick={handleJoinPool}
+            disabled={!dataFile || isValidating}
+            className="w-full bg-gray-900 text-white hover:bg-gray-800"
+          >
+            {isValidating ? 'Validating...' : 'Join Pool'}
+          </Button>
+        </div>
+      </div>
+    </DialogContent>
+  );
+};
+
 const PoolsTable = () => {
   const [search, setSearch] = useState('');
   const [showMyPools, setShowMyPools] = useState(false);
@@ -139,7 +258,7 @@ const PoolsTable = () => {
   const availableRights: Right[] = [
     { 
       id: '1', 
-      name: 'Append data pool', 
+      name: 'Append Data Pool', 
       description: 'Permits adding new data entries to existing pools'
     },
     { 
@@ -235,87 +354,105 @@ const PoolsTable = () => {
             <TableRow className="hover:bg-gray-800">
               <TableHead className="w-[15%] text-white">Pool Name</TableHead>
               <TableHead className="w-[20%] text-white">Description</TableHead>
-              <TableHead className="w-[25%] text-white">Digital Rights Tokens</TableHead>
-              <TableHead className="w-[40%] text-white">Sources</TableHead>
+              <TableHead className="w-[20%] text-white">Digital Rights Tokens</TableHead>
+              <TableHead className="w-[35%] text-white">Sources</TableHead>
+              <TableHead className="w-[10%] text-white">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filteredPools.map((pool) => (
-              <React.Fragment key={pool.id}>
-                <TableRow>
-                  <TableCell className="font-medium" rowSpan={2}>{pool.name}</TableCell>
-                  <TableCell rowSpan={2}>{pool.description}</TableCell>
-                  <TableCell rowSpan={2}>
-                    <div className="flex flex-wrap gap-2">
-                      {pool.rights.map((rightId) => {
-                        const right = getRightById(rightId);
-                        if (!right) return null;
-                        return (
-                          <TooltipProvider key={rightId}>
+            {filteredPools.map((pool) => {
+              const hasAppendRight = pool.rights.includes('1');
+              
+              return (
+                <React.Fragment key={pool.id}>
+                  <TableRow>
+                    <TableCell className="font-medium">{pool.name}</TableCell>
+                    <TableCell>{pool.description}</TableCell>
+                    <TableCell>
+                      <div className="flex flex-wrap gap-2">
+                        {pool.rights.map((rightId) => {
+                          const right = getRightById(rightId);
+                          if (!right) return null;
+                          return (
+                            <TooltipProvider key={rightId}>
+                              <Tooltip>
+                                <TooltipTrigger>
+                                  <Badge variant="secondary" className="cursor-help">
+                                    {right.name}
+                                  </Badge>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  <p>{right.description}</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          );
+                        })}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium whitespace-nowrap">Smart Contract:</span>
+                          <TooltipProvider>
                             <Tooltip>
-                              <TooltipTrigger>
-                                <Badge variant="secondary" className="cursor-help">
-                                  {right.name}
-                                </Badge>
+                              <TooltipTrigger asChild>
+                                <a
+                                  href={`https://explorer.solana.com/address/${pool.contractAddress}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="flex items-center gap-1 text-blue-500 hover:text-blue-700"
+                                >
+                                  <span>Link</span>
+                                  <ExternalLink size={16} />
+                                </a>
                               </TooltipTrigger>
                               <TooltipContent>
-                                <p>{right.description}</p>
+                                <p className="font-mono text-xs">{pool.contractAddress}</p>
                               </TooltipContent>
                             </Tooltip>
                           </TooltipProvider>
-                        );
-                      })}
-                    </div>
-                  </TableCell>
-                  <TableCell className="border-b-0 py-2">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium whitespace-nowrap">Smart Contract:</span>
-                      <TooltipProvider>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <a
-                              href={`https://explorer.solana.com/address/${pool.contractAddress}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="flex items-center gap-1 text-blue-500 hover:text-blue-700"
-                            >
-                              <span>Link</span>
-                              <ExternalLink size={16} />
-                            </a>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            <p className="font-mono text-xs">{pool.contractAddress}</p>
-                          </TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
-                    </div>
-                  </TableCell>
-                </TableRow>
-                <TableRow>
-                  <TableCell className="py-2">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium whitespace-nowrap">Enclave:</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium whitespace-nowrap">Enclave:</span>
+                          <Dialog>
+                            <DialogTrigger asChild>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className={attestationResults[pool.id]?.success ? 'bg-green-50' : ''}
+                              >
+                                <Shield className="w-4 h-4 mr-2" />
+                                {attestationResults[pool.id]?.success ? 'Verified' : 'Verify Enclave'}
+                              </Button>
+                            </DialogTrigger>
+                            <EnclaveDialog 
+                              pool={pool} 
+                              onAttest={() => handleAttestation(pool)} 
+                            />
+                          </Dialog>
+                        </div>
+                      </div>
+                    </TableCell>
+                    <TableCell>
                       <Dialog>
                         <DialogTrigger asChild>
                           <Button
                             variant="outline"
-                            size="sm"
-                            className={attestationResults[pool.id]?.success ? 'bg-green-50' : ''}
+                            disabled={!hasAppendRight}
+                            className={`w-full ${hasAppendRight ? 'hover:bg-gray-100' : 'opacity-50 cursor-not-allowed'}`}
                           >
-                            <Shield className="w-4 h-4 mr-2" />
-                            {attestationResults[pool.id]?.success ? 'Verified' : 'Verify Enclave'}
+                            <Upload className="w-4 h-4 mr-2" />
+                            Join Pool
                           </Button>
                         </DialogTrigger>
-                        <EnclaveDialog 
-                          pool={pool} 
-                          onAttest={() => handleAttestation(pool)} 
-                        />
+                        <JoinPoolDialog pool={pool} availableRights={availableRights} />
                       </Dialog>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              </React.Fragment>
-            ))}
+                    </TableCell>
+                  </TableRow>
+                </React.Fragment>
+              );
+            })}
           </TableBody>
         </Table>
       </div>
