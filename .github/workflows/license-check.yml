@@ -1,0 +1,78 @@
+# Nautilus Trusted Compute
+# Copyright (C) 2025 Nautilus
+
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published
+# by the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+
+name: License Check
+
+on:
+  pull_request:
+    branches: [ main, master ]
+  push:
+    branches: [ main, master ]
+
+jobs:
+  license-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Install addlicense
+        run: go install github.com/google/addlicense@latest
+
+      - name: Validate License Template
+        run: |
+          if [ ! -f license-template.txt ]; then
+            echo "::error::License template file not found! Ensure license-template.txt exists."
+            exit 1
+          fi
+
+      - name: Check Changed Files
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.sha }})
+          else
+            FILES=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }})
+          fi
+
+          if [ -z "$FILES" ]; then
+            echo "No files changed"
+            exit 0
+          fi
+
+          MISSING_LICENSE=0
+
+          for file in $FILES; do
+            if [[ $file =~ \.(js|jsx|ts|tsx|py|cpp|c|h|rs|css|scss|sass|less|html|md|sh|toml|yml|yaml|json|Dockerfile)$ ]] || file "$file" | grep -q "ASCII text"; then
+              if [ -f "$file" ] && ! grep -q "Copyright" "$file"; then
+                echo "::error::Missing license in: $file"
+                MISSING_LICENSE=1
+              fi
+            fi
+          done
+
+          if [ $MISSING_LICENSE -eq 1 ]; then
+            echo "License headers are missing in some files. Add the license manually or run 'addlicense' locally."
+            exit 1
+          fi
+
+          echo "All files have proper license headers."
