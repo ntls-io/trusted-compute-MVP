@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -40,6 +40,16 @@ function FileSelectionStep({ isActive, onNext }: StepProps) {
     error: null
   })
   const [isValidating, setIsValidating] = useState(false)
+
+  // Reset state when component becomes inactive
+  useEffect(() => {
+    if (!isActive) {
+      setSchemaFile(null)
+      setDataFile(null)
+      setValidation({ success: false, error: null })
+      setIsValidating(false)
+    }
+  }, [isActive])
 
   const validateFiles = async () => {
     if (!schemaFile || !dataFile) {
@@ -82,7 +92,7 @@ function FileSelectionStep({ isActive, onNext }: StepProps) {
                 setValidation({ success: false, error: null })
               }}
             />
-            {schemaFile && (
+            {isActive && schemaFile && (
               <div className="mt-2 flex justify-center">
                 <SchemaPreview schemaFile={schemaFile} />
               </div>
@@ -124,10 +134,27 @@ function DigitalRightsStep({ isActive, onNext, onPrev }: StepProps) {
   if (!isActive) return null
 
   const dummyRights = [
-    { id: '1', name: 'Create data pool', description: 'Allows creation of new data pools and setting initial parameters for data structure and digital right tokens' },
-    { id: '2', name: 'Append data pool', description: 'Permits adding new data entries to existing pools while maintaining schema requirements' },
-    { id: '3', name: 'Execute Median WASM', description: 'Enables running Rust WebAssembly-based median calculations on data pools' },
-    { id: '4', name: 'Execute Median Python', description: 'Allows execution of Python-based median computations on data pools' }
+    { 
+      id: '1', 
+      name: 'Append Data Pool', 
+      description: 'Permits adding new data entries to existing pools while maintaining schema requirements',
+      github: null,
+      hash: null
+    },
+    { 
+      id: '2', 
+      name: 'Execute Median WASM', 
+      description: 'Enables running Rust WebAssembly-based median calculations on data pools',
+      github: 'https://github.com/ntls-io/WASM-Binaries-MVP/blob/master/bin/get_median_wasm.wasm',
+      hash: '728445d425153350b3e353cc96d29c16d5d81978ea3d7bad21f3d2b2dd76d813'
+    },
+    { 
+      id: '3', 
+      name: 'Execute Median Python', 
+      description: 'Allows execution of Python-based median computations on data pools',
+      github: 'https://github.com/ntls-io/Python-Scripts-MVP/blob/main/calculate_median.py',
+      hash: 'bcda34f2af83a2dac745a5d86f18f4c4cd6cb4e61c76e0dec005a5fc9bc124f5'
+    }
   ]
 
   return (
@@ -138,16 +165,41 @@ function DigitalRightsStep({ isActive, onNext, onPrev }: StepProps) {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Name</TableHead>
-              <TableHead>Description</TableHead>
+              <TableHead className="w-1/6">Name</TableHead>
+              <TableHead className="w-2/6">Description</TableHead>
+              <TableHead className="w-1/6">GitHub</TableHead>
+              <TableHead className="w-1/6">Expected SHA256 Hash</TableHead>
               <TableHead className="w-24">Select</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {dummyRights.map((right) => (
               <TableRow key={right.id}>
-                <TableCell>{right.name}</TableCell>
+                <TableCell className="font-medium">{right.name}</TableCell>
                 <TableCell>{right.description}</TableCell>
+                <TableCell>
+                  {right.github ? (
+                    <a 
+                      href={right.github}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-600 hover:text-blue-800 underline"
+                    >
+                      View Source
+                    </a>
+                  ) : (
+                    "-"
+                  )}
+                </TableCell>
+                <TableCell>
+                  {right.hash ? (
+                    <div className="font-mono text-sm bg-gray-100 p-2 rounded-md overflow-x-auto whitespace-nowrap">
+                      {right.hash}
+                    </div>
+                  ) : (
+                    "-"
+                  )}
+                </TableCell>
                 <TableCell>
                   <Checkbox
                     checked={selectedRights.includes(right.id)}
@@ -321,7 +373,6 @@ function JoinPool() {
 
   // Dummy digital rights
   const digitalRights = [
-    'Create data pool',
     'Append data pool',
     'Execute Median WASM',
     'Execute Python Median',
@@ -411,12 +462,12 @@ function JoinPool() {
 
 export default function Pools() {
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 container mx-auto px-4 max-w-7xl">
       <h1 className="text-4xl font-bold text-gray-900">Pools</h1>
       
-      <div className="max-w-3xl mx-auto">
+      <div className="w-full">
         <Tabs defaultValue="create" className="w-full">
-          <TabsList className="grid w-full grid-cols-2 p-1 bg-white rounded-lg">
+          <TabsList className="grid w-full grid-cols-2 p-1 bg-white rounded-lg border border-gray-200">
             <TabsTrigger 
               value="create" 
               className="rounded-lg data-[state=active]:bg-gray-800 data-[state=active]:text-white data-[state=inactive]:text-gray-600 data-[state=inactive]:hover:bg-gray-100 transition-colors"
@@ -441,8 +492,7 @@ export default function Pools() {
         </Tabs>
       </div>
 
-      {/* Pools Table Section - Full width */}
-      <div className="mt-8 px-6">
+      <div className="mt-8">
         <h2 className="text-2xl font-semibold mb-4">Existing Pools</h2>
         <PoolsTable />
       </div>

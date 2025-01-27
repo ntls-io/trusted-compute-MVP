@@ -6,12 +6,28 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { ExternalLink, ChevronDown, ChevronUp, ChevronsUpDown } from 'lucide-react';
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { ExternalLink, Shield, Code2 } from 'lucide-react';
 
 interface Right {
   id: string;
   name: string;
   description: string;
+}
+
+interface EnclaveMeasurements {
+  mrenclave: string;
+  mrsigner: string;
+  isvProdId: string;
+  isvSvn: string;
 }
 
 interface Pool {
@@ -20,42 +36,121 @@ interface Pool {
   description: string;
   rights: string[];
   contractAddress: string;
+  enclaveMeasurements: EnclaveMeasurements;
   isOwned: boolean;
 }
 
-interface PoolsTableProps {
-  // Add any props if needed
+interface AttestationResult {
+  success: boolean;
+  error?: string;
+  measurements?: EnclaveMeasurements;
 }
 
-type SortField = 'name' | 'description' | 'rights' | 'contractAddress';
-type SortDirection = 'asc' | 'desc' | null;
+const EnclaveDialog = ({ pool, onAttest }: { pool: Pool; onAttest: () => void }) => {
+  const [isAttesting, setIsAttesting] = useState(false);
+  
+  const handleAttest = async () => {
+    setIsAttesting(true);
+    await onAttest();
+    setIsAttesting(false);
+  };
 
-const PoolsTable: React.FC<PoolsTableProps> = () => {
+  return (
+    <DialogContent className="max-w-2xl">
+      <DialogHeader>
+        <DialogTitle>Enclave Verification - {pool.name}</DialogTitle>
+        <DialogDescription>
+          Verify the integrity and authenticity of the trusted computing environment
+        </DialogDescription>
+      </DialogHeader>
+
+      <div className="space-y-6">
+        <div className="space-y-4">
+          <h3 className="text-lg font-semibold">Enclave Measurements</h3>
+          
+          <div className="grid gap-4">
+            <div>
+              <Label className="text-sm">MRENCLAVE (Identity of code and data)</Label>
+              <div className="font-mono text-sm bg-gray-100 p-2 rounded break-all">
+                {pool.enclaveMeasurements.mrenclave}
+              </div>
+            </div>
+            
+            <div>
+              <Label className="text-sm">MRSIGNER (Identity of enclave signer)</Label>
+              <div className="font-mono text-sm bg-gray-100 p-2 rounded break-all">
+                {pool.enclaveMeasurements.mrsigner}
+              </div>
+            </div>
+            
+            <div className="flex gap-8">
+              <div>
+                <Label className="text-sm">ISV_PROD_ID (Product ID)</Label>
+                <div className="font-mono text-sm bg-gray-100 p-2 rounded">
+                  {pool.enclaveMeasurements.isvProdId}
+                </div>
+              </div>
+              
+              <div>
+                <Label className="text-sm">ISV_SVN (Security version)</Label>
+                <div className="font-mono text-sm bg-gray-100 p-2 rounded">
+                  {pool.enclaveMeasurements.isvSvn}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-4">
+          <div className="flex items-center justify-between">
+            <a
+              href="https://github.com/ntls-io/trusted-compute-MVP/blob/main/sgx-mvp/attest.c"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-2 text-blue-500 hover:text-blue-700"
+            >
+              <Code2 className="w-4 h-4" />
+              View Attestation Source Code
+            </a>
+            
+            <Button onClick={handleAttest} disabled={isAttesting}>
+              <Shield className="w-4 h-4 mr-2" />
+              {isAttesting ? 'Running Attestation...' : 'Attest Enclave'}
+            </Button>
+          </div>
+
+          <div className="text-sm text-gray-500">
+            Command that will be executed:<br />
+            <code className="font-mono bg-gray-100 p-1 text-xs">
+              ./attest dcap {pool.enclaveMeasurements.mrenclave} {pool.enclaveMeasurements.mrsigner} {pool.enclaveMeasurements.isvProdId} {pool.enclaveMeasurements.isvSvn}
+            </code>
+          </div>
+        </div>
+      </div>
+    </DialogContent>
+  );
+};
+
+const PoolsTable = () => {
   const [search, setSearch] = useState('');
   const [showMyPools, setShowMyPools] = useState(false);
-  const [sortField, setSortField] = useState<SortField | null>(null);
-  const [sortDirection, setSortDirection] = useState<SortDirection>(null);
+  const [attestationResults, setAttestationResults] = useState<{[key: number]: AttestationResult}>({});
 
   const availableRights: Right[] = [
     { 
       id: '1', 
-      name: 'Create data pool', 
-      description: 'Allows creation of new data pools and setting initial parameters for data structure and digital right tokens'
+      name: 'Append data pool', 
+      description: 'Permits adding new data entries to existing pools'
     },
     { 
       id: '2', 
-      name: 'Append data pool', 
-      description: 'Permits adding new data entries to existing pools while maintaining schema requirements'
+      name: 'Execute Median WASM', 
+      description: 'Enables running Rust WebAssembly-based median calculations'
     },
     { 
       id: '3', 
-      name: 'Execute Median WASM', 
-      description: 'Enables running Rust WebAssembly-based median calculations on data pools'
-    },
-    { 
-      id: '4', 
       name: 'Execute Median Python', 
-      description: 'Allows execution of Python-based median computations on data pools'
+      description: 'Allows execution of Python-based median computations'
     },
   ];
 
@@ -64,97 +159,59 @@ const PoolsTable: React.FC<PoolsTableProps> = () => {
       id: 1,
       name: "Market Analysis Pool",
       description: "Contains market trend data from 2023-2024",
-      rights: ['2'],
+      rights: ['1', '2'],
       contractAddress: "7nYuwdHqwrxbr5CKqRqZY6ZduuB3ZSLJsBz8RPKkqvCp",
-      isOwned: false,
+      enclaveMeasurements: {
+        mrenclave: "c5e34826d42766363286055750373441545bc601df37fab07231bca4324db319",
+        mrsigner: "eb33db710373cbf7c6bfa26e6e9d40e261cfd1f5adc38db6599bfe764e9180cc",
+        isvProdId: "0",
+        isvSvn: "0"
+      },
+      isOwned: true,
     },
     {
       id: 2,
       name: "Customer Insights",
       description: "Aggregated customer behavior metrics",
-      rights: ['2', '3', '4'],
-      contractAddress: "BPFLoader2111111111111111111111111111111111",
-      isOwned: false,
-    },
-    {
-      id: 3,
-      name: "Financial Metrics",
-      description: "Quarterly financial performance data",
       rights: ['2', '3'],
-      contractAddress: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
-      isOwned: true,
-    },
+      contractAddress: "BPFLoader2111111111111111111111111111111111",
+      enclaveMeasurements: {
+        mrenclave: "d4e87626d42766363286055750373441545bc601df37fab07231bca4324db429",
+        mrsigner: "fa22db710373cbf7c6bfa26e6e9d40e261cfd1f5adc38db6599bfe764e9180dd",
+        isvProdId: "0",
+        isvSvn: "0"
+      },
+      isOwned: false,
+    }
   ];
 
-  const handleSort = (field: SortField) => {
-    if (sortField === field) {
-      // Cycle through: asc -> desc -> null
-      if (sortDirection === 'asc') {
-        setSortDirection('desc');
-      } else if (sortDirection === 'desc') {
-        setSortField(null);
-        setSortDirection(null);
+  const handleAttestation = async (pool: Pool) => {
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    setAttestationResults({
+      ...attestationResults,
+      [pool.id]: {
+        success: true,
+        measurements: pool.enclaveMeasurements
       }
-    } else {
-      setSortField(field);
-      setSortDirection('asc');
-    }
-  };
-
-  const getSortIcon = (field: SortField) => {
-    if (sortField !== field) return <ChevronsUpDown size={16} />;
-    if (sortDirection === 'asc') return <ChevronUp size={16} />;
-    if (sortDirection === 'desc') return <ChevronDown size={16} />;
-    return <ChevronsUpDown size={16} />;
+    });
   };
 
   const getRightById = (rightId: string): Right | undefined => {
     return availableRights.find((right) => right.id === rightId);
   };
 
-  const getSolanaExplorerUrl = (address: string): string => {
-    return `https://explorer.solana.com/address/${address}`;
-  };
-
-  const sortPools = (pools: Pool[]): Pool[] => {
-    if (!sortField || !sortDirection) return pools;
-
-    return [...pools].sort((a, b) => {
-      if (sortField === 'rights') {
-        // Compare by number of rights
-        const aValue = a.rights.length;
-        const bValue = b.rights.length;
-        return sortDirection === 'asc' ? aValue - bValue : bValue - aValue;
-      }
-
-      // For all other fields (which are strings)
-      const aValue = a[sortField];
-      const bValue = b[sortField];
-      
-      if (typeof aValue === 'string' && typeof bValue === 'string') {
-        return sortDirection === 'asc' 
-          ? aValue.localeCompare(bValue)
-          : bValue.localeCompare(aValue);
-      }
-      
-      return 0;
-    });
-  };
-
-  const filteredPools = sortPools(
-    pools
-      .filter((pool) => !showMyPools || pool.isOwned)
-      .filter((pool) =>
-        pool.name.toLowerCase().includes(search.toLowerCase()) ||
-        pool.description.toLowerCase().includes(search.toLowerCase())
-      )
-  );
+  const filteredPools = pools
+    .filter((pool) => !showMyPools || pool.isOwned)
+    .filter((pool) =>
+      pool.name.toLowerCase().includes(search.toLowerCase()) ||
+      pool.description.toLowerCase().includes(search.toLowerCase())
+    );
 
   return (
     <Card className="w-full overflow-hidden">
       <div className="bg-gray-800 p-4 flex justify-between items-center gap-4">
         <Input
-          placeholder="Search by pool name or description..."
+          placeholder="Search pools..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="max-w-md bg-white"
@@ -176,100 +233,89 @@ const PoolsTable: React.FC<PoolsTableProps> = () => {
         <Table>
           <TableHeader className="bg-gray-800 [&_tr]:border-0">
             <TableRow className="hover:bg-gray-800">
-              <TableHead 
-                className="w-[15%] text-white cursor-pointer"
-                onClick={() => handleSort('name')}
-              >
-                <div className="flex items-center gap-2">
-                  Pool Name
-                  {getSortIcon('name')}
-                </div>
-              </TableHead>
-              <TableHead 
-                className="w-[20%] text-white cursor-pointer"
-                onClick={() => handleSort('description')}
-              >
-                <div className="flex items-center gap-2">
-                  Description
-                  {getSortIcon('description')}
-                </div>
-              </TableHead>
-              <TableHead 
-                className="w-[25%] text-white cursor-pointer"
-                onClick={() => handleSort('rights')}
-              >
-                <div className="flex items-center gap-2">
-                  Digital Rights Tokens (DRT)
-                  {getSortIcon('rights')}
-                </div>
-              </TableHead>
-              <TableHead 
-                className="w-[40%] text-white cursor-pointer"
-                onClick={() => handleSort('contractAddress')}
-              >
-                <div className="flex items-center gap-2">
-                  Smart Contract
-                  {getSortIcon('contractAddress')}
-                </div>
-              </TableHead>
+              <TableHead className="w-[15%] text-white">Pool Name</TableHead>
+              <TableHead className="w-[20%] text-white">Description</TableHead>
+              <TableHead className="w-[25%] text-white">Digital Rights Tokens</TableHead>
+              <TableHead className="w-[40%] text-white">Sources</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {filteredPools.map((pool) => (
-              <TableRow key={pool.id}>
-                <TableCell className="font-medium">{pool.name}</TableCell>
-                <TableCell>{pool.description}</TableCell>
-                <TableCell>
-                  <div className="flex flex-wrap gap-2">
-                    {pool.rights.map((rightId) => {
-                      const right = getRightById(rightId);
-                      if (!right) return null;
-                      return (
-                        <TooltipProvider key={rightId}>
-                          <Tooltip>
-                            <TooltipTrigger>
-                              <Badge variant="secondary" className="cursor-help">
-                                {right.name}
-                              </Badge>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                              <p>{right.description}</p>
-                            </TooltipContent>
-                          </Tooltip>
-                        </TooltipProvider>
-                      );
-                    })}
-                  </div>
-                </TableCell>
-                <TableCell>
-                  <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger>
-                        <a
-                          href={getSolanaExplorerUrl(pool.contractAddress)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-center gap-2 text-blue-500 hover:text-blue-700"
-                        >
-                          <span className="truncate max-w-[450px]">{pool.contractAddress}</span>
-                          <ExternalLink size={16} />
-                        </a>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        <p>View on Solana Explorer</p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
-                </TableCell>
-              </TableRow>
+              <React.Fragment key={pool.id}>
+                <TableRow>
+                  <TableCell className="font-medium" rowSpan={2}>{pool.name}</TableCell>
+                  <TableCell rowSpan={2}>{pool.description}</TableCell>
+                  <TableCell rowSpan={2}>
+                    <div className="flex flex-wrap gap-2">
+                      {pool.rights.map((rightId) => {
+                        const right = getRightById(rightId);
+                        if (!right) return null;
+                        return (
+                          <TooltipProvider key={rightId}>
+                            <Tooltip>
+                              <TooltipTrigger>
+                                <Badge variant="secondary" className="cursor-help">
+                                  {right.name}
+                                </Badge>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                <p>{right.description}</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        );
+                      })}
+                    </div>
+                  </TableCell>
+                  <TableCell className="border-b-0 py-2">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium whitespace-nowrap">Smart Contract:</span>
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <a
+                              href={`https://explorer.solana.com/address/${pool.contractAddress}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center gap-1 text-blue-500 hover:text-blue-700"
+                            >
+                              <span>Link</span>
+                              <ExternalLink size={16} />
+                            </a>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p className="font-mono text-xs">{pool.contractAddress}</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    </div>
+                  </TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell className="py-2">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium whitespace-nowrap">Enclave:</span>
+                      <Dialog>
+                        <DialogTrigger asChild>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className={attestationResults[pool.id]?.success ? 'bg-green-50' : ''}
+                          >
+                            <Shield className="w-4 h-4 mr-2" />
+                            {attestationResults[pool.id]?.success ? 'Verified' : 'Verify Enclave'}
+                          </Button>
+                        </DialogTrigger>
+                        <EnclaveDialog 
+                          pool={pool} 
+                          onAttest={() => handleAttestation(pool)} 
+                        />
+                      </Dialog>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              </React.Fragment>
             ))}
-            {filteredPools.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={4} className="text-center text-gray-500">
-                  No results found.
-                </TableCell>
-              </TableRow>
-            )}
           </TableBody>
         </Table>
       </div>

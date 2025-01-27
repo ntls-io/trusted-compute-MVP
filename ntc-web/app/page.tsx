@@ -1,6 +1,6 @@
-"use client"
+"use client";
 
-import { useState } from 'react'
+import { useState } from 'react';
 import {
   Table,
   TableBody,
@@ -8,12 +8,13 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/components/ui/table"
-import { Card } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { Input } from "@/components/ui/input"
-import { ExternalLink, ChevronDown, ChevronUp, ChevronsUpDown } from 'lucide-react'
+} from "@/components/ui/table";
+import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Input } from "@/components/ui/input";
+import { ExternalLink, ChevronDown, ChevronUp, ChevronsUpDown } from 'lucide-react';
 
 interface StatsItem {
   label: string
@@ -34,22 +35,36 @@ interface Pool {
   contractAddress: string
 }
 
+interface DRTItem {
+  poolName: string
+  description: string
+  drt: string
+  state: string
+  listedOnMarketplace: string
+}
+
 type SortField = 'name' | 'description' | 'rights' | 'contractAddress';
 type SortDirection = 'asc' | 'desc' | null;
 
 export default function Home() {
-  const [search, setSearch] = useState('')
+  // Pool states
+  const [poolSearch, setPoolSearch] = useState('')
   const [sortField, setSortField] = useState<SortField | null>(null)
   const [sortDirection, setSortDirection] = useState<SortDirection>(null)
+  
+  // DRT states
+  const [drtSearch, setDrtSearch] = useState('')
+  const [stateFilters, setStateFilters] = useState<string[]>([])
+  const [marketplaceFilter, setMarketplaceFilter] = useState<string[]>([])
+  const [sortConfig, setSortConfig] = useState<{
+    key: keyof DRTItem | null;
+    direction: 'asc' | 'desc' | null;
+  }>({ key: null, direction: null })
 
   const statsItems: StatsItem[] = [
     {
-      label: "Data Pool",
+      label: "Data Pool(s)",
       value: "1"
-    },
-    {
-      label: "Digital Rights Tokens Sold",
-      value: "3"
     },
     {
       label: "Digital Rights Tokens Purchased",
@@ -63,14 +78,19 @@ export default function Home() {
 
   const availableRights: DigitalRight[] = [
     { 
-      id: '2', 
-      name: 'Append data pool', 
+      id: '1', 
+      name: 'Append Data Pool', 
       description: 'Permits adding new data entries to existing pools while maintaining schema requirements'
     },
     { 
-      id: '3', 
+      id: '2', 
       name: 'Execute Median WASM', 
       description: 'Enables running Rust WebAssembly-based median calculations on data pools'
+    },
+    { 
+      id: '3', 
+      name: 'Execute Median Python', 
+      description: 'Allows execution of Python-based median computations on data pools'
     }
   ]
 
@@ -78,13 +98,50 @@ export default function Home() {
     id: 3,
     name: "Financial Metrics",
     description: "Quarterly financial performance data",
-    rights: ['2', '3'],
+    rights: ['1', '3'],
     contractAddress: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
   }
 
-  const handleSort = (field: SortField) => {
+  const drtItems: DRTItem[] = [
+    {
+      poolName: "Healthcare Metrics",
+      description: "Patient outcome analysis dataset",
+      drt: "1", 
+      state: "active",
+      listedOnMarketplace: "yes"
+    },
+    {
+      poolName: "Retail Analytics",
+      description: "Shopping pattern data collection",
+      drt: "2", 
+      state: "pending",
+      listedOnMarketplace: "no"
+    },
+    {
+      poolName: "Climate Data",
+      description: "Temperature and weather patterns",
+      drt: "3", 
+      state: "active",
+      listedOnMarketplace: "yes"
+    },
+    {
+      poolName: "Supply Chain Metrics",
+      description: "Logistics performance tracking",
+      drt: "1", 
+      state: "active",
+      listedOnMarketplace: "no"
+    },
+    {
+      poolName: "Market Research",
+      description: "Consumer preference analysis",
+      drt: "2",
+      state: "active",
+      listedOnMarketplace: "yes"
+    }
+  ]
+
+  const handlePoolSort = (field: SortField) => {
     if (sortField === field) {
-      // Cycle through: asc -> desc -> null
       if (sortDirection === 'asc') {
         setSortDirection('desc')
       } else if (sortDirection === 'desc') {
@@ -97,7 +154,7 @@ export default function Home() {
     }
   }
 
-  const getSortIcon = (field: SortField) => {
+  const getPoolSortIcon = (field: SortField) => {
     if (sortField !== field) return <ChevronsUpDown size={16} />
     if (sortDirection === 'asc') return <ChevronUp size={16} />
     if (sortDirection === 'desc') return <ChevronDown size={16} />
@@ -113,136 +170,385 @@ export default function Home() {
   }
 
   const isPoolVisible = 
-    ownedPool.name.toLowerCase().includes(search.toLowerCase()) ||
-    ownedPool.description.toLowerCase().includes(search.toLowerCase()) ||
-    !search
+    ownedPool.name.toLowerCase().includes(poolSearch.toLowerCase()) ||
+    ownedPool.description.toLowerCase().includes(poolSearch.toLowerCase()) ||
+    !poolSearch
 
-  return (
-    <div className="container mx-auto p-4">
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {statsItems.map((item, index) => (
-          <Card key={index} className="p-4">
-            <div className="flex justify-between items-center">
-              <span className="text-gray-700">{item.label}</span>
-              <span className="bg-gray-800 text-white px-3 py-1 rounded-full text-sm">
-                {item.value}
-              </span>
+  // DRT handlers
+  const handleDrtSort = (key: keyof DRTItem) => {
+    let direction: 'asc' | 'desc' | null = 'asc'
+    
+    if (sortConfig.key === key) {
+      if (sortConfig.direction === 'asc') direction = 'desc'
+      else if (sortConfig.direction === 'desc') direction = null
+    }
+    
+    setSortConfig({ key, direction })
+  }
+
+  const getDrtSortIcon = (key: keyof DRTItem) => {
+    if (sortConfig.key !== key) return <ChevronsUpDown className="h-4 w-4" />
+    if (sortConfig.direction === 'asc') return <ChevronUp className="h-4 w-4" />
+    if (sortConfig.direction === 'desc') return <ChevronDown className="h-4 w-4" />
+    return <ChevronsUpDown className="h-4 w-4" />
+  }
+
+  const toggleStateFilter = (state: string) => {
+    setStateFilters(prev => 
+      prev.includes(state) 
+        ? prev.filter(s => s !== state)
+        : [...prev, state]
+    )
+  }
+
+  const toggleMarketplaceFilter = (value: string) => {
+    setMarketplaceFilter(prev =>
+      prev.includes(value)
+        ? prev.filter(v => v !== value)
+        : [...prev, value]
+    )
+  }
+
+  const filteredAndSortedItems = drtItems
+    .filter(item => {
+      const searchTerm = drtSearch.toLowerCase()
+      const matchesSearch = 
+        item.poolName.toLowerCase().includes(searchTerm) ||
+        item.description.toLowerCase().includes(searchTerm) ||
+        item.drt.toLowerCase().includes(searchTerm) ||
+        item.state.toLowerCase().includes(searchTerm) ||
+        item.listedOnMarketplace.toLowerCase().includes(searchTerm)
+
+      const matchesState = stateFilters.length === 0 || stateFilters.includes(item.state)
+      const matchesMarketplace = marketplaceFilter.length === 0 || marketplaceFilter.includes(item.listedOnMarketplace)
+
+      return matchesSearch && matchesState && matchesMarketplace
+    })
+    .sort((a, b) => {
+      if (!sortConfig.key || !sortConfig.direction) return 0
+      
+      const aValue = a[sortConfig.key]
+      const bValue = b[sortConfig.key]
+      
+      if (aValue < bValue) return sortConfig.direction === 'asc' ? -1 : 1
+      if (aValue > bValue) return sortConfig.direction === 'asc' ? 1 : -1
+      return 0
+    })
+    return (
+      <div className="container mx-auto p-4">
+        <div className="grid grid-cols-3 gap-4">
+          {statsItems.map((item, index) => (
+            <Card key={index} className="p-4 w-full">
+              <div className="flex justify-between items-center">
+                <span className="text-gray-700">{item.label}</span>
+                <span className="bg-gray-800 text-white px-3 py-1 rounded-full text-sm">
+                  {item.value}
+                </span>
+              </div>
+            </Card>
+          ))}
+        </div>
+  
+        <div className="mt-8">
+          <h2 className="text-xl font-semibold mb-4">My Pools</h2>
+          <Card className="w-full overflow-hidden">
+            <div className="bg-gray-800 p-4">
+              <Input
+                placeholder="Search by pool name or description..."
+                value={poolSearch}
+                onChange={(e) => setPoolSearch(e.target.value)}
+                className="max-w-md bg-white"
+              />
+            </div>
+            <Table>
+              <TableHeader className="bg-gray-800 [&_tr]:border-0">
+                <TableRow className="hover:bg-gray-800">
+                  <TableHead 
+                    className="w-[15%] text-white cursor-pointer"
+                    onClick={() => handlePoolSort('name')}
+                  >
+                    <div className="flex items-center gap-2">
+                      Pool Name
+                      {getPoolSortIcon('name')}
+                    </div>
+                  </TableHead>
+                  <TableHead 
+                    className="w-[20%] text-white cursor-pointer"
+                    onClick={() => handlePoolSort('description')}
+                  >
+                    <div className="flex items-center gap-2">
+                      Description
+                      {getPoolSortIcon('description')}
+                    </div>
+                  </TableHead>
+                  <TableHead 
+                    className="w-[25%] text-white cursor-pointer"
+                    onClick={() => handlePoolSort('rights')}
+                  >
+                    <div className="flex items-center gap-2">
+                      Digital Rights Tokens (DRT)
+                      {getPoolSortIcon('rights')}
+                    </div>
+                  </TableHead>
+                  <TableHead 
+                    className="w-[40%] text-white cursor-pointer"
+                    onClick={() => handlePoolSort('contractAddress')}
+                  >
+                    <div className="flex items-center gap-2">
+                      Smart Contract
+                      {getPoolSortIcon('contractAddress')}
+                    </div>
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {isPoolVisible ? (
+                  <TableRow>
+                    <TableCell className="font-medium">{ownedPool.name}</TableCell>
+                    <TableCell>{ownedPool.description}</TableCell>
+                    <TableCell>
+                      <div className="flex flex-wrap gap-2">
+                        {ownedPool.rights.map((rightId) => {
+                          const right = getRightById(rightId)
+                          if (!right) return null
+                          return (
+                            <TooltipProvider key={rightId}>
+                              <Tooltip>
+                                <TooltipTrigger>
+                                  <Badge variant="secondary" className="cursor-help">
+                                    {right.name}
+                                  </Badge>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  <p>{right.description}</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          )
+                        })}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger>
+                            <a
+                              href={getSolanaExplorerUrl(ownedPool.contractAddress)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center gap-2 text-blue-500 hover:text-blue-700"
+                            >
+                              <span className="truncate max-w-[450px]">{ownedPool.contractAddress}</span>
+                              <ExternalLink size={16} />
+                            </a>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p>View on Solana Explorer</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  <TableRow>
+                    <TableCell colSpan={4} className="text-center text-gray-500">
+                      No results found.
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </Card>
+        </div>
+  
+        <div className="mt-8">
+          <h2 className="text-2xl font-bold text-gray-900 mb-4">My DRTs</h2>
+          <Card>
+            <div className="bg-gray-800 p-4">
+              <div className="flex items-center gap-4">
+                <Input
+                  type="text"
+                  placeholder="Search DRTs..."
+                  value={drtSearch}
+                  onChange={(e) => setDrtSearch(e.target.value)}
+                  className="max-w-xs bg-white"
+                />
+
+                <div className="flex-1 flex justify-center">
+                  <div className="flex gap-2 mr-16">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => toggleStateFilter('active')}
+                      className={`bg-white hover:bg-gray-100 min-w-[100px] ${
+                        stateFilters.includes('active') ? 'bg-green-600 text-white hover:bg-green-700' : ''
+                      }`}
+                    >
+                      Active
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => toggleStateFilter('pending')}
+                      className={`bg-white hover:bg-gray-100 min-w-[100px] ${
+                        stateFilters.includes('pending') ? 'bg-green-600 text-white hover:bg-green-700' : ''
+                      }`}
+                    >
+                      Pending
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => toggleStateFilter('completed')}
+                      className={`bg-white hover:bg-gray-100 min-w-[100px] ${
+                        stateFilters.includes('completed') ? 'bg-green-600 text-white hover:bg-green-700' : ''
+                      }`}
+                    >
+                      Completed
+                    </Button>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => toggleMarketplaceFilter('yes')}
+                      className={`bg-white hover:bg-gray-100 min-w-[100px] ${
+                        marketplaceFilter.includes('yes') ? 'bg-green-600 text-white hover:bg-green-700' : ''
+                      }`}
+                    >
+                      Listed
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => toggleMarketplaceFilter('no')}
+                      className={`bg-white hover:bg-gray-100 min-w-[100px] ${
+                        marketplaceFilter.includes('no') ? 'bg-green-600 text-white hover:bg-green-700' : ''
+                      }`}
+                    >
+                      Not Listed
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="w-full">
+              <Table>
+                <TableHeader className="bg-gray-800 [&_tr]:border-0">
+                  <TableRow className="hover:bg-gray-800">
+                    <TableHead 
+                      className="text-white cursor-pointer"
+                      onClick={() => handleDrtSort('poolName')}
+                    >
+                      <div className="flex items-center gap-2">
+                        Pool Name
+                        {getDrtSortIcon('poolName')}
+                      </div>
+                    </TableHead>
+                    <TableHead 
+                      className="text-white cursor-pointer"
+                      onClick={() => handleDrtSort('description')}
+                    >
+                      <div className="flex items-center gap-2">
+                        Description
+                        {getDrtSortIcon('description')}
+                      </div>
+                    </TableHead>
+                    <TableHead 
+                      className="text-white cursor-pointer w-[22%]"
+                      onClick={() => handleDrtSort('drt')}
+                    >
+                      <div className="flex items-center gap-2">
+                        Digital Rights Tokens (DRTs)
+                        {getDrtSortIcon('drt')}
+                      </div>
+                    </TableHead>
+                    <TableHead 
+                      className="text-white cursor-pointer"
+                      onClick={() => handleDrtSort('state')}
+                    >
+                      <div className="flex items-center gap-2">
+                        State
+                        {getDrtSortIcon('state')}
+                      </div>
+                    </TableHead>
+                    <TableHead 
+                      className="text-white cursor-pointer"
+                      onClick={() => handleDrtSort('listedOnMarketplace')}
+                    >
+                      <div className="flex items-center gap-2">
+                        Listed on Marketplace
+                        {getDrtSortIcon('listedOnMarketplace')}
+                      </div>
+                    </TableHead>
+                    <TableHead className="text-white w-[200px]"></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredAndSortedItems.map((item, index) => (
+                    <TableRow key={index}>
+                      <TableCell className="font-medium">{item.poolName}</TableCell>
+                      <TableCell>{item.description}</TableCell>
+                      <TableCell>
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger>
+                              <Badge variant="secondary" className="cursor-help">
+                                {getRightById(item.drt)?.name || "Unknown DRT"}
+                              </Badge>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p>{getRightById(item.drt)?.description || "No description available"}</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      </TableCell>
+                      <TableCell>
+                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                          item.state === 'active' ? 'bg-green-100 text-green-700' :
+                          item.state === 'pending' ? 'bg-yellow-100 text-yellow-700' :
+                          'bg-gray-100 text-gray-700'
+                        }`}>
+                          {item.state}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                          item.listedOnMarketplace === 'yes' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'
+                        }`}>
+                          {item.listedOnMarketplace}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex justify-around gap-2">
+                          <Button 
+                            variant="outline" 
+                            size="sm"
+                            disabled={item.listedOnMarketplace === 'yes'}
+                          >
+                            Sell
+                          </Button>
+                          <Button variant="outline" size="sm">
+                            View results
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                  {filteredAndSortedItems.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={6} className="h-24 text-center">
+                        No results found.
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
             </div>
           </Card>
-        ))}
+        </div>
       </div>
-
-      <div className="mt-8">
-        <h2 className="text-xl font-semibold mb-4">My Pools</h2>
-        <Card className="w-full overflow-hidden">
-          <div className="bg-gray-800 p-4">
-            <Input
-              placeholder="Search by pool name or description..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="max-w-md bg-white"
-            />
-          </div>
-          <Table>
-            <TableHeader className="bg-gray-800 [&_tr]:border-0">
-              <TableRow className="hover:bg-gray-800">
-                <TableHead 
-                  className="w-[15%] text-white cursor-pointer"
-                  onClick={() => handleSort('name')}
-                >
-                  <div className="flex items-center gap-2">
-                    Pool Name
-                    {getSortIcon('name')}
-                  </div>
-                </TableHead>
-                <TableHead 
-                  className="w-[20%] text-white cursor-pointer"
-                  onClick={() => handleSort('description')}
-                >
-                  <div className="flex items-center gap-2">
-                    Description
-                    {getSortIcon('description')}
-                  </div>
-                </TableHead>
-                <TableHead 
-                  className="w-[25%] text-white cursor-pointer"
-                  onClick={() => handleSort('rights')}
-                >
-                  <div className="flex items-center gap-2">
-                    Digital Rights Tokens (DRT)
-                    {getSortIcon('rights')}
-                  </div>
-                </TableHead>
-                <TableHead 
-                  className="w-[40%] text-white cursor-pointer"
-                  onClick={() => handleSort('contractAddress')}
-                >
-                  <div className="flex items-center gap-2">
-                    Smart Contract
-                    {getSortIcon('contractAddress')}
-                  </div>
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {isPoolVisible ? (
-                <TableRow>
-                  <TableCell className="font-medium">{ownedPool.name}</TableCell>
-                  <TableCell>{ownedPool.description}</TableCell>
-                  <TableCell>
-                    <div className="flex flex-wrap gap-2">
-                      {ownedPool.rights.map((rightId) => {
-                        const right = getRightById(rightId)
-                        if (!right) return null
-                        return (
-                          <TooltipProvider key={rightId}>
-                            <Tooltip>
-                              <TooltipTrigger>
-                                <Badge variant="secondary" className="cursor-help">
-                                  {right.name}
-                                </Badge>
-                              </TooltipTrigger>
-                              <TooltipContent>
-                                <p>{right.description}</p>
-                              </TooltipContent>
-                            </Tooltip>
-                          </TooltipProvider>
-                        )
-                      })}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <TooltipProvider>
-                      <Tooltip>
-                        <TooltipTrigger>
-                          <a
-                            href={getSolanaExplorerUrl(ownedPool.contractAddress)}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="flex items-center gap-2 text-blue-500 hover:text-blue-700"
-                          >
-                            <span className="truncate max-w-[450px]">{ownedPool.contractAddress}</span>
-                            <ExternalLink size={16} />
-                          </a>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p>View on Solana Explorer</p>
-                        </TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
-                  </TableCell>
-                </TableRow>
-              ) : (
-                <TableRow>
-                  <TableCell colSpan={4} className="text-center text-gray-500">
-                    No results found.
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </Card>
-      </div>
-    </div>
-  )
-}
+    )
+  }
