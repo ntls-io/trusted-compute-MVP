@@ -189,7 +189,7 @@ export default function Home() {
 
   const statsItems: StatsItem[] = [
     {
-      label: "Data Pool(s)",
+      label: "My Data Pool(s)",
       value: "1"
     },
     {

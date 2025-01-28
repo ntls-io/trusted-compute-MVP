@@ -26,9 +26,8 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { FilePicker } from './FilePicker'
-import { validateJsonSchema } from './schemaValidation'
-import { SchemaPreview } from './SchemaPreview'
+import FilePicker from '@/components/FilePicker';
+import { SchemaPreview, validateJsonSchema } from '@/components/schemaUtils';
 import PoolsTable from './PoolsTable'
 
 // Common styles

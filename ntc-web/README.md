@@ -42,3 +42,15 @@ npm run dev
 
 The application will be available at [http://localhost:3000](http://localhost:3000).
 
+### Setting Up Environment Variables for Clerk Authentication
+
+To enable Clerk authentication, create a `.env.local` file in the root of your project with the following variables:
+
+```
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=
+CLERK_SECRET_KEY=
+NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in
+NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up
+```
+
+Make sure to replace the placeholder values with your actual Clerk keys and URLs.

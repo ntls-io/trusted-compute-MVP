@@ -105,4 +105,6 @@ export function FilePicker({ label, accept, onChange }: FilePickerProps) {
       </Card>
     </div>
   )
-}
+};
+
+export default FilePicker;

@@ -26,6 +26,14 @@ export default {
     "./app/**/*.{js,ts,jsx,tsx,mdx}",
   ],
   theme: {
+    components: {
+      '.button-base': {
+        '@apply bg-gray-900 text-white hover:bg-gray-800': {}
+      },
+      '.button-outline': {
+        '@apply border-2 border-gray-900 text-gray-900 hover:bg-gray-100': {}
+      }
+    },
     extend: {
       fontFamily: {
         sans: ['Visby', 'sans-serif'],

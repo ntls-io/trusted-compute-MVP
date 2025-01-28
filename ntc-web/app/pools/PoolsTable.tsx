@@ -35,8 +35,8 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { ExternalLink, Shield, Code2, Upload, Eye } from 'lucide-react';
-import { FilePicker } from './FilePicker';
-import { SchemaPreview } from './SchemaPreview';
+import FilePicker from '@/components/FilePicker';
+import { SchemaPreview, validateJsonSchema } from '@/components/schemaUtils';
 
 interface Right {
   id: string;
@@ -214,7 +214,7 @@ const JoinPoolDialog = ({ pool, availableRights }: { pool: Pool; availableRights
 
         <Dialog open={schemaPreviewOpen} onOpenChange={setSchemaPreviewOpen}>
           <DialogTrigger asChild>
-            <Button variant="outline" className="w-full border-2 border-gray-900 text-gray-900 hover:bg-gray-100">
+            <Button variant="outline" className="button-outline">
               View Schema Definition
             </Button>
           </DialogTrigger>
@@ -258,7 +258,7 @@ const JoinPoolDialog = ({ pool, availableRights }: { pool: Pool; availableRights
           <Button 
             onClick={handleJoinPool}
             disabled={!dataFile || isValidating}
-            className="w-full bg-gray-900 text-white hover:bg-gray-800"
+            className="button-base"
           >
             {isValidating ? 'Validating...' : 'Join Pool'}
           </Button>
