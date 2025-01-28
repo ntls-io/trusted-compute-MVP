@@ -1,0 +1,98 @@
+// Nautilus Trusted Compute
+// Copyright (C) 2025 Nautilus
+
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published
+// by the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+
+// You should have received a copy of the GNU Affero General Public License
+// along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+generator client {
+    provider = "prisma-client-js"
+}
+
+datasource db {
+    provider = "postgresql"
+    url      = env("DATABASE_URL")
+}
+
+// Off-chain metadata and UI-specific data
+model Pool {
+    id                  String    @id @default(uuid())
+    name                String
+    description         String
+    chainAddress       String    @unique  // Reference to on-chain pool program
+    schemaDefinition   Json
+    createdAt          DateTime  @default(now())
+    updatedAt          DateTime  @updatedAt
+
+    // Relationships
+    drtInstances       DRTInstance[]
+    enclaveMeasurement EnclaveMeasurement?
+
+    @@index([chainAddress])
+}
+
+model User {
+    id            String    @id
+    walletAddress String    @unique  // Primary wallet address
+    createdAt     DateTime  @default(now())
+    updatedAt     DateTime  @updatedAt
+    
+    drtInstances  DRTInstance[]
+}
+
+// Reference table for DRT types - mostly static
+model DigitalRightToken {
+    id          String    @id
+    name        String
+    description String
+    githubUrl   String?
+    hash        String?   
+    isActive    Boolean   @default(true)
+    
+    instances   DRTInstance[]
+}
+
+// Tracks DRT instances that exist on-chain
+model DRTInstance {
+    id           String    @id @default(uuid())
+    mintAddress  String    @unique  // On-chain mint address
+    drtId        String    // References DigitalRightToken type
+    poolId       String    // References Pool
+    ownerId      String    // References User (for UI queries)
+    state        String    // Mirrors on-chain state
+    isListed     Boolean   @default(false)
+    price        Float?    // Mirrors on-chain price if listed
+    createdAt    DateTime  @default(now())
+    updatedAt    DateTime  @updatedAt
+    
+    drt          DigitalRightToken @relation(fields: [drtId], references: [id])
+    pool         Pool      @relation(fields: [poolId], references: [id])
+    owner        User      @relation(fields: [ownerId], references: [id])
+
+    @@index([mintAddress])
+    @@index([drtId])
+    @@index([poolId])
+    @@index([ownerId])
+}
+
+model EnclaveMeasurement {
+    id         String   @id @default(uuid())
+    poolId     String   @unique
+    mrenclave  String
+    mrsigner   String
+    isvProdId  String
+    isvSvn     String
+    createdAt  DateTime @default(now())
+    updatedAt  DateTime @updatedAt
+    
+    pool       Pool     @relation(fields: [poolId], references: [id])
+}

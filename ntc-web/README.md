@@ -54,3 +54,66 @@ NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up
 ```
 
 Make sure to replace the placeholder values with your actual Clerk keys and URLs.
+
+## Database Setup
+
+### PostgreSQL with Docker
+
+1. Install Docker if you haven't already
+2. Run PostgreSQL container:
+```bash
+docker run --name postgres -e POSTGRES_PASSWORD=postgres -p 5432:5432 -d postgres
+```
+
+3. Create the development database:
+```bash
+docker exec -it postgres psql -U postgres -c "CREATE DATABASE ntls_dev;"
+```
+
+### Prisma Setup
+
+1. Create `.env` file in the project root:
+    ```
+    DATABASE_URL="postgresql://postgres:postgres@localhost:5432/ntls_dev?schema=public"
+    ```
+
+2. Push the schema to the database:
+    ```bash
+    npx prisma db push
+    ```
+
+3. Seed the database with initial data (`prisma/seed.ts`):
+    ```bash
+    npx prisma db seed
+    ```
+
+4. Run database tests to verify setup (`scripts/test-db.ts`):
+    ```bash
+    npm run test:db
+    ```
+
+### Useful Database Commands
+
+- Start Prisma Studio (GUI for database):
+    ```bash
+    npx prisma studio
+    ```
+
+- Reset database (⚠️ deletes all data):
+    ```bash
+    npx prisma db reset
+    ```
+
+- Update Prisma client after schema changes:
+    ```bash
+    npx prisma generate
+    ```
+
+### Troubleshooting
+
+If you encounter issues with the TypeScript configuration when seeding:
+1. Verify `tsconfig.seed.json` exists in the project root
+2. Ensure all dependencies are installed:
+    ```bash
+    npm install -D ts-node typescript @types/node
+    ```
