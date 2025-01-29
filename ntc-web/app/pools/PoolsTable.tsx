@@ -298,19 +298,23 @@ export function PoolsTable() {
       return sortDirection === "asc" ? valueA.localeCompare(valueB) : valueB.localeCompare(valueA);
     });
   
-  const handleSort = (field: "name" | "description") => {
+    const handleSort = (field: "name" | "description") => {
       if (sortField === field) {
-        setSortDirection(sortDirection === "asc" ? "desc" : "asc");
+        if (sortDirection === "asc") setSortDirection("desc");
+        else if (sortDirection === "desc") {
+          setSortField(null);
+          setSortDirection(null);
+        } else setSortDirection("asc");
       } else {
         setSortField(field);
         setSortDirection("asc");
       }
-    };
+    };    
     
-    const getSortIcon = (field: "name" | "description") => {
-      if (sortField !== field) return <ChevronsUpDown className="h-4 w-4" />;
-      return sortDirection === "asc" ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />;
-    };
+    const getSortIcon = (field: "name" | "description") => 
+      sortField === field 
+        ? sortDirection === "asc" ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />
+        : <ChevronsUpDown className="h-4 w-4" />;    
     
 
   if (loading) {
