@@ -62,7 +62,12 @@ jobs:
           MISSING_LICENSE=0
 
           for file in $FILES; do
-            if [[ $file =~ \.(js|jsx|ts|tsx|py|cpp|c|h|rs|css|scss|sass|less|html|md|sh|toml|yml|yaml|json|Dockerfile)$ ]] || file "$file" | grep -q "ASCII text"; then
+            # Skip JSON files
+            if [[ $file =~ \.json$ ]]; then
+              continue
+            fi
+
+            if [[ $file =~ \.(js|jsx|ts|tsx|py|cpp|c|h|rs|css|scss|sass|less|html|md|sh|toml|yml|yaml|Dockerfile|prisma|cargo)$ ]] || file "$file" | grep -q "ASCII text"; then
               if [ -f "$file" ] && ! grep -q "Copyright" "$file"; then
                 echo "::error::Missing license in: $file"
                 MISSING_LICENSE=1

@@ -1,3 +1,21 @@
+<!--
+Nautilus Trusted Compute  
+Copyright (C) 2025 Nautilus  
+
+This program is free software: you can redistribute it and/or modify  
+it under the terms of the GNU Affero General Public License as published  
+by the Free Software Foundation, either version 3 of the License, or  
+(at your option) any later version.  
+
+This program is distributed in the hope that it will be useful,  
+but WITHOUT ANY WARRANTY; without even the implied warranty of  
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the  
+GNU Affero General Public License for more details.  
+
+You should have received a copy of the GNU Affero General Public License  
+along with this program. If not, see <https://www.gnu.org/licenses/>.  
+-->
+
 # **Attestation Client Setup**
 
 This guide covers the setup and configuration of the attestation client for verifying SGX enclaves.
@@ -93,7 +111,7 @@ make attest
 
 1. **Build Container and Get Signature**
 
-    Check [Docker Deployment Guide](installation/docker-deployment.md) for complete instructions on building and setting up the Docker environment.
+    Check [Docker Deployment Guide](../installation/docker-deployment.md) for complete instructions on building and setting up the Docker environment.
 
     ```sh
     cd sgx-mvp/docker
