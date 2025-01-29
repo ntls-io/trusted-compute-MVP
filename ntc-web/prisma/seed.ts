@@ -112,16 +112,37 @@ async function main() {
             chainAddress: '7nYuwdHqwrxbr5CKqRqZY6ZduuB3ZSLJsBz8RPKkqvCp',
             ownerId: user1.id,
             schemaDefinition: {
-                type: 'object',
-                properties: {
-                    timestamp: { type: 'number' },
-                    marketValue: { type: 'number' },
-                    volume: { type: 'number' },
+                "$schema": "http://json-schema.org/draft-07/schema#",
+                "type": "object",
+                "properties": {
+                    "timestamp": {
+                        "type": "array",
+                        "items": {
+                            "type": "number"
+                        }
+                    },
+                    "marketValue": {
+                        "type": "array",
+                        "items": {
+                            "type": "number"
+                        }
+                    },
+                    "volume": {
+                        "type": "array",
+                        "items": {
+                            "type": "number"
+                        }
+                    }
                 },
+                "required": [
+                    "timestamp",
+                    "marketValue",
+                    "volume"
+                ]
             },
         },
     });
-
+    
     const customerInsightsPool = await prisma.pool.create({
         data: {
             name: 'Customer Insights',
@@ -129,16 +150,37 @@ async function main() {
             chainAddress: 'BPFLoader2111111111111111111111111111111111',
             ownerId: user2.id,
             schemaDefinition: {
-                type: 'object',
-                properties: {
-                    customerCount: { type: 'number' },
-                    averageSpend: { type: 'number' },
-                    segmentId: { type: 'number' },
+                "$schema": "http://json-schema.org/draft-07/schema#",
+                "type": "object",
+                "properties": {
+                    "customerCount": {
+                        "type": "array",
+                        "items": {
+                            "type": "number"
+                        }
+                    },
+                    "averageSpend": {
+                        "type": "array",
+                        "items": {
+                            "type": "number"
+                        }
+                    },
+                    "segmentId": {
+                        "type": "array",
+                        "items": {
+                            "type": "number"
+                        }
+                    }
                 },
+                "required": [
+                    "customerCount",
+                    "averageSpend",
+                    "segmentId"
+                ]
             },
         },
     });
-
+    
     const financialMetricsPool = await prisma.pool.create({
         data: {
             name: 'Financial Metrics',
@@ -146,16 +188,37 @@ async function main() {
             chainAddress: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
             ownerId: user4.id,
             schemaDefinition: {
-                type: 'object',
-                properties: {
-                    revenue: { type: 'number' },
-                    profit: { type: 'number' },
-                    expenses: { type: 'number' },
+                "$schema": "http://json-schema.org/draft-07/schema#",
+                "type": "object",
+                "properties": {
+                    "revenue": {
+                        "type": "array",
+                        "items": {
+                            "type": "number"
+                        }
+                    },
+                    "profit": {
+                        "type": "array",
+                        "items": {
+                            "type": "number"
+                        }
+                    },
+                    "expenses": {
+                        "type": "array",
+                        "items": {
+                            "type": "number"
+                        }
+                    }
                 },
+                "required": [
+                    "revenue",
+                    "profit",
+                    "expenses"
+                ]
             },
         },
     });
-
+    
     const developerSalaryPool = await prisma.pool.create({
         data: {
             name: 'Developer Salaries',
@@ -163,15 +226,36 @@ async function main() {
             chainAddress: 'sdfhjkhasmnjjasdkhjkhsSsoadijsdklfjsd',
             ownerId: user4.id,
             schemaDefinition: {
-                type: 'object',
-                properties: {
-                    income: { type: 'number' },
-                    tax: { type: 'number' },
-                    netSalary: { type: 'number' },
+                "$schema": "http://json-schema.org/draft-07/schema#",
+                "type": "object",
+                "properties": {
+                    "income": {
+                        "type": "array",
+                        "items": {
+                            "type": "number"
+                        }
+                    },
+                    "tax": {
+                        "type": "array",
+                        "items": {
+                            "type": "number"
+                        }
+                    },
+                    "netSalary": {
+                        "type": "array",
+                        "items": {
+                            "type": "number"
+                        }
+                    }
                 },
+                "required": [
+                    "income",
+                    "tax",
+                    "netSalary"
+                ]
             },
         },
-    });
+    });    
 
     console.log('✅ Pools created');
 

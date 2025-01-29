@@ -22,43 +22,40 @@ import { prisma } from "@/lib/prisma";
 
 export async function GET(request: NextRequest) {
   try {
+    // Get current user to check which pools they own
     const user = await currentUser();
+    const userId = user?.id;
 
-    if (!user) {
-      console.warn("🚨 Unauthorized: No user found in Clerk.");
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    console.log(`✅ Fetching data for user: ${user.id}`);
-
-    const userData = await prisma.user.findFirst({
-      where: { clerkId: user.id },
+    // Fetch all pools with related data
+    const pools = await prisma.pool.findMany({
       include: {
-        pools: {
+        enclaveMeasurement: true,
+        allowedDRTs: {
           include: {
-            enclaveMeasurement: true,
-            allowedDRTs: { include: { drt: true } }
+            drt: true
           }
         },
-        drtInstances: {
-          include: { drt: true, pool: true }
+        owner: {
+          select: {
+            clerkId: true
+          }
         }
       }
     });
 
-    if (!userData) {
-      console.warn(`⚠️ No user data found for Clerk ID: ${user.id}`);
-      return NextResponse.json({ pools: [], drtInstances: [] }, { status: 200 }); // Return empty arrays
-    }
+    // Add isOwned field to each pool
+    const enrichedPools = pools.map(pool => ({
+      ...pool,
+      isOwned: pool.owner?.clerkId === userId
+    }));
 
-    return NextResponse.json({
-      pools: userData.pools ?? [], // Ensure empty array
-      drtInstances: userData.drtInstances ?? [] // Ensure empty array
-    });
-
+    return NextResponse.json(enrichedPools);
   } catch (error) {
-    console.error("❌ Internal server error:", error);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    console.error("❌ Error fetching pools:", error);
+    return NextResponse.json(
+      { error: "Failed to fetch pools" },
+      { status: 500 }
+    );
   } finally {
     await prisma.$disconnect();
   }

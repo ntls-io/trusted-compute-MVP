@@ -31,7 +31,8 @@ interface ValidationResult {
 }
 
 interface SchemaPreviewProps {
-  schemaFile: File | null;
+  schema?: JSON;
+  schemaFile?: File | null;
 }
 
 interface SchemaColumn {
@@ -101,32 +102,42 @@ function validateDataAgainstSchema(data: any, schema: any): ValidationResult {
 /**
  * Renders a preview of the JSON schema.
  */
-export const SchemaPreview = ({ schemaFile }: SchemaPreviewProps) => {
+export const SchemaPreview = ({ schema, schemaFile }: SchemaPreviewProps) => {
   const [open, setOpen] = useState(false);
-  const [schema, setSchema] = useState<any>(null);
+  const [parsedSchema, setParsedSchema] = useState<any>(null);
   const [columns, setColumns] = useState<SchemaColumn[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  const loadSchema = async () => {
-    if (!schemaFile) return;
-
+  const processSchema = (schemaData: any) => {
     try {
-      const text = await schemaFile.text();
-      const parsedSchema = JSON.parse(text);
-      setSchema(parsedSchema);
+      setParsedSchema(schemaData);
 
       // Extract schema columns
-      const schemaColumns: SchemaColumn[] = Object.entries(parsedSchema.properties || {}).map(
+      const schemaColumns: SchemaColumn[] = Object.entries(schemaData.properties || {}).map(
         ([name, prop]: [string, any]) => ({
           name,
           type: prop.type,
-          required: (parsedSchema.required || []).includes(name),
+          required: (schemaData.required || []).includes(name),
           items: prop.items,
         })
       );
       setColumns(schemaColumns);
     } catch (err) {
-      setError('Failed to parse schema file.');
+      setError('Failed to process schema.');
+    }
+  };
+
+  const loadSchema = async () => {
+    if (schema) {
+      processSchema(schema);
+    } else if (schemaFile) {
+      try {
+        const text = await schemaFile.text();
+        const parsedData = JSON.parse(text);
+        processSchema(parsedData);
+      } catch (err) {
+        setError('Failed to parse schema file.');
+      }
     }
   };
 
@@ -138,7 +149,7 @@ export const SchemaPreview = ({ schemaFile }: SchemaPreviewProps) => {
           setOpen(true);
           loadSchema();
         }}
-        disabled={!schemaFile}
+        disabled={!schema && !schemaFile}
         className="hover:bg-gray-100 hover:text-gray-900 text-gray-600"
       >
         <Eye className="mr-2 h-4 w-4" />
@@ -187,7 +198,7 @@ export const SchemaPreview = ({ schemaFile }: SchemaPreviewProps) => {
 
               <TabsContent value="tree">
                 <ScrollArea>
-                  <pre className="p-4 bg-gray-50">{JSON.stringify(schema, null, 2)}</pre>
+                  <pre className="p-4 bg-gray-50">{JSON.stringify(parsedSchema, null, 2)}</pre>
                 </ScrollArea>
               </TabsContent>
             </Tabs>
