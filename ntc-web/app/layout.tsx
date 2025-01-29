@@ -18,11 +18,8 @@
 
 import { Inter } from 'next/font/google'
 import './globals.css'
-import LayoutClient from './LayoutClient'
-import {
-  ClerkProvider,
-} from '@clerk/nextjs'
-import AuthLayout from './AuthLayout'  // Add this import
+import { ClerkProvider } from '@clerk/nextjs'
+import AuthLayout from './AuthLayout'
 
 const inter = Inter({ subsets: ['latin'] })
 

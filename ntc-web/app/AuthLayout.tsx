@@ -16,18 +16,42 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// AuthLayout.tsx
+// AuthLayout.tsx
 'use client'
 
-import { usePathname } from 'next/navigation'
+import { useAuth } from '@clerk/nextjs'
+import { usePathname, useRouter } from 'next/navigation'
+import { useEffect } from 'react'
 import LayoutClient from './LayoutClient'
 
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
+  const { isLoaded, isSignedIn } = useAuth()
   const pathname = usePathname()
+  const router = useRouter()
   const isAuthPage = pathname === '/sign-in' || pathname === '/sign-up'
 
+  useEffect(() => {
+    if (isLoaded && !isSignedIn && !isAuthPage) {
+      router.push('/sign-in')
+    }
+  }, [isLoaded, isSignedIn, isAuthPage, router])
+
+  // Show loading state while Clerk loads
+  if (!isLoaded) {
+    return <div>Loading...</div>
+  }
+
+  // If on auth page, show without layout
   if (isAuthPage) {
     return children
   }
 
+  // For all other pages, ensure user is signed in
+  if (!isSignedIn) {
+    return <div>Redirecting to sign in...</div>
+  }
+
+  // User is authenticated, show with layout
   return <LayoutClient>{children}</LayoutClient>
 }
