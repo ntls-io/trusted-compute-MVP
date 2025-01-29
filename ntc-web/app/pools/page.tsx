@@ -40,6 +40,14 @@ interface StepProps {
   onPrev?: () => void;
 }
 
+interface DigitalRight {
+  id: string;
+  name: string;
+  description: string;
+  githubUrl: string | null;
+  hash: string | null;
+}
+
 // Step 1: File Selection Component
 function FileSelectionStep({ isActive, onNext }: StepProps) {
   const [schemaFile, setSchemaFile] = useState<File | null>(null)
@@ -139,32 +147,49 @@ function FileSelectionStep({ isActive, onNext }: StepProps) {
 // Step 2: Digital Rights Assignment
 function DigitalRightsStep({ isActive, onNext, onPrev }: StepProps) {
   const [selectedRights, setSelectedRights] = useState<string[]>([])
+  const [digitalRights, setDigitalRights] = useState<DigitalRight[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    const fetchDigitalRights = async () => {
+      try {
+        const response = await fetch('/api/digital-rights')
+        if (!response.ok) {
+          throw new Error('Failed to fetch digital rights')
+        }
+        const data = await response.json()
+        setDigitalRights(data)
+      } catch (err) {
+        setError('Failed to load digital rights. Please try again.')
+        console.error('Error fetching digital rights:', err)
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    if (isActive) {
+      fetchDigitalRights()
+    }
+  }, [isActive])
 
   if (!isActive) return null
 
-  const dummyRights = [
-    { 
-      id: '1', 
-      name: 'Append Data Pool', 
-      description: 'Permits adding new data entries to existing pools while maintaining schema requirements',
-      github: 'https://github.com/ntls-io/trusted-compute-MVP/blob/main/sgx-mvp/json-append/src/lib.rs',
-      hash: null
-    },
-    { 
-      id: '2', 
-      name: 'Execute Median WASM', 
-      description: 'Enables running Rust WebAssembly-based median calculations on data pools',
-      github: 'https://github.com/ntls-io/WASM-Binaries-MVP/blob/master/bin/get_median_wasm.wasm',
-      hash: '728445d425153350b3e353cc96d29c16d5d81978ea3d7bad21f3d2b2dd76d813'
-    },
-    { 
-      id: '3', 
-      name: 'Execute Median Python', 
-      description: 'Allows execution of Python-based median computations on data pools',
-      github: 'https://github.com/ntls-io/Python-Scripts-MVP/blob/main/calculate_median.py',
-      hash: 'bcda34f2af83a2dac745a5d86f18f4c4cd6cb4e61c76e0dec005a5fc9bc124f5'
-    }
-  ]
+  if (isLoading) {
+    return (
+      <div className="flex justify-center items-center h-64">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900" />
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <Alert variant="destructive">
+        <AlertDescription>{error}</AlertDescription>
+      </Alert>
+    )
+  }
 
   return (
     <div className="space-y-6">
@@ -182,14 +207,14 @@ function DigitalRightsStep({ isActive, onNext, onPrev }: StepProps) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {dummyRights.map((right) => (
+            {digitalRights.map((right) => (
               <TableRow key={right.id}>
                 <TableCell className="font-medium">{right.name}</TableCell>
                 <TableCell>{right.description}</TableCell>
                 <TableCell>
-                  {right.github ? (
+                  {right.githubUrl ? (
                     <a 
-                      href={right.github}
+                      href={right.githubUrl}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-blue-600 hover:text-blue-800 underline"
@@ -231,7 +256,11 @@ function DigitalRightsStep({ isActive, onNext, onPrev }: StepProps) {
         <Button variant="outline" onClick={onPrev} className={buttonOutlineClass}>
           Previous
         </Button>
-        <Button onClick={onNext} className={buttonBaseClass}>
+        <Button 
+          onClick={onNext} 
+          disabled={selectedRights.length === 0}
+          className={buttonBaseClass}
+        >
           Next
         </Button>
       </div>
