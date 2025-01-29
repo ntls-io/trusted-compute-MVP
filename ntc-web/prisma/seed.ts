@@ -21,25 +21,52 @@ import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
 
 async function main() {
-    // Clean up existing data
+    // 🧹 Clean up existing data
     await prisma.$transaction([
         prisma.dRTInstance.deleteMany(),
+        prisma.poolAllowedDRT.deleteMany(),
         prisma.digitalRightToken.deleteMany(),
         prisma.enclaveMeasurement.deleteMany(),
         prisma.pool.deleteMany(),
         prisma.user.deleteMany(),
     ]);
+    console.log('✅ Database cleaned');
 
-    // Create sample DRT types
+    // 👤 Create users with Clerk authentication
+    const user1 = await prisma.user.create({
+        data: {
+            id: 'user_alice',
+            clerkId: 'clerk_123456789_alice',
+            walletAddress: '5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty',
+        },
+    });
+
+    const user2 = await prisma.user.create({
+        data: {
+            id: 'user_bob',
+            clerkId: 'clerk_987654321_bob',
+            walletAddress: '5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY',
+        },
+    });
+
+    const user3 = await prisma.user.create({
+        data: {
+            id: 'user_charlie',
+            clerkId: 'clerk_567890123_charlie',
+            walletAddress: '5FLSigC9HGRKVhB9FiEo4Y3koPsNmBmLJbpXg2mp1hXcS59Y',
+        },
+    });
+
+    console.log('✅ Users created with Clerk IDs');
+
+    // 🏷️ Create DRT types
     const appendDrt = await prisma.digitalRightToken.create({
         data: {
             id: 'APPEND_DATA_POOL',
             name: 'Append Data Pool',
-            description:
-                'Permits adding new data entries to existing pools while maintaining schema requirements',
+            description: 'Allows adding new data entries while maintaining schema integrity',
             githubUrl: 'https://github.com/ntls-io/trusted-compute-MVP/blob/main/sgx-mvp/json-append/src/lib.rs',
             isActive: true,
-            hash: null,
         },
     });
 
@@ -47,11 +74,10 @@ async function main() {
         data: {
             id: 'EXECUTE_MEDIAN_WASM',
             name: 'Execute Median WASM',
-            description:
-                'Enables running Rust WebAssembly-based median calculations on data pools',
+            description: 'Runs Rust WebAssembly-based median calculations',
             githubUrl: 'https://github.com/ntls-io/WASM-Binaries-MVP/blob/master/bin/get_median_wasm.wasm',
             isActive: true,
-            hash: '728445d425153350b3e353cc96d29c16d5d81978ea3d7bad21f3d2b2dd76d813',
+            hash: 'c5e34826d42766363286055750373441545bc601df37fab07231bca4324db319',
         },
     });
 
@@ -59,95 +85,92 @@ async function main() {
         data: {
             id: 'EXECUTE_MEDIAN_PYTHON',
             name: 'Execute Median Python',
-            description:
-                'Allows execution of Python-based median computations on data pools',
+            description: 'Runs Python-based median computations on data pools',
             githubUrl: 'https://github.com/ntls-io/Python-Scripts-MVP/blob/main/calculate_median.py',
             isActive: true,
-            hash: 'bcda34f2af83a2dac745a5d86f18f4c4cd6cb4e61c76e0dec005a5fc9bc124f5',
+            hash: 'fa22db710373cbf7c6bfa26e6e9d40e261cfd1f5adc38db6599bfe764e9180dd',
         },
     });
 
-    // Create test users
-    const user1 = await prisma.user.create({
-        data: {
-            id: 'user_test1',
-            walletAddress: '5FHwkrdxkjdkzj5ZRksdj5zkjdkZJDKzjkz',
-        },
-    });
+    console.log('✅ DRT Types created');
 
-    const user2 = await prisma.user.create({
+    // 🏦 Create pools with schema definitions
+    const marketAnalysisPool = await prisma.pool.create({
         data: {
-            id: 'user_test2',
-            walletAddress: '5FHwkrdxkjdkzj5ZRksdj5zkjdkZJDKzjkx',
-        },
-    });
-
-    // Create test pools
-    const pool1 = await prisma.pool.create({
-        data: {
-            name: 'Weather Data Pool',
-            description: 'Historical weather data for major cities',
-            chainAddress: 'pool_weather_123',
+            name: 'Market Analysis Pool',
+            description: 'Contains market trend data from 2023-2024',
+            chainAddress: '7nYuwdHqwrxbr5CKqRqZY6ZduuB3ZSLJsBz8RPKkqvCp',
+            ownerId: user1.id,
             schemaDefinition: {
                 type: 'object',
                 properties: {
-                    temperature: { type: 'number' },
-                    humidity: { type: 'number' },
-                    timestamp: { type: 'string' },
-                },
-            },
-        },
-    });
-
-    const pool2 = await prisma.pool.create({
-        data: {
-            name: 'Market Data Pool',
-            description: 'Financial market data feed',
-            chainAddress: 'pool_market_456',
-            schemaDefinition: {
-                type: 'object',
-                properties: {
-                    price: { type: 'number' },
+                    timestamp: { type: 'number' },
+                    marketValue: { type: 'number' },
                     volume: { type: 'number' },
-                    symbol: { type: 'string' },
                 },
             },
         },
     });
 
-    // Create DRT instances
+    const customerInsightsPool = await prisma.pool.create({
+        data: {
+            name: 'Customer Insights',
+            description: 'Aggregated customer behavior metrics',
+            chainAddress: 'BPFLoader2111111111111111111111111111111111',
+            ownerId: user2.id,
+            schemaDefinition: {
+                type: 'object',
+                properties: {
+                    customerCount: { type: 'number' },
+                    averageSpend: { type: 'number' },
+                    segmentId: { type: 'number' },
+                },
+            },
+        },
+    });
+
+    console.log('✅ Pools created');
+
+    // 🔗 Define Pool-DRT Relationships
+    await prisma.poolAllowedDRT.createMany({
+        data: [
+            { poolId: marketAnalysisPool.id, drtId: appendDrt.id },
+            { poolId: marketAnalysisPool.id, drtId: executeMedianWASMDrt.id },
+            { poolId: customerInsightsPool.id, drtId: executeMedianPythonDrt.id },
+        ],
+    });
+
+    console.log('✅ Pool-DRT relationships set');
+
+    // 📈 Create enclave measurements
+    await prisma.enclaveMeasurement.create({
+        data: {
+            poolId: marketAnalysisPool.id,
+            mrenclave: 'c5e34826d42766363286055750373441545bc601df37fab07231bca4324db319',
+            mrsigner: 'eb33db710373cbf7c6bfa26e6e9d40e261cfd1f5adc38db6599bfe764e9180cc',
+            isvProdId: '0',
+            isvSvn: '0',
+        },
+    });
+
+    console.log('✅ Enclave Measurements added');
+
+    // 🎟️ Create DRT instances
     await prisma.dRTInstance.createMany({
         data: [
             {
-                mintAddress: 'mint_append_123',
+                mintAddress: 'market_append_1',
                 drtId: appendDrt.id,
-                poolId: pool1.id,
+                poolId: marketAnalysisPool.id,
                 ownerId: user1.id,
-                state: 'active',
-                isListed: false,
-            },
-            {
-                mintAddress: 'mint_execute_wasm_456',
-                drtId: executeMedianWASMDrt.id,
-                poolId: pool1.id,
-                ownerId: user1.id,
-                state: 'active',
-                isListed: true,
-                price: 1.5,
-            },
-            {
-                mintAddress: 'mint_append_789',
-                drtId: appendDrt.id,
-                poolId: pool2.id,
-                ownerId: user2.id,
                 state: 'active',
                 isListed: true,
                 price: 2.0,
             },
             {
-                mintAddress: 'mint_execute_python_789',
+                mintAddress: 'customer_python_1',
                 drtId: executeMedianPythonDrt.id,
-                poolId: pool2.id,
+                poolId: customerInsightsPool.id,
                 ownerId: user2.id,
                 state: 'active',
                 isListed: true,
@@ -156,27 +179,8 @@ async function main() {
         ],
     });
 
-    // Create enclave measurements
-    await prisma.enclaveMeasurement.createMany({
-        data: [
-            {
-                poolId: pool1.id,
-                mrenclave: 'mrenclave_123',
-                mrsigner: 'mrsigner_123',
-                isvProdId: 'isv_123',
-                isvSvn: 'svn_1',
-            },
-            {
-                poolId: pool2.id,
-                mrenclave: 'mrenclave_456',
-                mrsigner: 'mrsigner_456',
-                isvProdId: 'isv_456',
-                isvSvn: 'svn_1',
-            },
-        ],
-    });
-
-    console.log('🌱 Seed data created successfully');
+    console.log('✅ DRT Instances created');
+    console.log('🌱 Seed data fully loaded!');
 }
 
 main()

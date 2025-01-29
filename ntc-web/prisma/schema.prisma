@@ -28,26 +28,33 @@ model Pool {
     id                  String    @id @default(uuid())
     name                String
     description         String
-    chainAddress       String    @unique  // Reference to on-chain pool program
-    schemaDefinition   Json
+    chainAddress        String    @unique  // Reference to on-chain pool program
+    schemaDefinition    Json
+    ownerId            String    // References User who created/owns the pool
     createdAt          DateTime  @default(now())
     updatedAt          DateTime  @updatedAt
 
     // Relationships
+    owner              User      @relation(fields: [ownerId], references: [id])
     drtInstances       DRTInstance[]
     enclaveMeasurement EnclaveMeasurement?
+    allowedDRTs        PoolAllowedDRT[]    // New relationship to track allowed DRT types
 
     @@index([chainAddress])
+    @@index([ownerId])
 }
 
 model User {
     id            String    @id
+    clerkId       String    @unique  // Clerk user_id
     walletAddress String    @unique  // Primary wallet address
     createdAt     DateTime  @default(now())
     updatedAt     DateTime  @updatedAt
-    
+
+    pools         Pool[]
     drtInstances  DRTInstance[]
 }
+
 
 // Reference table for DRT types - mostly static
 model DigitalRightToken {
@@ -59,6 +66,7 @@ model DigitalRightToken {
     isActive    Boolean   @default(true)
     
     instances   DRTInstance[]
+    allowedPools PoolAllowedDRT[]    // New relationship to track pools where this DRT is allowed
 }
 
 // Tracks DRT instances that exist on-chain
@@ -95,4 +103,19 @@ model EnclaveMeasurement {
     updatedAt  DateTime @updatedAt
     
     pool       Pool     @relation(fields: [poolId], references: [id])
+}
+
+// DRT types allowed for each pool
+model PoolAllowedDRT {
+    id          String    @id @default(uuid())
+    poolId      String
+    drtId       String
+    createdAt   DateTime  @default(now())
+    
+    pool        Pool      @relation(fields: [poolId], references: [id])
+    drt         DigitalRightToken @relation(fields: [drtId], references: [id])
+
+    @@unique([poolId, drtId])    // Prevent duplicate pool-DRT combinations
+    @@index([poolId])
+    @@index([drtId])
 }
