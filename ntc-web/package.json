@@ -31,6 +31,7 @@
     "@solana/web3.js": "^1.98.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "dotenv": "^16.4.7",
     "lucide-react": "^0.471.1",
     "next": "^15.1.6",
     "prisma": "^6.2.1",
@@ -42,6 +43,7 @@
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
+    "@types/dotenv": "^6.1.1",
     "@types/node": "^20.17.16",
     "@types/react": "^19",
     "@types/react-dom": "^19",

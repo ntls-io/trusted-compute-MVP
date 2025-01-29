@@ -18,7 +18,7 @@
 
 "use client";
 
-import React, { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Table,
   TableBody,
@@ -30,6 +30,7 @@ import {
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Input } from "@/components/ui/input";
 import { ExternalLink, ChevronDown, ChevronUp, ChevronsUpDown, Shield, Code2 } from 'lucide-react';
@@ -42,37 +43,43 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 
-interface StatsItem {
-  label: string;
-  value: string;
-}
-
-interface DigitalRight {
+// Updated interfaces to match Prisma schema
+interface Pool {
   id: string;
   name: string;
   description: string;
-}
-
-interface Pool {
-  id: number;
-  name: string;
-  description: string;
-  rights: string[];
-  contractAddress: string;
-  enclaveMeasurements: {
+  chainAddress: string;
+  schemaDefinition: any;
+  enclaveMeasurement?: {
     mrenclave: string;
     mrsigner: string;
     isvProdId: string;
     isvSvn: string;
   };
+  allowedDRTs: {
+    drt: {
+      id: string;
+      name: string;
+      description: string;
+    };
+  }[];
 }
 
-interface DRTItem {
-  poolName: string;
-  description: string;
-  drt: string;
+interface DRTInstance {
+  id: string;
+  mintAddress: string;
+  drt: {
+    id: string;
+    name: string;
+    description: string;
+  };
+  pool: {
+    name: string;
+    description: string;
+  };
   state: string;
-  listedOnMarketplace: string;
+  isListed: boolean;
+  price: number;
 }
 
 interface AttestationResult {
@@ -86,6 +93,8 @@ interface AttestationResult {
   };
 }
 
+// Enclave Dialog Component
+// Enclave Dialog Component
 const EnclaveDialog = ({ pool, onAttest }: { pool: Pool; onAttest: () => void }) => {
   const [isAttesting, setIsAttesting] = useState(false);
 
@@ -100,41 +109,41 @@ const EnclaveDialog = ({ pool, onAttest }: { pool: Pool; onAttest: () => void })
       <DialogHeader>
         <DialogTitle>Enclave Verification - {pool.name}</DialogTitle>
         <DialogDescription>
-          Verify the integrity and authenticity of the trusted computing environment.
+          Verify the integrity and authenticity of the trusted computing environment
         </DialogDescription>
       </DialogHeader>
 
       <div className="space-y-6">
         <div className="space-y-4">
           <h3 className="text-lg font-semibold">Enclave Measurements</h3>
-
+          
           <div className="grid gap-4">
             <div>
-              <label className="text-sm font-medium">MRENCLAVE (Unique identity of code and data)</label>
+              <Label className="text-sm">MRENCLAVE (Unique identity of code and data)</Label>
               <div className="font-mono text-sm bg-gray-100 p-2 rounded break-all">
-                {pool.enclaveMeasurements.mrenclave}
+                {pool.enclaveMeasurement?.mrenclave}
               </div>
             </div>
-
+            
             <div>
-              <label className="text-sm font-medium">MRSIGNER (Identity of enclave signer)</label>
+              <Label className="text-sm">MRSIGNER (Identity of enclave signer)</Label>
               <div className="font-mono text-sm bg-gray-100 p-2 rounded break-all">
-                {pool.enclaveMeasurements.mrsigner}
+                {pool.enclaveMeasurement?.mrsigner}
               </div>
             </div>
-
+            
             <div className="flex gap-8">
               <div>
-                <label className="text-sm font-medium">ISV_PROD_ID (Product ID)</label>
+                <Label className="text-sm">ISV_PROD_ID (Product ID)</Label>
                 <div className="font-mono text-sm bg-gray-100 p-2 rounded">
-                  {pool.enclaveMeasurements.isvProdId}
+                  {pool.enclaveMeasurement?.isvProdId}
                 </div>
               </div>
-
+              
               <div>
-                <label className="text-sm font-medium">ISV_SVN (Security Version Number)</label>
+                <Label className="text-sm">ISV_SVN (Security Version Number)</Label>
                 <div className="font-mono text-sm bg-gray-100 p-2 rounded">
-                  {pool.enclaveMeasurements.isvSvn}
+                  {pool.enclaveMeasurement?.isvSvn}
                 </div>
               </div>
             </div>
@@ -152,7 +161,7 @@ const EnclaveDialog = ({ pool, onAttest }: { pool: Pool; onAttest: () => void })
               <Code2 className="w-4 h-4" />
               View Attestation Source Code
             </a>
-
+            
             <Button onClick={handleAttest} disabled={isAttesting}>
               <Shield className="w-4 h-4 mr-2" />
               {isAttesting ? 'Running Attestation...' : 'Attest Enclave'}
@@ -162,7 +171,7 @@ const EnclaveDialog = ({ pool, onAttest }: { pool: Pool; onAttest: () => void })
           <div className="text-sm text-gray-500">
             Command that will be executed:<br />
             <code className="font-mono bg-gray-100 p-1 text-xs">
-              ./attest dcap {pool.enclaveMeasurements.mrenclave} {pool.enclaveMeasurements.mrsigner} {pool.enclaveMeasurements.isvProdId} {pool.enclaveMeasurements.isvSvn}
+              ./attest dcap {pool.enclaveMeasurement?.mrenclave} {pool.enclaveMeasurement?.mrsigner} {pool.enclaveMeasurement?.isvProdId} {pool.enclaveMeasurement?.isvSvn}
             </code>
           </div>
         </div>
@@ -172,106 +181,58 @@ const EnclaveDialog = ({ pool, onAttest }: { pool: Pool; onAttest: () => void })
 };
 
 export default function Home() {
-  // Pool states
+  // State declarations
+  const [pools, setPools] = useState<Pool[]>([]);
+  const [drtInstances, setDrtInstances] = useState<DRTInstance[]>([]);
+  const [loading, setLoading] = useState(true);
   const [poolSearch, setPoolSearch] = useState('');
-  const [sortField, setSortField] = useState<'name' | 'description' | 'rights' | 'contractAddress' | null>(null);
+  const [sortField, setSortField] = useState<'name' | 'description' | null>(null);
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc' | null>(null);
-  const [attestationResults, setAttestationResults] = useState<{[key: number]: AttestationResult}>({});
+  const [attestationResults, setAttestationResults] = useState<{[key: string]: AttestationResult}>({});
+  const [apiError, setApiError] = useState<string | null>(null);
+
+  // Data fetching
+  useEffect(() => {
+    async function fetchData() {
+      try {
+        const response = await fetch('/api/user-data');
   
-  // DRT states
-  const [drtSearch, setDrtSearch] = useState('');
-  const [stateFilters, setStateFilters] = useState<string[]>([]);
-  const [marketplaceFilter, setMarketplaceFilter] = useState<string[]>([]);
-  const [sortConfig, setSortConfig] = useState<{
-    key: keyof DRTItem | null;
-    direction: 'asc' | 'desc' | null;
-  }>({ key: null, direction: null });
-
-  const statsItems: StatsItem[] = [
-    {
-      label: "My Data Pool(s)",
-      value: "1"
-    },
-    {
-      label: "Digital Rights Tokens Purchased",
-      value: "1"
-    },
-    {
-      label: "Amount Paid Out",
-      value: "$20"
+        if (!response.ok) {
+          if (response.status === 404) {
+            console.warn("🚨 API endpoint not found (404).");
+            setApiError("API endpoint not found. Please check if the backend is running.");
+          } else if (response.status === 401) {
+            console.warn("🚨 Unauthorized access (401).");
+            setApiError("Unauthorized access. Please log in.");
+          } else {
+            console.error(`❌ API Error ${response.status}: ${response.statusText}`);
+            setApiError(`API Error ${response.status}: ${response.statusText}`);
+          }
+          setPools([]); // Ensures no undefined errors
+          setDrtInstances([]);
+          return;
+        }
+  
+        const data = await response.json();
+  
+        setPools(Array.isArray(data.pools) ? data.pools : []);
+        setDrtInstances(Array.isArray(data.drtInstances) ? data.drtInstances : []);
+        setApiError(null); // Reset errors when API works fine
+  
+      } catch (error) {
+        console.error("❌ Network error or API unavailable:", error);
+        setApiError("Network error. Please check your connection or backend.");
+        setPools([]); 
+        setDrtInstances([]);
+      } finally {
+        setLoading(false);
+      }
     }
-  ];
+  
+    fetchData();
+  }, []);  
 
-  const availableRights: DigitalRight[] = [
-    { 
-      id: '1', 
-      name: 'Append Data Pool', 
-      description: 'Permits adding new data entries to existing pools while maintaining schema requirements'
-    },
-    { 
-      id: '2', 
-      name: 'Execute Median WASM', 
-      description: 'Enables running Rust WebAssembly-based median calculations on data pools'
-    },
-    { 
-      id: '3', 
-      name: 'Execute Median Python', 
-      description: 'Allows execution of Python-based median computations on data pools'
-    }
-  ];
-
-  const ownedPool: Pool = {
-    id: 3,
-    name: "Financial Metrics",
-    description: "Quarterly financial performance data",
-    rights: ['1', '3'],
-    contractAddress: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
-    enclaveMeasurements: {
-      mrenclave: "c5e34826d42766363286055750373441545bc601df37fab07231bca4324db319",
-      mrsigner: "eb33db710373cbf7c6bfa26e6e9d40e261cfd1f5adc38db6599bfe764e9180cc",
-      isvProdId: "0",
-      isvSvn: "0"
-    }
-  };
-
-  const drtItems: DRTItem[] = [
-    {
-      poolName: "Healthcare Metrics",
-      description: "Patient outcome analysis dataset",
-      drt: "1", 
-      state: "active",
-      listedOnMarketplace: "yes"
-    },
-    {
-      poolName: "Retail Analytics",
-      description: "Shopping pattern data collection",
-      drt: "2", 
-      state: "pending",
-      listedOnMarketplace: "no"
-    },
-    {
-      poolName: "Climate Data",
-      description: "Temperature and weather patterns",
-      drt: "3", 
-      state: "active",
-      listedOnMarketplace: "yes"
-    },
-    {
-      poolName: "Supply Chain Metrics",
-      description: "Logistics performance tracking",
-      drt: "1", 
-      state: "active",
-      listedOnMarketplace: "no"
-    },
-    {
-      poolName: "Market Research",
-      description: "Consumer preference analysis",
-      drt: "2",
-      state: "active",
-      listedOnMarketplace: "yes"
-    }
-  ];
-
+  // Helper functions
   const handlePoolSort = (field: typeof sortField) => {
     if (sortField === field) {
       if (sortDirection === 'asc') {
@@ -293,10 +254,6 @@ export default function Home() {
     return <ChevronsUpDown size={16} />;
   };
 
-  const getRightById = (rightId: string): DigitalRight | undefined => {
-    return availableRights.find((right) => right.id === rightId);
-  };
-
   const getSolanaExplorerUrl = (address: string): string => {
     return `https://explorer.solana.com/address/${address}`;
   };
@@ -307,13 +264,40 @@ export default function Home() {
       ...attestationResults,
       [pool.id]: {
         success: true,
-        measurements: pool.enclaveMeasurements
+        measurements: pool.enclaveMeasurement
       }
     });
   };
 
+  // Calculate stats from real data
+  const statsItems = [
+    {
+      label: "My Data Pool(s)",
+      value: Array.isArray(pools) ? pools.length.toString() : "0"
+    },
+    {
+      label: "Digital Rights Tokens Purchased",
+      value: Array.isArray(drtInstances) ? drtInstances.length.toString() : "0"
+    },
+    {
+      label: "Amount Paid Out",
+      value: Array.isArray(drtInstances) && drtInstances.length > 0 
+        ? `$${drtInstances.reduce((sum, drt) => sum + (drt.isListed ? drt.price : 0), 0).toFixed(2)}`
+        : "$0.00"
+    }
+  ];
+
+  // DRT states
+  const [drtSearch, setDrtSearch] = useState('');
+  const [stateFilters, setStateFilters] = useState<string[]>([]);
+  const [marketplaceFilter, setMarketplaceFilter] = useState<string[]>([]);
+  const [sortConfig, setSortConfig] = useState<{
+    key: keyof DRTInstance | null;
+    direction: 'asc' | 'desc' | null;
+  }>({ key: null, direction: null });
+
   // DRT handlers
-  const handleDrtSort = (key: keyof DRTItem) => {
+  const handleDrtSort = (key: keyof DRTInstance) => {
     let direction: 'asc' | 'desc' | null = 'asc';
     
     if (sortConfig.key === key) {
@@ -324,7 +308,7 @@ export default function Home() {
     setSortConfig({ key, direction });
   };
 
-  const getDrtSortIcon = (key: keyof DRTItem) => {
+  const getDrtSortIcon = (key: keyof DRTInstance) => {
     if (sortConfig.key !== key) return <ChevronsUpDown className="h-4 w-4" />;
     if (sortConfig.direction === 'asc') return <ChevronUp className="h-4 w-4" />;
     if (sortConfig.direction === 'desc') return <ChevronDown className="h-4 w-4" />;
@@ -347,39 +331,13 @@ export default function Home() {
     );
   };
 
-  const isPoolVisible = 
-    ownedPool.name.toLowerCase().includes(poolSearch.toLowerCase()) ||
-    ownedPool.description.toLowerCase().includes(poolSearch.toLowerCase()) ||
-    !poolSearch;
-
-  const filteredAndSortedItems = drtItems
-    .filter(item => {
-      const searchTerm = drtSearch.toLowerCase();
-      const matchesSearch = 
-        item.poolName.toLowerCase().includes(searchTerm) ||
-        item.description.toLowerCase().includes(searchTerm) ||
-        item.drt.toLowerCase().includes(searchTerm) ||
-        item.state.toLowerCase().includes(searchTerm) ||
-        item.listedOnMarketplace.toLowerCase().includes(searchTerm);
-
-      const matchesState = stateFilters.length === 0 || stateFilters.includes(item.state);
-      const matchesMarketplace = marketplaceFilter.length === 0 || marketplaceFilter.includes(item.listedOnMarketplace);
-
-      return matchesSearch && matchesState && matchesMarketplace;
-    })
-    .sort((a, b) => {
-      if (!sortConfig.key || !sortConfig.direction) return 0;
-      
-      const aValue = a[sortConfig.key];
-      const bValue = b[sortConfig.key];
-      
-      if (aValue < bValue) return sortConfig.direction === 'asc' ? -1 : 1;
-      if (aValue > bValue) return sortConfig.direction === 'asc' ? 1 : -1;
-      return 0;
-    });
+  if (loading) {
+    return <div className="flex items-center justify-center h-screen">Loading...</div>;
+  }
 
   return (
     <div className="container mx-auto p-4">
+      {/* Stats Cards */}
       <div className="grid grid-cols-3 gap-4">
         {statsItems.map((item, index) => (
           <Card key={index} className="p-4 w-full">
@@ -392,6 +350,12 @@ export default function Home() {
           </Card>
         ))}
       </div>
+
+      {apiError && (
+        <div className="text-center text-red-600 text-lg font-semibold mt-4">
+          {apiError}
+        </div>
+      )}
 
       {/* My Pools Table */}
       <div className="mt-8">
@@ -426,94 +390,91 @@ export default function Home() {
                     {getPoolSortIcon('description')}
                   </div>
                 </TableHead>
-                <TableHead 
-                  className="w-[20%] text-white cursor-pointer"
-                  onClick={() => handlePoolSort('rights')}
-                >
-                  <div className="flex items-center gap-2">
-                    Digital Rights Tokens (DRT)
-                    {getPoolSortIcon('rights')}
-                  </div>
-                </TableHead>
+                <TableHead className="w-[20%] text-white">Digital Rights Tokens (DRT)</TableHead>
                 <TableHead className="w-[35%] text-white">Sources</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {isPoolVisible ? (
-                <TableRow>
-                  <TableCell className="font-medium">{ownedPool.name}</TableCell>
-                  <TableCell>{ownedPool.description}</TableCell>
-                  <TableCell>
-                    <div className="flex flex-wrap gap-2">
-                      {ownedPool.rights.map((rightId) => {
-                        const right = getRightById(rightId);
-                        if (!right) return null;
-                        return (
-                          <TooltipProvider key={rightId}>
+              {pools
+                .filter(pool =>
+                  pool.name.toLowerCase().includes(poolSearch.toLowerCase()) ||
+                  pool.description.toLowerCase().includes(poolSearch.toLowerCase()) ||
+                  !poolSearch
+                )
+                .map((pool) => (
+                  <TableRow key={pool.id}>
+                    <TableCell className="font-medium">{pool.name}</TableCell>
+                    <TableCell>{pool.description}</TableCell>
+                    <TableCell>
+                      <div className="flex flex-wrap gap-2">
+                        {pool.allowedDRTs.map(({ drt }) => (
+                          <TooltipProvider key={drt.id}>
                             <Tooltip>
                               <TooltipTrigger>
                                 <Badge variant="secondary" className="cursor-help">
-                                  {right.name}
+                                  {drt.name}
                                 </Badge>
                               </TooltipTrigger>
                               <TooltipContent>
-                                <p>{right.description}</p>
+                                <p>{drt.description}</p>
                               </TooltipContent>
                             </Tooltip>
                           </TooltipProvider>
-                        );
-                      })}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium whitespace-nowrap">Smart Contract:</span>
-                        <TooltipProvider>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <a
-                                href={getSolanaExplorerUrl(ownedPool.contractAddress)}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="flex items-center gap-1 text-blue-500 hover:text-blue-700"
-                              >
-                                <span>Link</span>
-                                <ExternalLink size={16} />
-                              </a>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                              <p className="font-mono text-xs">{ownedPool.contractAddress}</p>
-                            </TooltipContent>
-                          </Tooltip>
-                        </TooltipProvider>
+                        ))}
                       </div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium whitespace-nowrap">Enclave:</span>
-                        <Dialog>
-                          <DialogTrigger asChild>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className={attestationResults[ownedPool.id]?.success ? 'bg-green-50' : ''}
-                            >
-                              <Shield className="w-4 h-4 mr-2" />
-                              {attestationResults[ownedPool.id]?.success ? 'Verified' : 'Verify Enclave'}
-                            </Button>
-                          </DialogTrigger>
-                          <EnclaveDialog 
-                            pool={ownedPool}
-                            onAttest={() => handleAttestation(ownedPool)}
-                          />
-                        </Dialog>
+                    </TableCell>
+                    <TableCell>
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium whitespace-nowrap">Smart Contract:</span>
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <a
+                                  href={getSolanaExplorerUrl(pool.chainAddress)}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="flex items-center gap-1 text-blue-500 hover:text-blue-700"
+                                >
+                                  <span>Link</span>
+                                  <ExternalLink size={16} />
+                                </a>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                <p className="font-mono text-xs">{pool.chainAddress}</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        </div>
+                        {pool.enclaveMeasurement && (
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium whitespace-nowrap">Enclave:</span>
+                            <Dialog>
+                              <DialogTrigger asChild>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className={attestationResults[pool.id]?.success ? 'bg-green-50' : ''}
+                                >
+                                  <Shield className="w-4 h-4 mr-2" />
+                                  {attestationResults[pool.id]?.success ? 'Verified' : 'Verify Enclave'}
+                                </Button>
+                              </DialogTrigger>
+                              <EnclaveDialog 
+                                pool={pool}
+                                onAttest={() => handleAttestation(pool)}
+                              />
+                            </Dialog>
+                          </div>
+                        )}
                       </div>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ) : (
+                    </TableCell>
+                  </TableRow>
+                ))}
+              {pools.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={4} className="text-center text-gray-500">
-                    No results found.
+                  <TableCell colSpan={4} className="h-24 text-center text-xl font-semibold">
+                    No pools found.
                   </TableCell>
                 </TableRow>
               )}
@@ -521,6 +482,7 @@ export default function Home() {
           </Table>
         </Card>
       </div>
+
       {/* DRT Table */}
       <div className="mt-8">
         <h2 className="text-2xl font-bold text-gray-900 mb-4">My Digital Right Tokens (DRTs)</h2>
@@ -601,29 +563,20 @@ export default function Home() {
                 <TableRow className="hover:bg-gray-800">
                   <TableHead 
                     className="text-white cursor-pointer"
-                    onClick={() => handleDrtSort('poolName')}
+                    onClick={() => handleDrtSort('pool' as keyof DRTInstance)}
                   >
                     <div className="flex items-center gap-2">
                       Pool Name
-                      {getDrtSortIcon('poolName')}
+                      {getDrtSortIcon('pool' as keyof DRTInstance)}
                     </div>
                   </TableHead>
                   <TableHead 
                     className="text-white cursor-pointer"
-                    onClick={() => handleDrtSort('description')}
+                    onClick={() => handleDrtSort('drt' as keyof DRTInstance)}
                   >
                     <div className="flex items-center gap-2">
-                      Description
-                      {getDrtSortIcon('description')}
-                    </div>
-                  </TableHead>
-                  <TableHead 
-                    className="text-white cursor-pointer w-[22%]"
-                    onClick={() => handleDrtSort('drt')}
-                  >
-                    <div className="flex items-center gap-2">
-                      Digital Rights Tokens (DRTs)
-                      {getDrtSortIcon('drt')}
+                      Digital Rights Token
+                      {getDrtSortIcon('drt' as keyof DRTInstance)}
                     </div>
                   </TableHead>
                   <TableHead 
@@ -637,71 +590,95 @@ export default function Home() {
                   </TableHead>
                   <TableHead 
                     className="text-white cursor-pointer"
-                    onClick={() => handleDrtSort('listedOnMarketplace')}
+                    onClick={() => handleDrtSort('isListed')}
                   >
                     <div className="flex items-center gap-2">
                       Listed on Marketplace
-                      {getDrtSortIcon('listedOnMarketplace')}
+                      {getDrtSortIcon('isListed')}
                     </div>
                   </TableHead>
-                  <TableHead className="text-white w-[200px]"></TableHead>
+                  <TableHead 
+                    className="text-white cursor-pointer"
+                    onClick={() => handleDrtSort('price')}
+                  >
+                    <div className="flex items-center gap-2">
+                      Price
+                      {getDrtSortIcon('price')}
+                    </div>
+                  </TableHead>
+                  <TableHead className="text-white w-[200px]">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredAndSortedItems.map((item, index) => (
-                  <TableRow key={index}>
-                    <TableCell className="font-medium">{item.poolName}</TableCell>
-                    <TableCell>{item.description}</TableCell>
-                    <TableCell>
-                      <TooltipProvider>
-                        <Tooltip>
-                          <TooltipTrigger>
-                            <Badge variant="secondary" className="cursor-help">
-                              {getRightById(item.drt)?.name || "Unknown DRT"}
-                            </Badge>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            <p>{getRightById(item.drt)?.description || "No description available"}</p>
-                          </TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
-                    </TableCell>
-                    <TableCell>
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                        item.state === 'active' ? 'bg-green-100 text-green-700' :
-                        item.state === 'pending' ? 'bg-yellow-100 text-yellow-700' :
-                        'bg-gray-100 text-gray-700'
-                      }`}>
-                        {item.state}
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                        item.listedOnMarketplace === 'yes' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'
-                      }`}>
-                        {item.listedOnMarketplace}
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex justify-around gap-2">
-                        <Button 
-                          variant="outline" 
-                          size="sm"
-                          disabled={item.listedOnMarketplace === 'yes'}
-                        >
-                          Sell
-                        </Button>
-                        <Button variant="outline" size="sm">
-                          View results
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {filteredAndSortedItems.length === 0 && (
+                {drtInstances
+                  .filter(item => {
+                    const searchTerm = drtSearch.toLowerCase();
+                    const matchesSearch = 
+                      item.pool.name.toLowerCase().includes(searchTerm) ||
+                      item.pool.description.toLowerCase().includes(searchTerm) ||
+                      item.drt.name.toLowerCase().includes(searchTerm) ||
+                      item.state.toLowerCase().includes(searchTerm);
+
+                    const matchesState = stateFilters.length === 0 || stateFilters.includes(item.state);
+                    const matchesMarketplace = marketplaceFilter.length === 0 || 
+                      marketplaceFilter.includes(item.isListed ? 'yes' : 'no');
+
+                    return matchesSearch && matchesState && matchesMarketplace;
+                  })
+                  .map((item) => (
+                    <TableRow key={item.id}>
+                      <TableCell className="font-medium">{item.pool.name}</TableCell>
+                      <TableCell>
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger>
+                              <Badge variant="secondary" className="cursor-help">
+                                {item.drt.name}
+                              </Badge>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p>{item.drt.description}</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      </TableCell>
+                      <TableCell>
+                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                          item.state === 'active' ? 'bg-green-100 text-green-700' :
+                          item.state === 'pending' ? 'bg-yellow-100 text-yellow-700' :
+                          'bg-gray-100 text-gray-700'
+                        }`}>
+                          {item.state}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                          item.isListed ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'
+                        }`}>
+                          {item.isListed ? 'Yes' : 'No'}
+                        </span>
+                      </TableCell>
+                      <TableCell>{item.price ? `$${item.price.toFixed(2)}` : '-'}</TableCell>
+                      <TableCell>
+                        <div className="flex justify-around gap-2">
+                          <Button 
+                            variant="outline" 
+                            size="sm"
+                            disabled={item.isListed || item.state === 'pending' || item.state === 'completed'}
+                          >
+                            Sell
+                          </Button>
+                          <Button variant="outline" size="sm">
+                            View results
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                {drtInstances.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={6} className="h-24 text-center">
-                      No results found.
+                    <TableCell colSpan={6} className="h-24 text-center text-xl font-semibold">
+                      No DRTs found.
                     </TableCell>
                   </TableRow>
                 )}

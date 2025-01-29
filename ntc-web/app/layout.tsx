@@ -18,24 +18,23 @@
 
 import { Inter } from 'next/font/google'
 import './globals.css'
-import { ClerkProvider } from '@clerk/nextjs'
-import AuthLayout from './AuthLayout'
+import { ClerkProvider, SignedIn, SignedOut, RedirectToSignIn } from '@clerk/nextjs'
+import LayoutClient from './LayoutClient'
 
 const inter = Inter({ subsets: ['latin'] })
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <ClerkProvider>
       <html lang="en" suppressHydrationWarning>
         <body className={inter.className} suppressHydrationWarning>
           <div id="app-root">
-            <AuthLayout>
-              {children}
-            </AuthLayout>
+            <SignedIn>
+              <LayoutClient>{children}</LayoutClient>
+            </SignedIn>
+            <SignedOut>
+              <RedirectToSignIn />
+            </SignedOut>
           </div>
         </body>
       </html>
