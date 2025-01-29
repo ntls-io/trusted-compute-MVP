@@ -32,6 +32,9 @@ This repository is organized into several sub-directories containing components 
 ### Execution Service & Enclave (/SGX-MVP)
 Secure WASM binary execution environment with data sealing/unsealing capabilities and oracle integration.
 
+### Front-end Next.js (/NTC-WEB)
+Next.js-based front-end for managing and interacting with Nautilus Trusted Compute.
+
 ### Smart Contracts (/TBD)
 TBD blockchain integration for trusted compute verification and orchestration.
 
