@@ -16,28 +16,40 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-import { Inter } from 'next/font/google'
-import './globals.css'
-import { ClerkProvider, SignedIn, SignedOut, RedirectToSignIn } from '@clerk/nextjs'
-import LayoutClient from './LayoutClient'
+"use client";
 
-const inter = Inter({ subsets: ['latin'] })
+import { Inter } from 'next/font/google';
+import './globals.css';
+import { ClerkProvider, SignedIn, SignedOut, RedirectToSignIn } from '@clerk/nextjs';
+import LayoutClient from './LayoutClient';
+import { usePathname } from 'next/navigation';
+
+const inter = Inter({ subsets: ['latin'] });
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname() ?? ""; // Ensure pathname is always a string
+  const isAuthPage = pathname.startsWith('/sign-in') || pathname.startsWith('/sign-up');
+
   return (
     <ClerkProvider>
       <html lang="en" suppressHydrationWarning>
         <body className={inter.className} suppressHydrationWarning>
           <div id="app-root">
-            <SignedIn>
-              <LayoutClient>{children}</LayoutClient>
-            </SignedIn>
-            <SignedOut>
-              <RedirectToSignIn />
-            </SignedOut>
+            {isAuthPage ? (
+              children
+            ) : (
+              <>
+                <SignedIn>
+                  <LayoutClient>{children}</LayoutClient>
+                </SignedIn>
+                <SignedOut>
+                  <RedirectToSignIn />
+                </SignedOut>
+              </>
+            )}
           </div>
         </body>
       </html>
     </ClerkProvider>
-  )
+  );
 }

@@ -18,6 +18,7 @@
 
 'use client'
 
+import React from 'react';
 import { useState, useEffect } from 'react'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button"
@@ -29,6 +30,8 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import FilePicker from '@/components/FilePicker';
 import { SchemaPreview, validateJsonSchema } from '@/components/schemaUtils';
 import PoolsTable from './PoolsTable'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { Copy, Check } from 'lucide-react'
 
 // Common styles
 const buttonBaseClass = "bg-gray-900 text-white hover:bg-gray-800"
@@ -47,6 +50,116 @@ interface DigitalRight {
   githubUrl: string | null;
   hash: string | null;
 }
+
+interface HashDisplayProps {
+  hash: string | null;
+}
+
+interface DigitalRightsTableProps {
+  digitalRights: DigitalRight[];
+  selectedRights: string[];
+  setSelectedRights: (rights: string[]) => void;
+}
+
+const HashDisplay: React.FC<HashDisplayProps> = ({ hash }) => {
+  const [copied, setCopied] = useState(false);
+  
+  if (!hash) return "-";
+
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(hash);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const truncatedHash = `${hash.slice(0, 4)}....${hash.slice(-4)}`;
+
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div className="font-mono text-sm bg-gray-100 p-2 rounded-md overflow-x-auto whitespace-nowrap flex items-center justify-between group">
+            <span>{truncatedHash}</span>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="opacity-0 group-hover:opacity-100 transition-opacity ml-2 h-6 w-6 p-0"
+              onClick={handleCopy}
+            >
+              {copied ? (
+                <Check className="h-4 w-4 text-green-500" />
+              ) : (
+                <Copy className="h-4 w-4" />
+              )}
+            </Button>
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="max-w-md p-2">
+          <p className="font-mono text-sm break-all">{hash}</p>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+};
+
+const DigitalRightsTable: React.FC<DigitalRightsTableProps> = ({ 
+  digitalRights, 
+  selectedRights, 
+  setSelectedRights 
+}) => {
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead className="w-1/6">Name</TableHead>
+          <TableHead className="w-2/6">Description</TableHead>
+          <TableHead className="w-1/6">GitHub</TableHead>
+          <TableHead className="w-1/6">Expected SHA256 Hash</TableHead>
+          <TableHead className="w-24">Select</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {digitalRights.map((right) => (
+          <TableRow key={right.id}>
+            <TableCell className="font-medium">{right.name}</TableCell>
+            <TableCell>{right.description}</TableCell>
+            <TableCell>
+              {right.githubUrl ? (
+                <a 
+                  href={right.githubUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-blue-600 hover:text-blue-800 underline"
+                >
+                  View Source
+                </a>
+              ) : (
+                "-"
+              )}
+            </TableCell>
+            <TableCell>
+              <HashDisplay hash={right.hash} />
+            </TableCell>
+            <TableCell>
+              <Checkbox
+                checked={selectedRights.includes(right.id)}
+                onCheckedChange={(checked) => {
+                  if (checked) {
+                    setSelectedRights([...selectedRights, right.id])
+                  } else {
+                    setSelectedRights(selectedRights.filter(id => id !== right.id))
+                  }
+                }}
+              />
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  );
+};
+
+export { HashDisplay, DigitalRightsTable };
 
 // Step 1: File Selection Component
 function FileSelectionStep({ isActive, onNext }: StepProps) {
@@ -196,60 +309,11 @@ function DigitalRightsStep({ isActive, onNext, onPrev }: StepProps) {
       <h2 className="text-xl font-semibold">Assign Digital Rights</h2>
 
       <Card>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-1/6">Name</TableHead>
-              <TableHead className="w-2/6">Description</TableHead>
-              <TableHead className="w-1/6">GitHub</TableHead>
-              <TableHead className="w-1/6">Expected SHA256 Hash</TableHead>
-              <TableHead className="w-24">Select</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {digitalRights.map((right) => (
-              <TableRow key={right.id}>
-                <TableCell className="font-medium">{right.name}</TableCell>
-                <TableCell>{right.description}</TableCell>
-                <TableCell>
-                  {right.githubUrl ? (
-                    <a 
-                      href={right.githubUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-blue-600 hover:text-blue-800 underline"
-                    >
-                      View Source
-                    </a>
-                  ) : (
-                    "-"
-                  )}
-                </TableCell>
-                <TableCell>
-                  {right.hash ? (
-                    <div className="font-mono text-sm bg-gray-100 p-2 rounded-md overflow-x-auto whitespace-nowrap">
-                      {right.hash}
-                    </div>
-                  ) : (
-                    "-"
-                  )}
-                </TableCell>
-                <TableCell>
-                  <Checkbox
-                    checked={selectedRights.includes(right.id)}
-                    onCheckedChange={(checked) => {
-                      if (checked) {
-                        setSelectedRights([...selectedRights, right.id])
-                      } else {
-                        setSelectedRights(selectedRights.filter(id => id !== right.id))
-                      }
-                    }}
-                  />
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+        <DigitalRightsTable 
+          digitalRights={digitalRights}
+          selectedRights={selectedRights}
+          setSelectedRights={setSelectedRights}
+        />
       </Card>
 
       <div className="flex justify-between">

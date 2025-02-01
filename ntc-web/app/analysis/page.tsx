@@ -18,7 +18,8 @@
 
 'use client'
 
-import { useState } from 'react'
+import React from 'react'
+import { useEffect, useState } from 'react'
 import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -30,60 +31,99 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { ChevronDown, ChevronUp, ChevronsUpDown } from "lucide-react"
+import { ChevronDown, ChevronUp, ChevronsUpDown, ExternalLink } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 
-interface AnalysisItem {
-  name: string
-  description: string
+interface DRTInstance {
+  id: string
+  mintAddress: string
   state: string
-  listedOnMarketplace: string
+  isListed: boolean
+  price: number | null
+  drt: {
+    id: string
+    name: string
+    description: string
+    githubUrl: string | null
+    isActive: boolean
+  }
+  pool: {
+    id: string
+    name: string
+    description: string
+    chainAddress: string
+    schemaDefinition: any
+  }
+  owner: {
+    id: string
+    clerkId: string
+    walletAddress: string
+  }
+}
+
+interface Stats {
+  totalDRTs: number
+  activeDRTs: number
+  listedDRTs: number
+  totalValue: number
 }
 
 export default function Analysis() {
   const [search, setSearch] = useState('')
   const [stateFilters, setStateFilters] = useState<string[]>([])
   const [marketplaceFilter, setMarketplaceFilter] = useState<string[]>([])
+  const [drtInstances, setDrtInstances] = useState<DRTInstance[]>([])
+  const [stats, setStats] = useState<Stats>({
+    totalDRTs: 0,
+    activeDRTs: 0,
+    listedDRTs: 0,
+    totalValue: 0
+  })
+  const [loading, setLoading] = useState(true)
+  const [apiError, setApiError] = useState<string | null>(null)
   const [sortConfig, setSortConfig] = useState<{
-    key: keyof AnalysisItem | null;
-    direction: 'asc' | 'desc' | null;
+    key: keyof DRTInstance | null
+    direction: 'asc' | 'desc' | null
   }>({ key: null, direction: null })
 
-  // Sample data
-  const items: AnalysisItem[] = [
-    {
-      name: "Market Analysis 2024",
-      description: "Consumer behavior trends Q1",
-      state: "active",
-      listedOnMarketplace: "yes"
-    },
-    {
-      name: "Financial Metrics",
-      description: "Revenue analysis by region",
-      state: "completed",
-      listedOnMarketplace: "no"
-    },
-    {
-      name: "Customer Demographics",
-      description: "Age distribution study",
-      state: "active",
-      listedOnMarketplace: "yes"
-    },
-    {
-      name: "Sales Performance",
-      description: "Monthly sales metrics",
-      state: "pending",
-      listedOnMarketplace: "no"
-    },
-    {
-      name: "Product Analytics",
-      description: "Usage patterns Q4 2023",
-      state: "active",
-      listedOnMarketplace: "yes"
+  // Fetch data from API
+  useEffect(() => {
+    async function fetchData() {
+      try {
+        const response = await fetch('/api/analysis')
+        
+        if (!response.ok) {
+          if (response.status === 404) {
+            setApiError("API endpoint not found. Please check if the backend is running.")
+          } else if (response.status === 401) {
+            setApiError("Unauthorized access. Please log in.")
+          } else {
+            setApiError(`API Error ${response.status}: ${response.statusText}`)
+          }
+          setDrtInstances([])
+          return
+        }
+
+        const data = await response.json()
+        setDrtInstances(Array.isArray(data.drtInstances) ? data.drtInstances : [])
+        setStats(data.stats)
+        setApiError(null)
+
+      } catch (error) {
+        console.error("Network error or API unavailable:", error)
+        setApiError("Network error. Please check your connection or backend.")
+        setDrtInstances([])
+      } finally {
+        setLoading(false)
+      }
     }
-  ]
+
+    fetchData()
+  }, [])
 
   // Handle sort
-  const handleSort = (key: keyof AnalysisItem) => {
+  const handleSort = (key: keyof DRTInstance) => {
     let direction: 'asc' | 'desc' | null = 'asc'
     
     if (sortConfig.key === key) {
@@ -95,38 +135,68 @@ export default function Analysis() {
   }
 
   // Get sort icon
-  const getSortIcon = (key: keyof AnalysisItem) => {
+  const getSortIcon = (key: keyof DRTInstance) => {
     if (sortConfig.key !== key) return <ChevronsUpDown className="h-4 w-4" />
     if (sortConfig.direction === 'asc') return <ChevronUp className="h-4 w-4" />
     if (sortConfig.direction === 'desc') return <ChevronDown className="h-4 w-4" />
     return <ChevronsUpDown className="h-4 w-4" />
   }
 
-  // Filter and sort items
-  const filteredAndSortedItems = items
-    .filter(item => {
+  const processedData = (() => {
+    // First filter
+    const filtered = drtInstances.filter(item => {
       const searchTerm = search.toLowerCase()
       const matchesSearch = 
-        item.name.toLowerCase().includes(searchTerm) ||
-        item.description.toLowerCase().includes(searchTerm) ||
+        item.drt.name.toLowerCase().includes(searchTerm) ||
+        item.drt.description.toLowerCase().includes(searchTerm) ||
+        item.pool.name.toLowerCase().includes(searchTerm) ||
         item.state.toLowerCase().includes(searchTerm) ||
-        item.listedOnMarketplace.toLowerCase().includes(searchTerm)
+        item.owner.walletAddress.toLowerCase().includes(searchTerm)
 
       const matchesState = stateFilters.length === 0 || stateFilters.includes(item.state)
-      const matchesMarketplace = marketplaceFilter.length === 0 || marketplaceFilter.includes(item.listedOnMarketplace)
+      const matchesMarketplace = marketplaceFilter.length === 0 || 
+        marketplaceFilter.includes(item.isListed ? 'yes' : 'no')
 
       return matchesSearch && matchesState && matchesMarketplace
     })
-    .sort((a, b) => {
+
+    // Then sort
+    const sorted = [...filtered].sort((a, b) => {
       if (!sortConfig.key || !sortConfig.direction) return 0
       
-      const aValue = a[sortConfig.key]
-      const bValue = b[sortConfig.key]
+      // Helper function to safely get nested values
+      const getValue = (item: DRTInstance, key: keyof DRTInstance) => {
+        if (key === 'drt') return item.drt.name
+        if (key === 'pool') return item.pool.name
+        if (key === 'owner') return item.owner.walletAddress
+        return item[key]
+      }
+
+      const aValue = getValue(a, sortConfig.key)
+      const bValue = getValue(b, sortConfig.key)
+      
+      // Handle null/undefined values
+      if (aValue === null || aValue === undefined) return 1
+      if (bValue === null || bValue === undefined) return -1
       
       if (aValue < bValue) return sortConfig.direction === 'asc' ? -1 : 1
       if (aValue > bValue) return sortConfig.direction === 'asc' ? 1 : -1
       return 0
     })
+
+    // Finally group
+    return sorted.reduce((acc, item) => {
+      const poolId = item.pool.id
+      if (!acc[poolId]) {
+        acc[poolId] = {
+          pool: item.pool,
+          drts: []
+        }
+      }
+      acc[poolId].drts.push(item)
+      return acc
+    }, {} as Record<string, { pool: DRTInstance['pool'], drts: DRTInstance[] }>)
+  })()
 
   // Toggle filter functions
   const toggleStateFilter = (state: string) => {
@@ -145,9 +215,60 @@ export default function Analysis() {
     )
   }
 
+  // Get Solana explorer URL
+  const getSolanaExplorerUrl = (address: string): string => {
+    return `https://explorer.solana.com/address/${address}`
+  }
+
+  if (loading) {
+    return <div className="flex items-center justify-center h-screen">Loading...</div>
+  }
+
   return (
-    <div className="space-y-6">
+    <div className="container mx-auto p-4 space-y-6">
       <h1 className="text-4xl font-bold text-gray-900">Analysis</h1>
+      
+      {/* Stats Cards */}
+      <div className="grid grid-cols-4 gap-4">
+        <Card className="p-4">
+          <div className="flex justify-between items-center">
+            <span className="text-gray-700">Total DRTs</span>
+            <span className="bg-gray-800 text-white px-3 py-1 rounded-full text-sm">
+              {stats.totalDRTs}
+            </span>
+          </div>
+        </Card>
+        <Card className="p-4">
+          <div className="flex justify-between items-center">
+            <span className="text-gray-700">Active DRTs</span>
+            <span className="bg-green-600 text-white px-3 py-1 rounded-full text-sm">
+              {stats.activeDRTs}
+            </span>
+          </div>
+        </Card>
+        <Card className="p-4">
+          <div className="flex justify-between items-center">
+            <span className="text-gray-700">Listed DRTs</span>
+            <span className="bg-blue-600 text-white px-3 py-1 rounded-full text-sm">
+              {stats.listedDRTs}
+            </span>
+          </div>
+        </Card>
+        <Card className="p-4">
+          <div className="flex justify-between items-center">
+            <span className="text-gray-700">Total Value</span>
+            <span className="bg-purple-600 text-white px-3 py-1 rounded-full text-sm">
+              ${stats.totalValue.toFixed(2)}
+            </span>
+          </div>
+        </Card>
+      </div>
+
+      {apiError && (
+        <div className="text-center text-red-600 text-lg font-semibold">
+          {apiError}
+        </div>
+      )}
       
       <Card>
         {/* Search and Filters */}
@@ -155,7 +276,7 @@ export default function Analysis() {
           <div className="flex items-center gap-4">
             <Input
               type="text"
-              placeholder="Search analysis..."
+              placeholder="Search by pool name, state, wallet..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="max-w-xs bg-white"
@@ -224,92 +345,124 @@ export default function Analysis() {
         {/* Table */}
         <div className="w-full">
           <Table>
-            <TableHeader className="bg-gray-800 [&_tr]:border-0">
-              <TableRow className="hover:bg-gray-800">
-                <TableHead 
-                  className="text-white cursor-pointer"
-                  onClick={() => handleSort('name')}
-                >
-                  <div className="flex items-center gap-2">
-                    Name
-                    {getSortIcon('name')}
-                  </div>
-                </TableHead>
-                <TableHead 
-                  className="text-white cursor-pointer"
-                  onClick={() => handleSort('description')}
-                >
-                  <div className="flex items-center gap-2">
-                    Description
-                    {getSortIcon('description')}
-                  </div>
-                </TableHead>
-                <TableHead 
-                  className="text-white cursor-pointer"
-                  onClick={() => handleSort('state')}
-                >
-                  <div className="flex items-center gap-2">
-                    State
-                    {getSortIcon('state')}
-                  </div>
-                </TableHead>
-                <TableHead 
-                  className="text-white cursor-pointer"
-                  onClick={() => handleSort('listedOnMarketplace')}
-                >
-                  <div className="flex items-center gap-2">
-                    Listed on marketplace
-                    {getSortIcon('listedOnMarketplace')}
-                  </div>
-                </TableHead>
-                <TableHead className="text-white w-[200px]"></TableHead>
+          <TableHeader className="bg-gray-800 [&_tr]:border-0">
+            <TableRow className="hover:bg-gray-800">
+              <TableHead 
+                className="text-white cursor-pointer"
+                onClick={() => handleSort('drt' as keyof DRTInstance)}
+              >
+                <div className="flex items-center gap-2">
+                  Digital Rights Token
+                  {getSortIcon('drt' as keyof DRTInstance)}
+                </div>
+              </TableHead>
+              <TableHead 
+                className="text-white cursor-pointer"
+                onClick={() => handleSort('state')}
+              >
+                <div className="flex items-center gap-2">
+                  State
+                  {getSortIcon('state')}
+                </div>
+              </TableHead>
+              <TableHead 
+                className="text-white cursor-pointer"
+                onClick={() => handleSort('isListed')}
+              >
+                <div className="flex items-center gap-2">
+                  Listed
+                  {getSortIcon('isListed')}
+                </div>
+              </TableHead>
+              <TableHead 
+                className="text-white cursor-pointer"
+                onClick={() => handleSort('owner' as keyof DRTInstance)}
+              >
+                <div className="flex items-center gap-2">
+                  Owner
+                  {getSortIcon('owner' as keyof DRTInstance)}
+                </div>
+              </TableHead>
+              <TableHead 
+                className="text-white cursor-pointer"
+                onClick={() => handleSort('price')}
+              >
+                <div className="flex items-center gap-2">
+                  Price
+                  {getSortIcon('price')}
+                </div>
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {Object.entries(processedData).map(([poolId, { pool, drts }]) => (
+              <React.Fragment key={poolId}>
+                <TableRow className="bg-gray-50">
+                  <TableCell colSpan={5} className="font-bold">
+                    {pool.name}
+                  </TableCell>
+                </TableRow>
+                {drts.map((item) => (
+                  <TableRow key={item.id}>
+                    <TableCell className="pl-8">
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger>
+                            <Badge variant="secondary" className="cursor-help">
+                              {item.drt.name}
+                            </Badge>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p>{item.drt.description}</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    </TableCell>
+                    <TableCell>
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                        item.state === 'active' ? 'bg-green-100 text-green-700' :
+                        item.state === 'pending' ? 'bg-yellow-100 text-yellow-700' :
+                        'bg-gray-100 text-gray-700'
+                      }`}>
+                        {item.state}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                        item.isListed ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'
+                      }`}>
+                        {item.isListed ? 'Yes' : 'No'}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger>
+                            <span className="font-mono text-sm">
+                              {item.owner.walletAddress.slice(0, 4)}...{item.owner.walletAddress.slice(-4)}
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p className="font-mono text-xs">{item.owner.walletAddress}</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    </TableCell>
+                    <TableCell>
+                      {item.price ? `$${item.price.toFixed(2)}` : '-'}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </React.Fragment>
+            ))}
+            {Object.keys(processedData).length === 0 && (
+              <TableRow>
+                <TableCell colSpan={5} className="h-24 text-center">
+                  No results found.
+                </TableCell>
               </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredAndSortedItems.map((item, index) => (
-                <TableRow key={index}>
-                  <TableCell className="font-medium">{item.name}</TableCell>
-                  <TableCell>{item.description}</TableCell>
-                  <TableCell>
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                      item.state === 'active' ? 'bg-green-100 text-green-700' :
-                      item.state === 'pending' ? 'bg-yellow-100 text-yellow-700' :
-                      'bg-gray-100 text-gray-700'
-                    }`}>
-                      {item.state}
-                    </span>
-                  </TableCell>
-                  <TableCell>
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                      item.listedOnMarketplace === 'yes' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'
-                    }`}>
-                      {item.listedOnMarketplace}
-                    </span>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex justify-around gap-2">
-                      <Button 
-                        variant="outline" 
-                        size="sm"
-                        disabled={item.listedOnMarketplace === 'yes'}
-                      >
-                        Sell
-                      </Button>
-                      <Button variant="outline" size="sm">
-                        View results
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-              {filteredAndSortedItems.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={5} className="h-24 text-center">
-                    No results found.
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
+            )}
+          </TableBody>
           </Table>
         </div>
       </Card>
