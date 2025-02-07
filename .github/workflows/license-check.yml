@@ -62,8 +62,8 @@ jobs:
           MISSING_LICENSE=0
 
           for file in $FILES; do
-            # Skip JSON files
-            if [[ $file =~ \.json$ ]]; then
+            # Skip JSON, Cargo.lock, and yarn.lock files
+            if [[ $file =~ \.json$ || $file == "Cargo.lock" || $file == "yarn.lock" ]]; then
               continue
             fi
 
