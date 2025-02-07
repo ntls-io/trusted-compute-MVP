@@ -16,11 +16,9 @@
 
 #![allow(unexpected_cfgs)]
 use anchor_lang::prelude::*;
-use anchor_spl::{
-    token::{self, MintTo, Burn, Transfer, Token},
-};
+use anchor_spl::token::{self, MintTo, Burn, Transfer, Token};
 
-declare_id!("CiHJcJofM1k3iEKh7sHtzWY71HJhzP2rqw6Z6i9h9dwP");
+declare_id!("9KK93rWbXofyiitr5ECgbDpGeA1HLTGd6txXz5xsL8CY");
 
 /// A wrapper type for allowed DRT strings.
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
@@ -36,15 +34,14 @@ pub mod drt_manager {
     ///
     /// The client is responsible for creating the mints and associated token accounts.
     /// This instruction stores the pool state—including an allowed list of DRT types—and mints
-    /// the full supply of “ownership” tokens to the owner’s token account and the full supply
-    /// of “append” tokens to the pool’s append token account.
+    /// the full supply of “ownership” tokens to the owner’s token account.
     ///
-    /// Allowed DRT types include: "append", "w_compute", "py_compute", "add_data".
+    /// Allowed DRT types include: "append", "w_compute", "py_compute".
+    /// (DRTs are optional and can be initialized later.)
     pub fn initialize_pool(
         ctx: Context<InitializePool>,
         pool_name: String,
         ownership_supply: u64,
-        append_supply: u64,
         allowed_drts: Vec<String>,
     ) -> Result<()> {
         let pool = &mut ctx.accounts.pool;
@@ -52,13 +49,12 @@ pub mod drt_manager {
         pool.owner = ctx.accounts.owner.key();
         pool.fee_accumulator = 0;
         pool.ownership_mint = ctx.accounts.ownership_mint.key();
-        pool.append_mint = ctx.accounts.append_mint.key();
+        // The append DRT is not auto‑initialized.
+        pool.append_mint = None;
         pool.ownership_supply = ownership_supply;
-        pool.append_supply = append_supply;
+        pool.append_supply = None;
         pool.w_compute_median_mint = None;
         pool.py_compute_median_mint = None;
-        pool.add_data_mint = None;
-        // Convert Vec<String> into Vec<DrtType> for proper serialization.
         pool.allowed_drts = allowed_drts.into_iter().map(|s| DrtType { value: s }).collect();
 
         // Mint the full supply of ownership tokens into the owner’s token account.
@@ -73,8 +69,21 @@ pub mod drt_manager {
             ),
             ownership_supply,
         )?;
+        Ok(())
+    }
 
-        // Mint the full supply of append tokens into the pool’s append token account.
+    /// Initialize the append DRT.
+    pub fn initialize_append_drt(
+        ctx: Context<InitializeAppendDRT>,
+        drt_supply: u64,
+    ) -> Result<()> {
+        let pool = &mut ctx.accounts.pool;
+        // Ensure that "append" is allowed for this pool.
+        if !pool.allowed_drts.iter().any(|d| d.value == "append") {
+            return Err(ErrorCode::DRTNotAllowed.into());
+        }
+        pool.append_mint = Some(ctx.accounts.append_mint.key());
+        pool.append_supply = Some(drt_supply);
         token::mint_to(
             CpiContext::new(
                 ctx.accounts.token_program.to_account_info(),
@@ -84,75 +93,8 @@ pub mod drt_manager {
                     authority: ctx.accounts.owner.to_account_info(),
                 },
             ),
-            append_supply,
+            drt_supply,
         )?;
-        Ok(())
-    }
-
-    /// Buy an AppendDRT.
-    pub fn buy_append_drt(ctx: Context<BuyAppendDRT>, fee: u64) -> Result<()> {
-        let pool = &mut ctx.accounts.pool;
-        pool.fee_accumulator = pool.fee_accumulator
-            .checked_add(fee)
-            .ok_or(ErrorCode::Overflow)?;
-        token::transfer(
-            CpiContext::new(
-                ctx.accounts.token_program.to_account_info(),
-                Transfer {
-                    from: ctx.accounts.pool_append_token_account.to_account_info(),
-                    to: ctx.accounts.user_append_token_account.to_account_info(),
-                    authority: ctx.accounts.owner.to_account_info(),
-                },
-            ),
-            1,
-        )?;
-        Ok(())
-    }
-
-    /// Redeem an AppendDRT.
-    pub fn redeem_append_drt(ctx: Context<RedeemAppendDRT>) -> Result<()> {
-        // Burn one append token.
-        token::burn(
-            CpiContext::new(
-                ctx.accounts.token_program.to_account_info(),
-                Burn {
-                    mint: ctx.accounts.append_mint.to_account_info(),
-                    from: ctx.accounts.user_append_token_account.to_account_info(),
-                    authority: ctx.accounts.user.to_account_info(),
-                },
-            ),
-            1,
-        )?;
-        let pool = &ctx.accounts.pool;
-        let reward = pool.ownership_supply / pool.append_supply;
-        token::mint_to(
-            CpiContext::new(
-                ctx.accounts.token_program.to_account_info(),
-                MintTo {
-                    mint: ctx.accounts.ownership_mint.to_account_info(),
-                    to: ctx.accounts.user_ownership_token_account.to_account_info(),
-                    authority: ctx.accounts.owner.to_account_info(),
-                },
-            ),
-            reward,
-        )?;
-        Ok(())
-    }
-
-    /// Redeem a generic DRT.
-    pub fn redeem_drt(ctx: Context<RedeemDRT>) -> Result<()> {
-        token::burn(
-            CpiContext::new(
-                ctx.accounts.token_program.to_account_info(),
-                Burn {
-                    mint: ctx.accounts.drt_mint.to_account_info(),
-                    from: ctx.accounts.user_drt_token_account.to_account_info(),
-                    authority: ctx.accounts.user.to_account_info(),
-                },
-            ),
-            1,
-        )?;
-        msg!("DRT redeemed by: {}", ctx.accounts.user.key());
         Ok(())
     }
 
@@ -162,6 +104,9 @@ pub mod drt_manager {
         drt_supply: u64,
     ) -> Result<()> {
         let pool = &mut ctx.accounts.pool;
+        if !pool.allowed_drts.iter().any(|d| d.value == "w_compute") {
+            return Err(ErrorCode::DRTNotAllowed.into());
+        }
         pool.w_compute_median_mint = Some(ctx.accounts.w_compute_median_mint.key());
         token::mint_to(
             CpiContext::new(
@@ -183,6 +128,9 @@ pub mod drt_manager {
         drt_supply: u64,
     ) -> Result<()> {
         let pool = &mut ctx.accounts.pool;
+        if !pool.allowed_drts.iter().any(|d| d.value == "py_compute") {
+            return Err(ErrorCode::DRTNotAllowed.into());
+        }
         pool.py_compute_median_mint = Some(ctx.accounts.py_compute_median_mint.key());
         token::mint_to(
             CpiContext::new(
@@ -198,23 +146,60 @@ pub mod drt_manager {
         Ok(())
     }
 
-    /// Initialize the new addDataDRT.
-    pub fn initialize_add_data_drt(
-        ctx: Context<InitializeAddDataDRT>,
-        drt_supply: u64,
-    ) -> Result<()> {
+    /// Buy an AppendDRT.
+    pub fn buy_append_drt(ctx: Context<BuyAppendDRT>, fee: u64) -> Result<()> {
         let pool = &mut ctx.accounts.pool;
-        pool.add_data_mint = Some(ctx.accounts.add_data_mint.key());
+        if pool.append_mint.is_none() {
+            return Err(ErrorCode::DRTNotInitialized.into());
+        }
+        pool.fee_accumulator = pool.fee_accumulator
+            .checked_add(fee)
+            .ok_or(ErrorCode::Overflow)?;
+        token::transfer(
+            CpiContext::new(
+                ctx.accounts.token_program.to_account_info(),
+                Transfer {
+                    from: ctx.accounts.pool_append_token_account.to_account_info(),
+                    to: ctx.accounts.user_append_token_account.to_account_info(),
+                    authority: ctx.accounts.owner.to_account_info(),
+                },
+            ),
+            1,
+        )?;
+        Ok(())
+    }
+
+    /// Redeem an AppendDRT.
+    pub fn redeem_append_drt(ctx: Context<RedeemAppendDRT>) -> Result<()> {
+        if ctx.accounts.pool.append_mint.is_none() {
+            return Err(ErrorCode::DRTNotInitialized.into());
+        }
+        token::burn(
+            CpiContext::new(
+                ctx.accounts.token_program.to_account_info(),
+                Burn {
+                    mint: ctx.accounts.append_mint.to_account_info(),
+                    from: ctx.accounts.user_append_token_account.to_account_info(),
+                    authority: ctx.accounts.user.to_account_info(),
+                },
+            ),
+            1,
+        )?;
+        let pool = &ctx.accounts.pool;
+        let append_supply = pool
+            .append_supply
+            .ok_or(ErrorCode::DRTNotInitialized)?;
+        let reward = pool.ownership_supply / append_supply;
         token::mint_to(
             CpiContext::new(
                 ctx.accounts.token_program.to_account_info(),
                 MintTo {
-                    mint: ctx.accounts.add_data_mint.to_account_info(),
-                    to: ctx.accounts.pool_add_data_token_account.to_account_info(),
+                    mint: ctx.accounts.ownership_mint.to_account_info(),
+                    to: ctx.accounts.user_ownership_token_account.to_account_info(),
                     authority: ctx.accounts.owner.to_account_info(),
                 },
             ),
-            drt_supply,
+            reward,
         )?;
         Ok(())
     }
@@ -222,6 +207,9 @@ pub mod drt_manager {
     /// Buy a wComputeMedianDRT.
     pub fn buy_w_compute_median_drt(ctx: Context<BuyWComputeMedianDRT>, fee: u64) -> Result<()> {
         let pool = &mut ctx.accounts.pool;
+        if pool.w_compute_median_mint.is_none() {
+            return Err(ErrorCode::DRTNotInitialized.into());
+        }
         pool.fee_accumulator = pool.fee_accumulator
             .checked_add(fee)
             .ok_or(ErrorCode::Overflow)?;
@@ -239,9 +227,32 @@ pub mod drt_manager {
         Ok(())
     }
 
+    /// Redeem a wComputeMedianDRT.
+    pub fn redeem_w_compute_median_drt(ctx: Context<RedeemWComputeMedianDRT>) -> Result<()> {
+        if ctx.accounts.pool.w_compute_median_mint.is_none() {
+            return Err(ErrorCode::DRTNotInitialized.into());
+        }
+        token::burn(
+            CpiContext::new(
+                ctx.accounts.token_program.to_account_info(),
+                Burn {
+                    mint: ctx.accounts.w_compute_median_mint.to_account_info(),
+                    from: ctx.accounts.user_w_compute_median_token_account.to_account_info(),
+                    authority: ctx.accounts.user.to_account_info(),
+                },
+            ),
+            1,
+        )?;
+        msg!("wComputeMedian DRT redeemed by: {}", ctx.accounts.user.key());
+        Ok(())
+    }
+
     /// Buy a pyComputeMedianDRT.
     pub fn buy_py_compute_median_drt(ctx: Context<BuyPyComputeMedianDRT>, fee: u64) -> Result<()> {
         let pool = &mut ctx.accounts.pool;
+        if pool.py_compute_median_mint.is_none() {
+            return Err(ErrorCode::DRTNotInitialized.into());
+        }
         pool.fee_accumulator = pool.fee_accumulator
             .checked_add(fee)
             .ok_or(ErrorCode::Overflow)?;
@@ -259,49 +270,11 @@ pub mod drt_manager {
         Ok(())
     }
 
-    /// Buy an addDataDRT.
-    pub fn buy_add_data_drt(ctx: Context<BuyAddDataDRT>, fee: u64) -> Result<()> {
-        let pool = &mut ctx.accounts.pool;
-        pool.fee_accumulator = pool.fee_accumulator
-            .checked_add(fee)
-            .ok_or(ErrorCode::Overflow)?;
-        token::transfer(
-            CpiContext::new(
-                ctx.accounts.token_program.to_account_info(),
-                Transfer {
-                    from: ctx.accounts.pool_add_data_token_account.to_account_info(),
-                    to: ctx.accounts.user_add_data_token_account.to_account_info(),
-                    authority: ctx.accounts.owner.to_account_info(),
-                },
-            ),
-            1,
-        )?;
-        Ok(())
-    }
-
-    /// Redeem a wComputeMedianDRT.
-    pub fn redeem_w_compute_median_drt(
-        ctx: Context<RedeemWComputeMedianDRT>,
-    ) -> Result<()> {
-        token::burn(
-            CpiContext::new(
-                ctx.accounts.token_program.to_account_info(),
-                Burn {
-                    mint: ctx.accounts.w_compute_median_mint.to_account_info(),
-                    from: ctx.accounts.user_w_compute_median_token_account.to_account_info(),
-                    authority: ctx.accounts.user.to_account_info(),
-                },
-            ),
-            1,
-        )?;
-        msg!("wComputeMedian DRT redeemed by: {}", ctx.accounts.user.key());
-        Ok(())
-    }
-
     /// Redeem a pyComputeMedianDRT.
-    pub fn redeem_py_compute_median_drt(
-        ctx: Context<RedeemPyComputeMedianDRT>,
-    ) -> Result<()> {
+    pub fn redeem_py_compute_median_drt(ctx: Context<RedeemPyComputeMedianDRT>) -> Result<()> {
+        if ctx.accounts.pool.py_compute_median_mint.is_none() {
+            return Err(ErrorCode::DRTNotInitialized.into());
+        }
         token::burn(
             CpiContext::new(
                 ctx.accounts.token_program.to_account_info(),
@@ -317,20 +290,20 @@ pub mod drt_manager {
         Ok(())
     }
 
-    /// Redeem an addDataDRT.
-    pub fn redeem_add_data_drt(ctx: Context<RedeemAddDataDRT>) -> Result<()> {
+    /// Redeem a generic DRT.
+    pub fn redeem_drt(ctx: Context<RedeemDRT>) -> Result<()> {
         token::burn(
             CpiContext::new(
                 ctx.accounts.token_program.to_account_info(),
                 Burn {
-                    mint: ctx.accounts.add_data_mint.to_account_info(),
-                    from: ctx.accounts.user_add_data_token_account.to_account_info(),
+                    mint: ctx.accounts.drt_mint.to_account_info(),
+                    from: ctx.accounts.user_drt_token_account.to_account_info(),
                     authority: ctx.accounts.user.to_account_info(),
                 },
             ),
             1,
         )?;
-        msg!("addData DRT redeemed by: {}", ctx.accounts.user.key());
+        msg!("DRT redeemed by: {}", ctx.accounts.user.key());
         Ok(())
     }
 
@@ -401,7 +374,6 @@ pub mod drt_manager {
 
 #[derive(Accounts)]
 pub struct InitializePool<'info> {
-    // Increase space to 420 bytes to ensure allowed_drts is stored.
     #[account(init, payer = owner, space = 420)]
     pub pool: Account<'info, Pool>,
     #[account(mut)]
@@ -409,18 +381,27 @@ pub struct InitializePool<'info> {
     /// CHECK: Ownership token mint.
     #[account(mut)]
     pub ownership_mint: UncheckedAccount<'info>,
-    /// CHECK: Append token mint.
-    #[account(mut)]
-    pub append_mint: UncheckedAccount<'info>,
-    /// CHECK: Pool’s append token account.
-    #[account(mut)]
-    pub pool_append_token_account: UncheckedAccount<'info>,
     /// CHECK: Owner’s ownership token account.
     #[account(mut)]
     pub owner_ownership_token_account: UncheckedAccount<'info>,
     pub system_program: Program<'info, System>,
     pub token_program: Program<'info, Token>,
     pub rent: Sysvar<'info, Rent>,
+}
+
+#[derive(Accounts)]
+pub struct InitializeAppendDRT<'info> {
+    #[account(mut)]
+    pub pool: Account<'info, Pool>,
+    /// CHECK: Append token mint.
+    #[account(mut)]
+    pub append_mint: UncheckedAccount<'info>,
+    /// CHECK: Pool’s append token account.
+    #[account(mut)]
+    pub pool_append_token_account: UncheckedAccount<'info>,
+    #[account(mut)]
+    pub owner: Signer<'info>,
+    pub token_program: Program<'info, Token>,
 }
 
 #[derive(Accounts)]
@@ -506,21 +487,6 @@ pub struct InitializePyComputeMedianDRT<'info> {
 }
 
 #[derive(Accounts)]
-pub struct InitializeAddDataDRT<'info> {
-    #[account(mut)]
-    pub pool: Account<'info, Pool>,
-    /// CHECK: addData token mint.
-    #[account(mut)]
-    pub add_data_mint: UncheckedAccount<'info>,
-    /// CHECK: Pool’s addData token account.
-    #[account(mut)]
-    pub pool_add_data_token_account: UncheckedAccount<'info>,
-    #[account(mut)]
-    pub owner: Signer<'info>,
-    pub token_program: Program<'info, Token>,
-}
-
-#[derive(Accounts)]
 pub struct BuyWComputeMedianDRT<'info> {
     #[account(mut)]
     pub pool: Account<'info, Pool>,
@@ -551,22 +517,9 @@ pub struct BuyPyComputeMedianDRT<'info> {
 }
 
 #[derive(Accounts)]
-pub struct BuyAddDataDRT<'info> {
+pub struct RedeemWComputeMedianDRT<'info> {
     #[account(mut)]
     pub pool: Account<'info, Pool>,
-    /// CHECK: Pool’s addData token account.
-    #[account(mut)]
-    pub pool_add_data_token_account: UncheckedAccount<'info>,
-    /// CHECK: Buyer’s addData token account.
-    #[account(mut)]
-    pub user_add_data_token_account: UncheckedAccount<'info>,
-    #[account(mut)]
-    pub owner: Signer<'info>,
-    pub token_program: Program<'info, Token>,
-}
-
-#[derive(Accounts)]
-pub struct RedeemWComputeMedianDRT<'info> {
     /// CHECK: wComputeMedian token mint.
     #[account(mut)]
     pub w_compute_median_mint: UncheckedAccount<'info>,
@@ -580,25 +533,14 @@ pub struct RedeemWComputeMedianDRT<'info> {
 
 #[derive(Accounts)]
 pub struct RedeemPyComputeMedianDRT<'info> {
+    #[account(mut)]
+    pub pool: Account<'info, Pool>,
     /// CHECK: pyComputeMedian token mint.
     #[account(mut)]
     pub py_compute_median_mint: UncheckedAccount<'info>,
     /// CHECK: User’s pyComputeMedian token account.
     #[account(mut)]
     pub user_py_compute_median_token_account: UncheckedAccount<'info>,
-    #[account(mut)]
-    pub user: Signer<'info>,
-    pub token_program: Program<'info, Token>,
-}
-
-#[derive(Accounts)]
-pub struct RedeemAddDataDRT<'info> {
-    /// CHECK: addData token mint.
-    #[account(mut)]
-    pub add_data_mint: UncheckedAccount<'info>,
-    /// CHECK: User’s addData token account.
-    #[account(mut)]
-    pub user_add_data_token_account: UncheckedAccount<'info>,
     #[account(mut)]
     pub user: Signer<'info>,
     pub token_program: Program<'info, Token>,
@@ -615,7 +557,11 @@ pub struct SetTokenMetadata<'info> {
     #[account(mut)]
     pub mint_authority: Signer<'info>,
     /// CHECK: The Token Metadata program.
+    #[account(address = mpl_token_metadata::ID)]
     pub token_metadata_program: UncheckedAccount<'info>,
+    
+    /// The System Program account
+    #[account(address = anchor_lang::system_program::ID)]
     pub system_program: Program<'info, System>,
     pub rent: Sysvar<'info, Rent>,
 }
@@ -631,12 +577,11 @@ pub struct Pool {
     pub owner: Pubkey,
     pub fee_accumulator: u64,
     pub ownership_mint: Pubkey,
-    pub append_mint: Pubkey,
+    pub append_mint: Option<Pubkey>,
     pub ownership_supply: u64,
-    pub append_supply: u64,
+    pub append_supply: Option<u64>,
     pub w_compute_median_mint: Option<Pubkey>,
     pub py_compute_median_mint: Option<Pubkey>,
-    pub add_data_mint: Option<Pubkey>,
     pub allowed_drts: Vec<DrtType>,
 }
 
@@ -644,4 +589,8 @@ pub struct Pool {
 pub enum ErrorCode {
     #[msg("Overflow occurred")]
     Overflow,
+    #[msg("DRT not initialized")]
+    DRTNotInitialized,
+    #[msg("DRT not allowed in this pool")]
+    DRTNotAllowed,
 }
