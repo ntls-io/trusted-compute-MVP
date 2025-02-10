@@ -21,14 +21,14 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-drt_manager = "9KK93rWbXofyiitr5ECgbDpGeA1HLTGd6txXz5xsL8CY"
+drt_manager = "4ThASJWEwoHzEsdWU94WmLhDG3gaDUQFNF7LjgaDfrPk"
 
 [registry]
 url = "https://api.apr.dev"
 
 [provider]
 cluster = "Devnet"
-wallet = "./test-wallet.json"
+wallet = "~/.config/solana/id.json"
 
 [scripts]
 test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"

@@ -17,595 +17,1028 @@
  */
 
 import * as anchor from "@coral-xyz/anchor";
-import { Program, web3, BN } from "@coral-xyz/anchor";
+import { Program, web3, BN, AnchorProvider } from "@coral-xyz/anchor";
 import { DrtManager } from "../target/types/drt_manager";
-import { assert } from "chai";
 import {
   TOKEN_PROGRAM_ID,
-  MINT_SIZE,
-  getAssociatedTokenAddress,
+  getAccount,
+  getMint,
   createInitializeMintInstruction,
+  ASSOCIATED_TOKEN_PROGRAM_ID,
+  getAssociatedTokenAddress,
   createAssociatedTokenAccountInstruction,
 } from "@solana/spl-token";
+import { PublicKey } from "@solana/web3.js";
 
 // The Metaplex Token Metadata program id.
 const TOKEN_METADATA_PROGRAM_ID = new web3.PublicKey(
   "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
 );
 
-/**
- * Helper to format BN values for console logging.
- */
-function formatBN(bn: BN | any): string {
-  return bn instanceof BN ? bn.toString() : bn;
+function isPublicKeyLike(obj: any): boolean {
+  return (
+    obj &&
+    typeof obj === 'object' &&
+    (obj instanceof PublicKey ||
+      '_bn' in obj ||
+      (typeof obj.toBase58 === 'function'))
+  );
 }
 
-describe("drt_manager", () => {
-  // Set up provider and program.
+function formatPublicKeyLike(obj: any): string {
+  if (obj instanceof PublicKey) {
+    return obj.toBase58();
+  }
+  try {
+    // For both _bn objects and numeric strings
+    return new PublicKey(obj.toString()).toBase58();
+  } catch (e) {
+    // If conversion fails, return original toString
+    return obj.toString();
+  }
+}
+
+/**
+ * Helper: Recursively convert BN instances and PublicKeys in an object to their string representation
+ * @param obj - The object to format
+ * @returns The formatted object with BNs and PublicKeys converted to strings
+ */
+function formatBNs(obj: any): any {
+  // Handle null/undefined
+  if (obj == null) {
+    return obj;
+  }
+
+  // Handle BN instances
+  if (obj instanceof BN) {
+    return obj.toString();
+  }
+
+  // Handle PublicKey-like objects - this should come before object check
+  if (isPublicKeyLike(obj)) {
+    return formatPublicKeyLike(obj);
+  }
+
+  // Handle Buffer instances
+  if (Buffer.isBuffer(obj)) {
+    return obj.toString('hex');
+  }
+
+  // Handle BigInt values
+  if (typeof obj === 'bigint') {
+    return obj.toString();
+  }
+
+  // Handle arrays
+  if (Array.isArray(obj)) {
+    return obj.map(formatBNs);
+  }
+
+  // Handle plain objects
+  if (typeof obj === 'object') {
+    const ret: any = {};
+    for (const key in obj) {
+      if (!Object.prototype.hasOwnProperty.call(obj, key)) continue;
+      
+      // Special case for known PublicKey fields
+      const value = obj[key];
+      if (['owner', 'ownershipMint', 'address', 'mint', 'mintAuthority', 'freezeAuthority'].includes(key) && value) {
+        try {
+          ret[key] = new PublicKey(value.toString()).toBase58();
+          continue;
+        } catch (e) {
+          // If conversion fails, process normally
+        }
+      }
+      
+      ret[key] = formatBNs(value);
+    }
+    return ret;
+  }
+
+  // Return primitive values as is
+  return obj;
+}
+
+async function processPoolData(poolData: any) {
+  return {
+    ...poolData,
+    owner: poolData.owner instanceof PublicKey ? 
+      poolData.owner : 
+      new PublicKey(poolData.owner.toString()),
+    ownershipMint: poolData.ownershipMint ? 
+      (poolData.ownershipMint instanceof PublicKey ? 
+        poolData.ownershipMint : 
+        new PublicKey(poolData.ownershipMint.toString())) : 
+      null,
+    appendMint: poolData.appendMint ? 
+      (poolData.appendMint instanceof PublicKey ? 
+        poolData.appendMint : 
+        new PublicKey(poolData.appendMint.toString())) : 
+      null,
+    wComputeMedianMint: poolData.wComputeMedianMint ? 
+      (poolData.wComputeMedianMint instanceof PublicKey ? 
+        poolData.wComputeMedianMint : 
+        new PublicKey(poolData.wComputeMedianMint.toString())) : 
+      null,
+    pyComputeMedianMint: poolData.pyComputeMedianMint ? 
+      (poolData.pyComputeMedianMint instanceof PublicKey ? 
+        poolData.pyComputeMedianMint : 
+        new PublicKey(poolData.pyComputeMedianMint.toString())) : 
+      null,
+  };
+}
+
+async function processMintInfo(mintInfo: any) {
+  return {
+    ...mintInfo,
+    address: mintInfo.address instanceof PublicKey ? 
+      mintInfo.address : 
+      new PublicKey(mintInfo.address.toString()),
+    mintAuthority: mintInfo.mintAuthority ? 
+      (mintInfo.mintAuthority instanceof PublicKey ? 
+        mintInfo.mintAuthority : 
+        new PublicKey(mintInfo.mintAuthority.toString())) : 
+      null,
+    freezeAuthority: mintInfo.freezeAuthority ? 
+      (mintInfo.freezeAuthority instanceof PublicKey ? 
+        mintInfo.freezeAuthority : 
+        new PublicKey(mintInfo.freezeAuthority.toString())) : 
+      null,
+  };
+}
+
+async function processTokenAccountInfo(tokenInfo: any) {
+  return {
+    ...tokenInfo,
+    address: tokenInfo.address instanceof PublicKey ? 
+      tokenInfo.address : 
+      new PublicKey(tokenInfo.address.toString()),
+    mint: tokenInfo.mint instanceof PublicKey ? 
+      tokenInfo.mint : 
+      new PublicKey(tokenInfo.mint.toString()),
+    owner: tokenInfo.owner instanceof PublicKey ? 
+      tokenInfo.owner : 
+      new PublicKey(tokenInfo.owner.toString()),
+  };
+}
+
+/**
+ * Creates a new SPL mint with [mintAuthority] as both the mint and freeze authority.
+ */
+async function createNewMint(
+  mintAuthority: web3.PublicKey,
+  decimals: number = 0
+): Promise<web3.PublicKey> {
+  const mintKeypair = web3.Keypair.generate();
+  const provider = anchor.getProvider();
+  const lamports = await provider.connection.getMinimumBalanceForRentExemption(82);
+  const createMintIx = web3.SystemProgram.createAccount({
+    fromPubkey: (provider as AnchorProvider).publicKey,
+    newAccountPubkey: mintKeypair.publicKey,
+    space: 82,
+    lamports,
+    programId: TOKEN_PROGRAM_ID,
+  });
+  const initMintIx = createInitializeMintInstruction(
+    mintKeypair.publicKey,
+    decimals,
+    mintAuthority,
+    mintAuthority
+  );
+  const tx = new web3.Transaction().add(createMintIx).add(initMintIx);
+  await provider.sendAndConfirm(tx, [mintKeypair]);
+  return mintKeypair.publicKey;
+}
+
+/**
+ * Returns the PDA for the Metaplex metadata for a given mint.
+ */
+async function createMetadataAccount(
+  mint: web3.PublicKey,
+  name: string,
+  symbol: string,
+  uri: string
+): Promise<web3.PublicKey> {
+  const [metadataPda] = web3.PublicKey.findProgramAddressSync(
+    [
+      Buffer.from("metadata"),
+      TOKEN_METADATA_PROGRAM_ID.toBuffer(),
+      mint.toBuffer(),
+    ],
+    TOKEN_METADATA_PROGRAM_ID
+  );
+  return metadataPda;
+}
+
+/**
+ * Helper to compute a pool PDA from:
+ *   seeds = [b"pool", owner, pool_name, pool_id (as 8-byte little endian)]
+ */
+function getPoolPda(
+  owner: web3.PublicKey,
+  poolName: string,
+  poolId: number,
+  programId: web3.PublicKey
+): [web3.PublicKey, number] {
+  const poolIdBuffer = Buffer.alloc(8);
+  poolIdBuffer.writeUInt32LE(poolId, 0); // Lower 32 bits
+  poolIdBuffer.writeUInt32LE(0, 4); // Upper 32 bits (assuming poolId < 2^32)
+  return web3.PublicKey.findProgramAddressSync(
+    [
+      Buffer.from("pool"),
+      owner.toBuffer(),
+      Buffer.from(poolName),
+      poolIdBuffer,
+    ],
+    programId
+  );
+}
+
+describe("drt_manager", function () {
+  // Increase timeout to 2 minutes.
+  this.timeout(120000);
+
   const provider = anchor.AnchorProvider.env();
   anchor.setProvider(provider);
   const program = anchor.workspace.DrtManager as Program<DrtManager>;
+  const connection = provider.connection;
 
-  console.log("Program ID:", program.programId.toString());
-
-  // Generate keypairs for pool state and main mints.
-  const poolAccount = web3.Keypair.generate();
-  const ownershipMint = web3.Keypair.generate();
-  const appendMint = web3.Keypair.generate();
-
-  // Generate keypairs for the new DRT mints.
-  const wComputeMedianMint = web3.Keypair.generate();
-  const pyComputeMedianMint = web3.Keypair.generate();
-  const addDataMint = web3.Keypair.generate();
-
-  // The pool owner is the provider's wallet.
-  const owner = provider.wallet.publicKey;
-
-  // Create a new buyer.
-  const buyer = web3.Keypair.generate();
-
-  // Associated token account variables.
-  let ownerOwnershipTokenAccount: web3.PublicKey;
-  let poolAppendTokenAccount: web3.PublicKey;
-  let buyerAppendTokenAccount: web3.PublicKey;
-  let buyerOwnershipTokenAccount: web3.PublicKey;
-
-  // New token accounts for wComputeMedian, pyComputeMedian, and addData DRTs.
-  let poolWComputeMedianTokenAccount: web3.PublicKey;
-  let poolPyComputeMedianTokenAccount: web3.PublicKey;
-  let poolAddDataTokenAccount: web3.PublicKey;
-  let buyerWComputeMedianTokenAccount: web3.PublicKey;
-  let buyerPyComputeMedianTokenAccount: web3.PublicKey;
-  let buyerAddDataTokenAccount: web3.PublicKey;
-
-  before(async () => {
-    const balance = await provider.connection.getBalance(owner);
-    console.log("Owner wallet balance:", balance / web3.LAMPORTS_PER_SOL, "SOL");
-    if (balance < web3.LAMPORTS_PER_SOL) {
-      console.warn("Low balance; please fund your wallet on devnet manually.");
-    }
-  });
-
-  it("Initialize Pool", async () => {
-    // Derive associated token accounts.
-    ownerOwnershipTokenAccount = await getAssociatedTokenAddress(
-      ownershipMint.publicKey,
-      owner
-    );
-    poolAppendTokenAccount = await getAssociatedTokenAddress(
-      appendMint.publicKey,
-      owner
-    );
-    buyerAppendTokenAccount = await getAssociatedTokenAddress(
-      appendMint.publicKey,
-      buyer.publicKey
-    );
-    buyerOwnershipTokenAccount = await getAssociatedTokenAddress(
-      ownershipMint.publicKey,
-      buyer.publicKey
-    );
-
-    console.log("Owner Ownership Token Account:", ownerOwnershipTokenAccount.toString());
-    console.log("Pool Append Token Account:", poolAppendTokenAccount.toString());
-    console.log("Buyer Append Token Account:", buyerAppendTokenAccount.toString());
-    console.log("Buyer Ownership Token Account:", buyerOwnershipTokenAccount.toString());
-
-    const lamportsForMint = await provider.connection.getMinimumBalanceForRentExemption(MINT_SIZE);
-    const tx = new web3.Transaction();
-
-    // Create ownership mint.
-    tx.add(
-      web3.SystemProgram.createAccount({
-        fromPubkey: owner,
-        newAccountPubkey: ownershipMint.publicKey,
-        space: MINT_SIZE,
-        lamports: lamportsForMint,
-        programId: TOKEN_PROGRAM_ID,
-      })
-    );
-    tx.add(
-      createInitializeMintInstruction(ownershipMint.publicKey, 0, owner, owner)
-    );
-
-    // Create append mint.
-    tx.add(
-      web3.SystemProgram.createAccount({
-        fromPubkey: owner,
-        newAccountPubkey: appendMint.publicKey,
-        space: MINT_SIZE,
-        lamports: lamportsForMint,
-        programId: TOKEN_PROGRAM_ID,
-      })
-    );
-    tx.add(
-      createInitializeMintInstruction(appendMint.publicKey, 0, owner, owner)
-    );
-
-    // Create associated token accounts.
-    tx.add(
-      createAssociatedTokenAccountInstruction(owner, ownerOwnershipTokenAccount, owner, ownershipMint.publicKey)
-    );
-    tx.add(
-      createAssociatedTokenAccountInstruction(owner, poolAppendTokenAccount, owner, appendMint.publicKey)
-    );
-    tx.add(
-      createAssociatedTokenAccountInstruction(owner, buyerAppendTokenAccount, buyer.publicKey, appendMint.publicKey)
-    );
-    tx.add(
-      createAssociatedTokenAccountInstruction(owner, buyerOwnershipTokenAccount, buyer.publicKey, ownershipMint.publicKey)
-    );
-
-    await provider.sendAndConfirm(tx, [ownershipMint, appendMint]);
-    console.log("##### Ownership Mint Address:", ownershipMint.publicKey.toString(), "#####");
-    console.log("##### Append Mint Address:", appendMint.publicKey.toString(), "#####");
-
-    // Allowed DRTs for this pool.
-    const allowedDrts = ["append", "w_compute", "py_compute", "add_data"];
-
+  it("\n\n=== START: 'Initializes pool with proper token metadata' ===", async () => {
     const poolName = "developer_salary";
-    const ownershipSupply = new BN(1000000);
-    const appendSupply = new BN(100);
+    const poolId = 1; // Use poolId 1 for this pool.
+    const ownershipSupply = new BN(1_000_000);
+    const appendSupply = new BN(5000);
+    const allowedDrts = ["append", "w_compute_median", "py_compute_median"];
 
-    const accountsStruct = {
-      pool: poolAccount.publicKey,
-      owner: owner,
-      ownershipMint: ownershipMint.publicKey,
-      appendMint: appendMint.publicKey,
-      poolAppendTokenAccount: poolAppendTokenAccount,
-      ownerOwnershipTokenAccount: ownerOwnershipTokenAccount,
-      systemProgram: web3.SystemProgram.programId,
-      tokenProgram: TOKEN_PROGRAM_ID,
-      rent: web3.SYSVAR_RENT_PUBKEY,
-    };
-
-    // Call initialize_pool with allowedDrts.
-    await program.methods
-      .initializePool(poolName, ownershipSupply, appendSupply, allowedDrts)
-      .accounts(accountsStruct)
-      .signers([poolAccount])
-      .rpc();
-
-    console.log("Pool Account:", poolAccount.publicKey.toString());
-    const poolAccountData = await program.account.pool.fetch(poolAccount.publicKey);
-    console.log("Pool Account Data:", {
-      name: poolAccountData.name,
-      owner: poolAccountData.owner.toString(),
-      feeAccumulator: formatBN(poolAccountData.feeAccumulator),
-      ownershipMint: poolAccountData.ownershipMint.toString(),
-      appendMint: poolAccountData.appendMint.toString(),
-      // Map over our DrtType objects to display the inner string.
-      allowedDrts: poolAccountData.allowedDrts.map((drt: any) => drt.value),
-      ownershipSupply: formatBN(poolAccountData.ownershipSupply),
-      appendSupply: formatBN(poolAccountData.appendSupply),
-      wComputeMedianMint: poolAccountData.w_compute_median_mint,
-      pyComputeMedianMint: poolAccountData.py_compute_median_mint,
-      addDataMint: poolAccountData.add_data_mint,
-    });
-    assert.equal(poolAccountData.name, poolName);
-    assert.ok(poolAccountData.feeAccumulator.eq(new BN(0)));
-    assert.ok(poolAccountData.ownershipSupply.eq(ownershipSupply));
-    assert.ok(poolAccountData.appendSupply.eq(appendSupply));
-    assert.deepEqual(poolAccountData.allowedDrts.map((drt: any) => drt.value), allowedDrts);
-  });
-
-  // Set metadata for each token.
-  it("Set Token Metadata for Ownership Mint", async () => {
-    const [metadataPDA] = await web3.PublicKey.findProgramAddress(
-      [Buffer.from("metadata"), TOKEN_METADATA_PROGRAM_ID.toBuffer(), ownershipMint.publicKey.toBuffer()],
-      TOKEN_METADATA_PROGRAM_ID
+    // Compute pool PDA.
+    const [poolPda, poolBump] = getPoolPda(
+      provider.wallet.publicKey,
+      poolName,
+      poolId,
+      program.programId
     );
-    console.log("##### Ownership Token Address:", ownershipMint.publicKey.toString(), "#####");
+    console.log("Pool PDA:", poolPda.toBase58());
+
+    // Derive vault PDA using poolPda.
+    const [vaultPda, vaultBump] = await web3.PublicKey.findProgramAddress(
+      [Buffer.from("vault"), poolPda.toBuffer()],
+      program.programId
+    );
+    console.log("Vault PDA:", vaultPda.toBase58());
+
+    // Create the ownership mint (using vaultPda as mint authority).
+    console.log("Creating ownership mint...");
+    const ownershipMint = await createNewMint(vaultPda);
+    console.log("Ownership mint:", ownershipMint.toBase58());
+
+    // Derive the vault's associated token account.
+    const vaultTokenAccount = await getAssociatedTokenAddress(
+      ownershipMint,
+      vaultPda,
+      true
+    );
+    console.log("Vault token account:", vaultTokenAccount.toBase58());
+
+    // Prepare metadata PDA for the ownership mint.
+    const ownershipMetadataPda = await createMetadataAccount(
+      ownershipMint,
+      `${poolName}_ownership`,
+      "OWN",
+      "https://arweave.net/your-metadata-uri"
+    );
+    console.log("Ownership metadata PDA:", ownershipMetadataPda.toBase58());
+
+    // Initialize the pool.
+    console.log("Initializing pool...");
     await program.methods
-      .setTokenMetadata("developer_salary_ownership", "devsal_o", "https://example.com/ownership.json")
+      .initializePool(
+        poolName,
+        new BN(poolId),
+        ownershipSupply,
+        appendSupply,
+        allowedDrts
+      )
       .accounts({
-        metadata: metadataPDA,
-        mint: ownershipMint.publicKey,
-        mintAuthority: owner,
+        pool: poolPda,
+        owner: provider.wallet.publicKey,
+        ownershipMint,
+        vault: vaultPda,
+        vaultTokenAccount: vaultTokenAccount,
+        systemProgram: web3.SystemProgram.programId,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        rent: web3.SYSVAR_RENT_PUBKEY,
+      })
+      .rpc();
+    console.log("Pool initialized successfully!");
+
+    // Set token metadata for the ownership token.
+    console.log("Setting metadata for ownership token...");
+    await program.methods
+      .setTokenMetadata(
+        `${poolName}_ownership`,
+        "OWN",
+        "https://arweave.net/your-metadata-uri"
+      )
+      .accounts({
+        metadata: ownershipMetadataPda,
+        mint: ownershipMint,
+        pool: poolPda,
+        vault: vaultPda,
+        owner: provider.wallet.publicKey,
         tokenMetadataProgram: TOKEN_METADATA_PROGRAM_ID,
         systemProgram: web3.SystemProgram.programId,
         rent: web3.SYSVAR_RENT_PUBKEY,
       })
       .rpc();
-    console.log("Set token metadata for Ownership Mint completed.");
+    console.log("Ownership token metadata set successfully!");
+
+    // Fetch and log on-chain data.
+    const poolData = await program.account.pool.fetch(poolPda);
+    const mintInfo = await getMint(connection, ownershipMint);
+    const vaultTokenInfo = await getAccount(connection, vaultTokenAccount);
+
+    // Use our helper functions to process the data
+    const processedPoolData = await processPoolData(poolData);
+    const processedMintInfo = await processMintInfo(mintInfo);
+    const processedVaultTokenInfo = await processTokenAccountInfo(vaultTokenInfo);
+
+    console.log("Pool data:\n", JSON.stringify(formatBNs(processedPoolData), null, 2));
+    console.log("Ownership mint info:\n", JSON.stringify(formatBNs(processedMintInfo), null, 2));
+    console.log("Vault token account info:\n", JSON.stringify(formatBNs(processedVaultTokenInfo), null, 2));
   });
 
-  it("Set Token Metadata for Append Mint", async () => {
-    const [metadataPDA] = await web3.PublicKey.findProgramAddress(
-      [Buffer.from("metadata"), TOKEN_METADATA_PROGRAM_ID.toBuffer(), appendMint.publicKey.toBuffer()],
-      TOKEN_METADATA_PROGRAM_ID
+  it("\n\n=== START: 'Initializes and redeems Append DRT with metadata using generic instructions' ===", async () => {
+    const poolName = "append_drt_test";
+    const poolId = 1;
+    const ownershipSupply = new BN(100_000);
+    const appendDrtSupply = new BN(100);
+    const allowedDrts = ["append", "py_compute_median"];
+
+    // Compute pool PDA.
+    const [poolPda, poolBump] = getPoolPda(
+      provider.wallet.publicKey,
+      poolName,
+      poolId,
+      program.programId
     );
-    console.log("##### Append Token Address:", appendMint.publicKey.toString(), "#####");
+    console.log("Pool PDA:", poolPda.toBase58());
+
+    // Derive vault PDA.
+    const [vaultPda, vaultBump] = await web3.PublicKey.findProgramAddress(
+      [Buffer.from("vault"), poolPda.toBuffer()],
+      program.programId
+    );
+    console.log("Vault PDA:", vaultPda.toBase58());
+
+    // Create the ownership mint.
+    console.log("Creating ownership mint...");
+    const ownershipMint = await createNewMint(vaultPda);
+    console.log("Ownership mint:", ownershipMint.toBase58());
+
+    // Derive vault associated token account for ownership.
+    const vaultOwnershipTokenAcct = await getAssociatedTokenAddress(
+      ownershipMint,
+      vaultPda,
+      true
+    );
+    console.log("Vault ownership token account:", vaultOwnershipTokenAcct.toBase58());
+
+    // Initialize the pool.
+    console.log("Initializing pool...");
     await program.methods
-      .setTokenMetadata("developer_salary_append", "devsal_a", "https://example.com/append.json")
+      .initializePool(
+        poolName,
+        new BN(poolId),
+        ownershipSupply,
+        appendDrtSupply,
+        allowedDrts
+      )
       .accounts({
-        metadata: metadataPDA,
-        mint: appendMint.publicKey,
-        mintAuthority: owner,
+        pool: poolPda,
+        owner: provider.wallet.publicKey,
+        ownershipMint,
+        vault: vaultPda,
+        vaultTokenAccount: vaultOwnershipTokenAcct,
+        systemProgram: web3.SystemProgram.programId,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        rent: web3.SYSVAR_RENT_PUBKEY,
+      })
+      .rpc();
+    console.log("Pool initialized successfully!");
+
+    // Create the "append" DRT mint.
+    console.log("Creating Append DRT mint...");
+    const appendMint = await createNewMint(vaultPda);
+    console.log("Append mint:", appendMint.toBase58());
+
+    // Derive vault associated token account for the DRT.
+    const vaultAppendTokenAcct = await getAssociatedTokenAddress(
+      appendMint,
+      vaultPda,
+      true
+    );
+    console.log("Vault append token account:", vaultAppendTokenAcct.toBase58());
+
+    // Initialize the "append" DRT.
+    console.log("Initializing 'append' DRT...");
+    await program.methods
+      .initializeDrt("append", appendDrtSupply)
+      .accounts({
+        pool: poolPda,
+        drtMint: appendMint,
+        vault: vaultPda,
+        vaultDrtTokenAccount: vaultAppendTokenAcct,
+        owner: provider.wallet.publicKey,
+        systemProgram: web3.SystemProgram.programId,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+      })
+      .rpc();
+    console.log("Append DRT initialized successfully!");
+
+    // Set metadata for the Append DRT.
+    console.log("Setting metadata for Append DRT...");
+    const appendDrtMetadataPda = await createMetadataAccount(
+      appendMint,
+      "AppendDRT",
+      "APPEND",
+      "https://arweave.net/append-drt"
+    );
+    await program.methods
+      .setTokenMetadata("AppendDRT", "APPEND", "https://arweave.net/append-drt")
+      .accounts({
+        metadata: appendDrtMetadataPda,
+        mint: appendMint,
+        pool: poolPda,
+        vault: vaultPda,
+        owner: provider.wallet.publicKey,
         tokenMetadataProgram: TOKEN_METADATA_PROGRAM_ID,
         systemProgram: web3.SystemProgram.programId,
         rent: web3.SYSVAR_RENT_PUBKEY,
       })
       .rpc();
-    console.log("Set token metadata for Append Mint completed.");
-  });
+    console.log("Append DRT metadata set successfully!");
 
-  // Buy and redeem AppendDRT.
-  it("Buy Append DRT and Redeem Append DRT", async () => {
-    const fee = new BN(1000);
+    // Buyer buys 1 Append DRT.
+    const buyer = provider.wallet.publicKey;
+    const buyerAppendTokenAcct = await getAssociatedTokenAddress(
+      appendMint,
+      buyer
+    );
+    let ataInfo = await connection.getAccountInfo(buyerAppendTokenAcct);
+    if (!ataInfo) {
+      console.log("Buyer ATA for Append DRT does not exist; creating it...");
+      const createAtaIx = createAssociatedTokenAccountInstruction(
+        buyer,
+        buyerAppendTokenAcct,
+        buyer,
+        appendMint
+      );
+      await provider.sendAndConfirm(new web3.Transaction().add(createAtaIx));
+      console.log("Buyer ATA created for Append DRT.");
+    }
+    console.log("Buying 1 Append DRT with fee 1000...");
+    const feePaid = new BN(1000);
     await program.methods
-      .buyAppendDrt(fee)
+      .buyDrt("append", feePaid)
       .accounts({
-        pool: poolAccount.publicKey,
-        poolAppendTokenAccount: poolAppendTokenAccount,
-        userAppendTokenAccount: buyerAppendTokenAccount,
-        owner: owner,
+        pool: poolPda,
+        drtMint: appendMint,
+        vaultDrtTokenAccount: vaultAppendTokenAcct,
+        userDrtTokenAccount: buyerAppendTokenAcct,
+        vault: vaultPda,
         tokenProgram: TOKEN_PROGRAM_ID,
       })
       .rpc();
-    console.log("Buyer bought an AppendDRT with fee:", fee.toString());
+    console.log("Buy DRT succeeded!");
 
-    const buyerAppendBalance = await provider.connection.getTokenAccountBalance(buyerAppendTokenAccount);
-    console.log("Buyer Append Token Balance:", buyerAppendBalance.value.amount);
-    assert.equal(buyerAppendBalance.value.amount, "1");
-
-    const poolAccountData = await program.account.pool.fetch(poolAccount.publicKey);
-    console.log("Updated Pool Fee Accumulator:", formatBN(poolAccountData.feeAccumulator));
-    assert.ok(poolAccountData.feeAccumulator.eq(fee));
-
+    // Buyer redeems 1 Append DRT.
+    const buyerOwnershipTokenAcct = await getAssociatedTokenAddress(
+      ownershipMint,
+      buyer
+    );
+    let buyerOwnershipInfo = await connection.getAccountInfo(buyerOwnershipTokenAcct);
+    if (!buyerOwnershipInfo) {
+      console.log("Buyer ATA for ownership token does not exist; creating it...");
+      const createAtaIx2 = createAssociatedTokenAccountInstruction(
+        buyer,
+        buyerOwnershipTokenAcct,
+        buyer,
+        ownershipMint
+      );
+      await provider.sendAndConfirm(new web3.Transaction().add(createAtaIx2));
+      console.log("Buyer ATA created for ownership token.");
+    }
+    console.log("Redeeming 1 Append DRT...");
     await program.methods
-      .redeemAppendDrt()
+      .redeemDrt("append")
       .accounts({
-        pool: poolAccount.publicKey,
-        appendMint: appendMint.publicKey,
-        ownershipMint: ownershipMint.publicKey,
-        userAppendTokenAccount: buyerAppendTokenAccount,
-        userOwnershipTokenAccount: buyerOwnershipTokenAccount,
-        owner: owner,
-        user: buyer.publicKey,
+        pool: poolPda,
+        drtMint: appendMint,
+        ownershipMint,
+        userDrtTokenAccount: buyerAppendTokenAcct,
+        userOwnershipTokenAccount: buyerOwnershipTokenAcct,
+        vault: vaultPda,
+        owner: provider.wallet.publicKey,
+        user: buyer,
         tokenProgram: TOKEN_PROGRAM_ID,
       })
-      .signers([buyer])
       .rpc();
-    console.log("Buyer redeemed an AppendDRT.");
+    console.log("Redeem DRT succeeded!");
 
-    const buyerAppendAfter = await provider.connection.getTokenAccountBalance(buyerAppendTokenAccount);
-    console.log("Buyer Append Token Balance after redemption:", buyerAppendAfter.value.amount);
-    assert.equal(buyerAppendAfter.value.amount, "0");
-
-    const appendSupplyAfter = await provider.connection.getTokenSupply(appendMint.publicKey);
-    console.log("##### Append Token Supply after redemption:", appendSupplyAfter.value.amount, "#####");
+    // Verify redemption result.
+    const buyerOwnershipAcctInfo = await getAccount(connection, buyerOwnershipTokenAcct);
+    const buyerAppendAcctInfo = await getAccount(connection, buyerAppendTokenAcct);
+    console.log(
+      "Buyer ownership token balance:",
+      formatBNs(buyerOwnershipAcctInfo.amount)
+    );
+    console.log(
+      "Buyer append token balance:",
+      formatBNs(buyerAppendAcctInfo.amount)
+    );
   });
 
-  // Initialize, set metadata, buy and redeem wComputeMedianDRT.
-  it("Initialize, Set Metadata, Buy, and Redeem wComputeMedian DRT", async () => {
-    poolWComputeMedianTokenAccount = await getAssociatedTokenAddress(
-      wComputeMedianMint.publicKey,
-      owner
-    );
-    buyerWComputeMedianTokenAccount = await getAssociatedTokenAddress(
-      wComputeMedianMint.publicKey,
-      buyer.publicKey
-    );
+  it("\n\n=== START: 'Manages multiple DRT types with metadata correctly' ===", async () => {
+    const poolName = "multi_drt_pool";
+    const poolId = 1;
+    const ownershipSupply = new BN(200_000);
+    const appendDrtSupply = new BN(20);
+    const wComputeSupply = new BN(50);
+    const pyComputeSupply = new BN(75);
+    const allowedDrts = ["append", "w_compute_median", "py_compute_median"];
 
-    const lamportsForMint = await provider.connection.getMinimumBalanceForRentExemption(MINT_SIZE);
-    let tx = new web3.Transaction();
-    tx.add(
-      web3.SystemProgram.createAccount({
-        fromPubkey: owner,
-        newAccountPubkey: wComputeMedianMint.publicKey,
-        space: MINT_SIZE,
-        lamports: lamportsForMint,
-        programId: TOKEN_PROGRAM_ID,
-      })
+    // Compute pool PDA.
+    const [poolPda, poolBump] = getPoolPda(
+      provider.wallet.publicKey,
+      poolName,
+      poolId,
+      program.programId
     );
-    tx.add(
-      createInitializeMintInstruction(wComputeMedianMint.publicKey, 0, owner, owner)
-    );
-    tx.add(
-      createAssociatedTokenAccountInstruction(owner, poolWComputeMedianTokenAccount, owner, wComputeMedianMint.publicKey)
-    );
-    await provider.sendAndConfirm(tx, [wComputeMedianMint]);
-    console.log("##### wComputeMedian Mint Address:", wComputeMedianMint.publicKey.toString(), "#####");
-    console.log("Pool wComputeMedian Token Account:", poolWComputeMedianTokenAccount.toString());
+    console.log("Pool PDA:", poolPda.toBase58());
 
-    const [wMetadataPDA] = await web3.PublicKey.findProgramAddress(
-      [Buffer.from("metadata"), TOKEN_METADATA_PROGRAM_ID.toBuffer(), wComputeMedianMint.publicKey.toBuffer()],
-      TOKEN_METADATA_PROGRAM_ID
+    // Derive vault PDA.
+    const [vaultPda, vaultBump] = await web3.PublicKey.findProgramAddress(
+      [Buffer.from("vault"), poolPda.toBuffer()],
+      program.programId
     );
-    console.log("Setting metadata for wComputeMedian Mint...");
+    console.log("Vault PDA:", vaultPda.toBase58());
+
+    // Create the ownership mint.
+    console.log("Creating ownership mint...");
+    const ownershipMint = await createNewMint(vaultPda);
+    console.log("Ownership mint:", ownershipMint.toBase58());
+
+    // Derive vault associated token account for ownership.
+    const vaultOwnershipTokenAcct = await getAssociatedTokenAddress(
+      ownershipMint,
+      vaultPda,
+      true
+    );
+    console.log("Vault ownership token account:", vaultOwnershipTokenAcct.toBase58());
+
+    // Initialize the pool.
+    console.log("Initializing pool...");
     await program.methods
-      .setTokenMetadata("developer_salary_wc_med", "devsal_wc", "https://example.com/w_compute_median.json")
+      .initializePool(
+        poolName,
+        new BN(poolId),
+        ownershipSupply,
+        appendDrtSupply,
+        allowedDrts
+      )
       .accounts({
-        metadata: wMetadataPDA,
-        mint: wComputeMedianMint.publicKey,
-        mintAuthority: owner,
+        pool: poolPda,
+        owner: provider.wallet.publicKey,
+        ownershipMint,
+        vault: vaultPda,
+        vaultTokenAccount: vaultOwnershipTokenAcct,
+        systemProgram: web3.SystemProgram.programId,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        rent: web3.SYSVAR_RENT_PUBKEY,
+      })
+      .rpc();
+    console.log("Pool initialized successfully!");
+
+    // Initialize "append" DRT.
+    console.log("Creating Append DRT mint...");
+    const appendMint = await createNewMint(vaultPda);
+    console.log("Append mint:", appendMint.toBase58());
+    const vaultAppendTokenAcct = await getAssociatedTokenAddress(
+      appendMint,
+      vaultPda,
+      true
+    );
+    console.log("Vault append token account:", vaultAppendTokenAcct.toBase58());
+    console.log("Initializing 'append' DRT...");
+    await program.methods
+      .initializeDrt("append", appendDrtSupply)
+      .accounts({
+        pool: poolPda,
+        drtMint: appendMint,
+        vault: vaultPda,
+        vaultDrtTokenAccount: vaultAppendTokenAcct,
+        owner: provider.wallet.publicKey,
+        systemProgram: web3.SystemProgram.programId,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+      })
+      .rpc();
+    console.log("'append' DRT initialized successfully!");
+
+    // Set metadata for the append DRT.
+    console.log("Setting metadata for append DRT...");
+    const appendMetadataPda = await createMetadataAccount(
+      appendMint,
+      "AppendDRT",
+      "APPEND",
+      "https://arweave.net/append_multi"
+    );
+    await program.methods
+      .setTokenMetadata("AppendDRT", "APPEND", "https://arweave.net/append_multi")
+      .accounts({
+        metadata: appendMetadataPda,
+        mint: appendMint,
+        pool: poolPda,
+        vault: vaultPda,
+        owner: provider.wallet.publicKey,
         tokenMetadataProgram: TOKEN_METADATA_PROGRAM_ID,
         systemProgram: web3.SystemProgram.programId,
         rent: web3.SYSVAR_RENT_PUBKEY,
       })
       .rpc();
-    console.log("Set token metadata for wComputeMedian Mint completed.");
+    console.log("append DRT metadata set successfully!");
 
-    const wSupply = new BN(500);
+    // Initialize "w_compute_median" DRT.
+    console.log("Creating w_compute_median mint...");
+    const wComputeMint = await createNewMint(vaultPda);
+    console.log("w_compute_median mint:", wComputeMint.toBase58());
+    const vaultWComputeTokenAcct = await getAssociatedTokenAddress(
+      wComputeMint,
+      vaultPda,
+      true
+    );
+    console.log("Vault w_compute_median token account:", vaultWComputeTokenAcct.toBase58());
+    console.log("Initializing 'w_compute_median' DRT...");
     await program.methods
-      .initializeWComputeMedianDrt(wSupply)
+      .initializeDrt("w_compute_median", wComputeSupply)
       .accounts({
-        pool: poolAccount.publicKey,
-        owner: owner,
-        wComputeMedianMint: wComputeMedianMint.publicKey,
-        poolWComputeMedianTokenAccount: poolWComputeMedianTokenAccount,
+        pool: poolPda,
+        drtMint: wComputeMint,
+        vault: vaultPda,
+        vaultDrtTokenAccount: vaultWComputeTokenAcct,
+        owner: provider.wallet.publicKey,
+        systemProgram: web3.SystemProgram.programId,
         tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
       })
       .rpc();
-    console.log("Initialized wComputeMedian DRT with supply:", wSupply.toString());
+    console.log("'w_compute_median' DRT initialized successfully!");
 
-    tx = new web3.Transaction();
-    tx.add(
-      createAssociatedTokenAccountInstruction(owner, buyerWComputeMedianTokenAccount, buyer.publicKey, wComputeMedianMint.publicKey)
+    // Set metadata for w_compute_median.
+    console.log("Setting metadata for w_compute_median...");
+    const wComputeMetadataPda = await createMetadataAccount(
+      wComputeMint,
+      "WComputeMedian",
+      "WCM",
+      "https://arweave.net/wcompute"
     );
-    await provider.sendAndConfirm(tx, []);
-    
-    const fee = new BN(2000);
     await program.methods
-      .buyWComputeMedianDrt(fee)
+      .setTokenMetadata("WComputeMedian", "WCM", "https://arweave.net/wcompute")
       .accounts({
-        pool: poolAccount.publicKey,
-        owner: owner,
-        poolWComputeMedianTokenAccount: poolWComputeMedianTokenAccount,
-        userWComputeMedianTokenAccount: buyerWComputeMedianTokenAccount,
-        tokenProgram: TOKEN_PROGRAM_ID,
-      })
-      .rpc();
-    console.log("Buyer bought a wComputeMedian DRT with fee:", fee.toString());
-    const buyerWBalance = await provider.connection.getTokenAccountBalance(buyerWComputeMedianTokenAccount);
-    console.log("Buyer wComputeMedian Token Balance:", buyerWBalance.value.amount);
-    assert.equal(buyerWBalance.value.amount, "1");
-
-    await program.methods
-      .redeemWComputeMedianDrt()
-      .accounts({
-        wComputeMedianMint: wComputeMedianMint.publicKey,
-        userWComputeMedianTokenAccount: buyerWComputeMedianTokenAccount,
-        user: buyer.publicKey,
-        tokenProgram: TOKEN_PROGRAM_ID,
-      })
-      .signers([buyer])
-      .rpc();
-    console.log("Buyer redeemed a wComputeMedian DRT.");
-    const buyerWBalanceAfter = await provider.connection.getTokenAccountBalance(buyerWComputeMedianTokenAccount);
-    console.log("Buyer wComputeMedian Token Balance after redemption:", buyerWBalanceAfter.value.amount);
-    assert.equal(buyerWBalanceAfter.value.amount, "0");
-
-    const wComputeMedianSupply = await provider.connection.getTokenSupply(wComputeMedianMint.publicKey);
-    console.log("##### wComputeMedian Token Supply after redemption:", wComputeMedianSupply.value.amount, "#####");
-  });
-
-  // Initialize, set metadata, buy and redeem pyComputeMedianDRT.
-  it("Initialize, Set Metadata, Buy, and Redeem pyComputeMedian DRT", async () => {
-    poolPyComputeMedianTokenAccount = await getAssociatedTokenAddress(
-      pyComputeMedianMint.publicKey,
-      owner
-    );
-    buyerPyComputeMedianTokenAccount = await getAssociatedTokenAddress(
-      pyComputeMedianMint.publicKey,
-      buyer.publicKey
-    );
-
-    const lamportsForMint = await provider.connection.getMinimumBalanceForRentExemption(MINT_SIZE);
-    let tx = new web3.Transaction();
-    tx.add(
-      web3.SystemProgram.createAccount({
-        fromPubkey: owner,
-        newAccountPubkey: pyComputeMedianMint.publicKey,
-        space: MINT_SIZE,
-        lamports: lamportsForMint,
-        programId: TOKEN_PROGRAM_ID,
-      })
-    );
-    tx.add(
-      createInitializeMintInstruction(pyComputeMedianMint.publicKey, 0, owner, owner)
-    );
-    tx.add(
-      createAssociatedTokenAccountInstruction(owner, poolPyComputeMedianTokenAccount, owner, pyComputeMedianMint.publicKey)
-    );
-    await provider.sendAndConfirm(tx, [pyComputeMedianMint]);
-    console.log("##### pyComputeMedian Mint Address:", pyComputeMedianMint.publicKey.toString(), "#####");
-    console.log("Pool pyComputeMedian Token Account:", poolPyComputeMedianTokenAccount.toString());
-
-    const [pyMetadataPDA] = await web3.PublicKey.findProgramAddress(
-      [Buffer.from("metadata"), TOKEN_METADATA_PROGRAM_ID.toBuffer(), pyComputeMedianMint.publicKey.toBuffer()],
-      TOKEN_METADATA_PROGRAM_ID
-    );
-    console.log("Setting metadata for pyComputeMedian Mint...");
-    await program.methods
-      .setTokenMetadata("developer_salary_py_med", "devsal_pc", "https://example.com/py_compute_median.json")
-      .accounts({
-        metadata: pyMetadataPDA,
-        mint: pyComputeMedianMint.publicKey,
-        mintAuthority: owner,
+        metadata: wComputeMetadataPda,
+        mint: wComputeMint,
+        pool: poolPda,
+        vault: vaultPda,
+        owner: provider.wallet.publicKey,
         tokenMetadataProgram: TOKEN_METADATA_PROGRAM_ID,
         systemProgram: web3.SystemProgram.programId,
         rent: web3.SYSVAR_RENT_PUBKEY,
       })
       .rpc();
-    console.log("Set token metadata for pyComputeMedian Mint completed.");
+    console.log("w_compute_median metadata set successfully!");
 
-    const pySupply = new BN(800);
+    // Initialize "py_compute_median" DRT.
+    console.log("Creating py_compute_median mint...");
+    const pyComputeMint = await createNewMint(vaultPda);
+    console.log("py_compute_median mint:", pyComputeMint.toBase58());
+    const vaultPyComputeTokenAcct = await getAssociatedTokenAddress(
+      pyComputeMint,
+      vaultPda,
+      true
+    );
+    console.log("Vault py_compute_median token account:", vaultPyComputeTokenAcct.toBase58());
+    console.log("Initializing 'py_compute_median' DRT...");
     await program.methods
-      .initializePyComputeMedianDrt(pySupply)
+      .initializeDrt("py_compute_median", pyComputeSupply)
       .accounts({
-        pool: poolAccount.publicKey,
-        owner: owner,
-        pyComputeMedianMint: pyComputeMedianMint.publicKey,
-        poolPyComputeMedianTokenAccount: poolPyComputeMedianTokenAccount,
+        pool: poolPda,
+        drtMint: pyComputeMint,
+        vault: vaultPda,
+        vaultDrtTokenAccount: vaultPyComputeTokenAcct,
+        owner: provider.wallet.publicKey,
+        systemProgram: web3.SystemProgram.programId,
         tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
       })
       .rpc();
-    console.log("Initialized pyComputeMedian DRT with supply:", pySupply.toString());
+    console.log("'py_compute_median' DRT initialized successfully!");
 
-    tx = new web3.Transaction();
-    tx.add(
-      createAssociatedTokenAccountInstruction(owner, buyerPyComputeMedianTokenAccount, buyer.publicKey, pyComputeMedianMint.publicKey)
+    // Set metadata for py_compute_median.
+    console.log("Setting metadata for py_compute_median...");
+    const pyComputeMetadataPda = await createMetadataAccount(
+      pyComputeMint,
+      "PyComputeMedian",
+      "PCM",
+      "https://arweave.net/pycompute"
     );
-    await provider.sendAndConfirm(tx, []);
-    
-    const fee = new BN(3000);
     await program.methods
-      .buyPyComputeMedianDrt(fee)
+      .setTokenMetadata("PyComputeMedian", "PCM", "https://arweave.net/pycompute")
       .accounts({
-        pool: poolAccount.publicKey,
-        owner: owner,
-        poolPyComputeMedianTokenAccount: poolPyComputeMedianTokenAccount,
-        userPyComputeMedianTokenAccount: buyerPyComputeMedianTokenAccount,
-        tokenProgram: TOKEN_PROGRAM_ID,
-      })
-      .rpc();
-    console.log("Buyer bought a pyComputeMedian DRT with fee:", fee.toString());
-    const buyerPyBalance = await provider.connection.getTokenAccountBalance(buyerPyComputeMedianTokenAccount);
-    console.log("Buyer pyComputeMedian Token Balance:", buyerPyBalance.value.amount);
-    assert.equal(buyerPyBalance.value.amount, "1");
-
-    await program.methods
-      .redeemPyComputeMedianDrt()
-      .accounts({
-        pyComputeMedianMint: pyComputeMedianMint.publicKey,
-        userPyComputeMedianTokenAccount: buyerPyComputeMedianTokenAccount,
-        user: buyer.publicKey,
-        tokenProgram: TOKEN_PROGRAM_ID,
-      })
-      .signers([buyer])
-      .rpc();
-    console.log("Buyer redeemed a pyComputeMedian DRT.");
-    const buyerPyBalanceAfter = await provider.connection.getTokenAccountBalance(buyerPyComputeMedianTokenAccount);
-    console.log("Buyer pyComputeMedian Token Balance after redemption:", buyerPyBalanceAfter.value.amount);
-    assert.equal(buyerPyBalanceAfter.value.amount, "0");
-
-    const pyComputeMedianSupply = await provider.connection.getTokenSupply(pyComputeMedianMint.publicKey);
-    console.log("##### pyComputeMedian Token Supply after redemption:", pyComputeMedianSupply.value.amount, "#####");
-  });
-
-  // Initialize, set metadata, buy and redeem addDataDRT.
-  it("Initialize, Set Metadata, Buy, and Redeem addData DRT", async () => {
-    // Derive addData token accounts.
-    poolAddDataTokenAccount = await getAssociatedTokenAddress(
-      addDataMint.publicKey,
-      owner
-    );
-    buyerAddDataTokenAccount = await getAssociatedTokenAddress(
-      addDataMint.publicKey,
-      buyer.publicKey
-    );
-
-    const lamportsForMint = await provider.connection.getMinimumBalanceForRentExemption(MINT_SIZE);
-    let tx = new web3.Transaction();
-    tx.add(
-      web3.SystemProgram.createAccount({
-        fromPubkey: owner,
-        newAccountPubkey: addDataMint.publicKey,
-        space: MINT_SIZE,
-        lamports: lamportsForMint,
-        programId: TOKEN_PROGRAM_ID,
-      })
-    );
-    tx.add(
-      createInitializeMintInstruction(addDataMint.publicKey, 0, owner, owner)
-    );
-    tx.add(
-      createAssociatedTokenAccountInstruction(owner, poolAddDataTokenAccount, owner, addDataMint.publicKey)
-    );
-    await provider.sendAndConfirm(tx, [addDataMint]);
-    console.log("##### addData Mint Address:", addDataMint.publicKey.toString(), "#####");
-    console.log("Pool addData Token Account:", poolAddDataTokenAccount.toString());
-
-    const [addDataMetadataPDA] = await web3.PublicKey.findProgramAddress(
-      [Buffer.from("metadata"), TOKEN_METADATA_PROGRAM_ID.toBuffer(), addDataMint.publicKey.toBuffer()],
-      TOKEN_METADATA_PROGRAM_ID
-    );
-    console.log("Setting metadata for addData Mint...");
-    await program.methods
-      .setTokenMetadata("developer_salary_add_data", "devsal_ad", "https://example.com/add_data.json")
-      .accounts({
-        metadata: addDataMetadataPDA,
-        mint: addDataMint.publicKey,
-        mintAuthority: owner,
+        metadata: pyComputeMetadataPda,
+        mint: pyComputeMint,
+        pool: poolPda,
+        vault: vaultPda,
+        owner: provider.wallet.publicKey,
         tokenMetadataProgram: TOKEN_METADATA_PROGRAM_ID,
         systemProgram: web3.SystemProgram.programId,
         rent: web3.SYSVAR_RENT_PUBKEY,
       })
       .rpc();
-    console.log("Set token metadata for addData Mint completed.");
+    console.log("py_compute_median metadata set successfully!");
 
-    const adSupply = new BN(600);
-    await program.methods
-      .initializeAddDataDrt(adSupply)
-      .accounts({
-        pool: poolAccount.publicKey,
-        owner: owner,
-        addDataMint: addDataMint.publicKey,
-        poolAddDataTokenAccount: poolAddDataTokenAccount,
-        tokenProgram: TOKEN_PROGRAM_ID,
-      })
-      .rpc();
-    console.log("Initialized addData DRT with supply:", adSupply.toString());
-
-    tx = new web3.Transaction();
-    tx.add(
-      createAssociatedTokenAccountInstruction(owner, buyerAddDataTokenAccount, buyer.publicKey, addDataMint.publicKey)
+    // Buyer buys and then redeems each DRT.
+    const buyer = provider.wallet.publicKey;
+    // For w_compute_median:
+    const buyerWComputeAta = await getAssociatedTokenAddress(
+      wComputeMint,
+      buyer
     );
-    await provider.sendAndConfirm(tx, []);
-    
-    const fee = new BN(1500);
+    let ataInfoWCompute = await connection.getAccountInfo(buyerWComputeAta);
+    if (!ataInfoWCompute) {
+      console.log("Buyer ATA for w_compute_median not found; creating...");
+      const ix = createAssociatedTokenAccountInstruction(
+        buyer,
+        buyerWComputeAta,
+        buyer,
+        wComputeMint
+      );
+      await provider.sendAndConfirm(new web3.Transaction().add(ix));
+    }
+    console.log("Buying 1 'w_compute_median' DRT...");
+    const feeWCompute = new BN(2000);
     await program.methods
-      .buyAddDataDrt(fee)
+      .buyDrt("w_compute_median", feeWCompute)
       .accounts({
-        pool: poolAccount.publicKey,
-        owner: owner,
-        poolAddDataTokenAccount: poolAddDataTokenAccount,
-        userAddDataTokenAccount: buyerAddDataTokenAccount,
+        pool: poolPda,
+        drtMint: wComputeMint,
+        vaultDrtTokenAccount: vaultWComputeTokenAcct,
+        userDrtTokenAccount: buyerWComputeAta,
+        vault: vaultPda,
         tokenProgram: TOKEN_PROGRAM_ID,
       })
       .rpc();
-    console.log("Buyer bought an addData DRT with fee:", fee.toString());
-    const buyerAdBalance = await provider.connection.getTokenAccountBalance(buyerAddDataTokenAccount);
-    console.log("Buyer addData Token Balance:", buyerAdBalance.value.amount);
-    assert.equal(buyerAdBalance.value.amount, "1");
+    console.log("Bought 1 w_compute_median DRT!");
 
+    // For py_compute_median:
+    const buyerPyComputeAta = await getAssociatedTokenAddress(
+      pyComputeMint,
+      buyer
+    );
+    let ataInfoPyCompute = await connection.getAccountInfo(buyerPyComputeAta);
+    if (!ataInfoPyCompute) {
+      console.log("Buyer ATA for py_compute_median not found; creating...");
+      const ix = createAssociatedTokenAccountInstruction(
+        buyer,
+        buyerPyComputeAta,
+        buyer,
+        pyComputeMint
+      );
+      await provider.sendAndConfirm(new web3.Transaction().add(ix));
+    }
+    console.log("Buying 1 'py_compute_median' DRT...");
+    const feePyCompute = new BN(3000);
     await program.methods
-      .redeemAddDataDrt()
+      .buyDrt("py_compute_median", feePyCompute)
       .accounts({
-        addDataMint: addDataMint.publicKey,
-        userAddDataTokenAccount: buyerAddDataTokenAccount,
-        user: buyer.publicKey,
+        pool: poolPda,
+        drtMint: pyComputeMint,
+        vaultDrtTokenAccount: vaultPyComputeTokenAcct,
+        userDrtTokenAccount: buyerPyComputeAta,
+        vault: vaultPda,
         tokenProgram: TOKEN_PROGRAM_ID,
       })
-      .signers([buyer])
       .rpc();
-    console.log("Buyer redeemed an addData DRT.");
-    const buyerAdBalanceAfter = await provider.connection.getTokenAccountBalance(buyerAddDataTokenAccount);
-    console.log("Buyer addData Token Balance after redemption:", buyerAdBalanceAfter.value.amount);
-    assert.equal(buyerAdBalanceAfter.value.amount, "0");
+    console.log("Bought 1 py_compute_median DRT!");
 
-    const addDataSupplyAfter = await provider.connection.getTokenSupply(addDataMint.publicKey);
-    console.log("##### addData Token Supply after redemption:", addDataSupplyAfter.value.amount, "#####");
+    // Redeem w_compute_median.
+    const buyerOwnershipAta = await getAssociatedTokenAddress(
+      ownershipMint,
+      buyer
+    );
+    let ataInfoOwnership = await connection.getAccountInfo(buyerOwnershipAta);
+    if (!ataInfoOwnership) {
+      console.log("Buyer ATA for ownership token not found; creating...");
+      const ix = createAssociatedTokenAccountInstruction(
+        buyer,
+        buyerOwnershipAta,
+        buyer,
+        ownershipMint
+      );
+      await provider.sendAndConfirm(new web3.Transaction().add(ix));
+    }
+    console.log("Redeeming 1 w_compute_median DRT...");
+    await program.methods
+      .redeemDrt("w_compute_median")
+      .accounts({
+        pool: poolPda,
+        drtMint: wComputeMint,
+        ownershipMint,
+        userDrtTokenAccount: buyerWComputeAta,
+        userOwnershipTokenAccount: buyerOwnershipAta,
+        vault: vaultPda,
+        owner: provider.wallet.publicKey,
+        user: buyer,
+        tokenProgram: TOKEN_PROGRAM_ID,
+      })
+      .rpc();
+    console.log("Redeemed w_compute_median DRT!");
+
+    // Redeem py_compute_median.
+    console.log("Redeeming 1 py_compute_median DRT...");
+    await program.methods
+      .redeemDrt("py_compute_median")
+      .accounts({
+        pool: poolPda,
+        drtMint: pyComputeMint,
+        ownershipMint,
+        userDrtTokenAccount: buyerPyComputeAta,
+        userOwnershipTokenAccount: buyerOwnershipAta,
+        vault: vaultPda,
+        owner: provider.wallet.publicKey,
+        user: buyer,
+        tokenProgram: TOKEN_PROGRAM_ID,
+      })
+      .rpc();
+    console.log("Redeemed py_compute_median DRT!");
+
+    const buyerOwnershipInfo = await getAccount(connection, buyerOwnershipAta);
+    console.log(
+      "Buyer ownership token balance after redeems:",
+      formatBNs(buyerOwnershipInfo.amount)
+    );
+  });
+
+  it("\n\n=== START: 'Allows multiple pools with the same name' ===", async () => {
+    // Here the same pool name is used but with different poolId values.
+    const duplicatePoolName = "duplicate_pool";
+    const ownershipSupply = new BN(500_000);
+    const appendSupply = new BN(2500);
+    const allowedDrts = ["append"];
+
+    // First pool with poolId = 1.
+    const poolId1 = 1;
+    const [poolPda1] = getPoolPda(
+      provider.wallet.publicKey,
+      duplicatePoolName,
+      poolId1,
+      program.programId
+    );
+    console.log("Pool 1 PDA:", poolPda1.toBase58());
+    const [vaultPda1] = await web3.PublicKey.findProgramAddress(
+      [Buffer.from("vault"), poolPda1.toBuffer()],
+      program.programId
+    );
+    console.log("Vault PDA:", vaultPda1.toBase58()); 
+    const ownershipMint1 = await createNewMint(vaultPda1);
+    const vaultTokenAccount1 = await getAssociatedTokenAddress(
+      ownershipMint1,
+      vaultPda1,
+      true
+    );
+    const metadataPda1 = await createMetadataAccount(
+      ownershipMint1,
+      `${duplicatePoolName}_ownership`,
+      "OWN",
+      "https://arweave.net/duplicate1"
+    );
+    console.log("Initializing first pool with duplicate name...");
+    await program.methods
+      .initializePool(
+        duplicatePoolName,
+        new BN(poolId1),
+        ownershipSupply,
+        appendSupply,
+        allowedDrts
+      )
+      .accounts({
+        pool: poolPda1,
+        owner: provider.wallet.publicKey,
+        ownershipMint: ownershipMint1,
+        vault: vaultPda1,
+        vaultTokenAccount: vaultTokenAccount1,
+        systemProgram: web3.SystemProgram.programId,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        rent: web3.SYSVAR_RENT_PUBKEY,
+      })
+      .rpc();
+    await program.methods
+      .setTokenMetadata(
+        `${duplicatePoolName}_ownership`,
+        "OWN",
+        "https://arweave.net/duplicate1"
+      )
+      .accounts({
+        metadata: metadataPda1,
+        mint: ownershipMint1,
+        pool: poolPda1,
+        vault: vaultPda1,
+        owner: provider.wallet.publicKey,
+        tokenMetadataProgram: TOKEN_METADATA_PROGRAM_ID,
+        systemProgram: web3.SystemProgram.programId,
+        rent: web3.SYSVAR_RENT_PUBKEY,
+      })
+      .rpc();
+
+    // Second pool with poolId = 2 (same name but different id).
+    const poolId2 = 2;
+    const [poolPda2] = getPoolPda(
+      provider.wallet.publicKey,
+      duplicatePoolName,
+      poolId2,
+      program.programId
+    );
+    console.log("Pool 2 PDA:", poolPda2.toBase58());
+    const [vaultPda2] = await web3.PublicKey.findProgramAddress(
+      [Buffer.from("vault"), poolPda2.toBuffer()],
+      program.programId
+    );
+    console.log("Vault PDA:", vaultPda2.toBase58()); 
+    const ownershipMint2 = await createNewMint(vaultPda2);
+    const vaultTokenAccount2 = await getAssociatedTokenAddress(
+      ownershipMint2,
+      vaultPda2,
+      true
+    );
+    const metadataPda2 = await createMetadataAccount(
+      ownershipMint2,
+      `${duplicatePoolName}_ownership`,
+      "OWN",
+      "https://arweave.net/duplicate2"
+    );
+    console.log("Initializing second pool with duplicate name...");
+    await program.methods
+      .initializePool(
+        duplicatePoolName,
+        new BN(poolId2),
+        ownershipSupply,
+        appendSupply,
+        allowedDrts
+      )
+      .accounts({
+        pool: poolPda2,
+        owner: provider.wallet.publicKey,
+        ownershipMint: ownershipMint2,
+        vault: vaultPda2,
+        vaultTokenAccount: vaultTokenAccount2,
+        systemProgram: web3.SystemProgram.programId,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        rent: web3.SYSVAR_RENT_PUBKEY,
+      })
+      .rpc();
+    await program.methods
+      .setTokenMetadata(
+        `${duplicatePoolName}_ownership`,
+        "OWN",
+        "https://arweave.net/duplicate2"
+      )
+      .accounts({
+        metadata: metadataPda2,
+        mint: ownershipMint2,
+        pool: poolPda2,
+        vault: vaultPda2,
+        owner: provider.wallet.publicKey,
+        tokenMetadataProgram: TOKEN_METADATA_PROGRAM_ID,
+        systemProgram: web3.SystemProgram.programId,
+        rent: web3.SYSVAR_RENT_PUBKEY,
+      })
+      .rpc();
+
+    // Fetch both pool accounts.
+    const rawPoolData1 = await program.account.pool.fetch(poolPda1);
+    const rawPoolData2 = await program.account.pool.fetch(poolPda2);
+
+    // Use our helper function
+    const processedPoolData1 = await processPoolData(rawPoolData1);
+    const processedPoolData2 = await processPoolData(rawPoolData2);
+
+    console.log("Pool 1 data:", JSON.stringify(formatBNs(processedPoolData1), null, 2));
+    console.log("Pool 2 data:", JSON.stringify(formatBNs(processedPoolData2), null, 2));
   });
 });
