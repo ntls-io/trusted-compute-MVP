@@ -1,3 +1,4 @@
+#![allow(unexpected_cfgs)]
 // Nautilus Trusted Compute
 // Copyright (C) 2025 Nautilus
 //
@@ -14,17 +15,17 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-#![allow(unexpected_cfgs)] // Suppress Solana config warnings
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program;
 use anchor_lang::solana_program::program_pack::Pack;
 use anchor_spl::{
     associated_token::AssociatedToken,
-    token::{self, Burn, Mint, MintTo, Token, TokenAccount, Transfer},
     token::spl_token,
+    token::{self, Burn, Mint, MintTo, Token, TokenAccount, Transfer},
 };
+use mpl_token_metadata::ID as METADATA_PROGRAM_ID;
 
-declare_id!("4ThASJWEwoHzEsdWU94WmLhDG3gaDUQFNF7LjgaDfrPk");
+declare_id!("C1meQCYX6KokZ2bJN7GPRmJyvPy2nZHTMxEFyKyJTLQr");
 
 /// The vault account holds tokens and is a PDA.
 #[account]
@@ -43,17 +44,13 @@ pub struct DrtRedeemed {
     pub timestamp: i64,
 }
 
-
 /// The Pool stores configuration and the mints/supplies for several DRT types.
-/// A new field `pool_id` is added so that multiple pools with the same name (but different IDs)
-/// can be created.
 #[account]
 pub struct Pool {
     pub bump: u8,
     pub pool_id: u64,
     pub name: String,
     pub owner: Pubkey,
-    pub fee_accumulator: u64,
     pub ownership_mint: Pubkey,
     pub append_mint: Option<Pubkey>,
     pub ownership_supply: u64,
@@ -89,6 +86,10 @@ pub enum ErrorCode {
     NotTokenOwner,
     #[msg("Insufficient tokens for redemption")]
     InsufficientTokens,
+    #[msg("No fees available for redemption")]
+    NoFeesAvailable,
+    #[msg("Invalid redemption amount")]
+    InvalidRedemptionAmount,
 }
 
 /// Helper: Mint tokens from a mint to a destination using the vault’s PDA.
@@ -119,10 +120,6 @@ pub mod drt_manager {
     use super::*;
 
     /// Initializes the pool.
-    ///
-    /// The pool account is created as a PDA using seeds:
-    /// `[b"pool", owner.key(), pool_name.as_bytes(), &pool_id.to_le_bytes()]`
-    /// which allows multiple pools (per owner) with the same name as long as they have different IDs.
     #[access_control(InitializePool::validate(&ctx, &pool_name, pool_id))]
     pub fn initialize_pool(
         ctx: Context<InitializePool>,
@@ -136,7 +133,6 @@ pub mod drt_manager {
         pool.name = pool_name.clone();
         pool.pool_id = pool_id;
         pool.owner = ctx.accounts.owner.key();
-        pool.fee_accumulator = 0;
         pool.ownership_mint = ctx.accounts.ownership_mint.key();
         pool.append_mint = None;
         pool.ownership_supply = ownership_supply;
@@ -146,7 +142,11 @@ pub mod drt_manager {
         pool.w_compute_supply = None;
         pool.py_compute_supply = None;
         pool.allowed_drts = allowed_drts;
-        msg!("Pool initialized with name: {} and owner: {}", pool_name, pool.owner);
+        msg!(
+            "Pool initialized with name: {} and owner: {}",
+            pool_name,
+            pool.owner
+        );
 
         let vault_bump = ctx.bumps.vault;
         let vault = &mut ctx.accounts.vault;
@@ -168,10 +168,13 @@ pub mod drt_manager {
         Ok(())
     }
 
+    /// Initializes the fee vault.
+    pub fn initialize_fee_vault(_ctx: Context<InitializeFeeVault>) -> Result<()> {
+        msg!("Fee vault initialized.");
+        Ok(())
+    }
+
     /// Initializes a DRT.
-    ///
-    /// If the pool owner calls this instruction, a new DRT type is allowed (if not already present);
-    /// otherwise, the DRT type must already be allowed.
     #[access_control(InitializeDrt::validate(&ctx, &drt_type, drt_supply))]
     pub fn initialize_drt(
         ctx: Context<InitializeDrt>,
@@ -222,37 +225,54 @@ pub mod drt_manager {
             }
             _ => return Err(ErrorCode::InvalidDRTType.into()),
         }
-        msg!("Initialized DRT type: {} with supply: {}", drt_type, drt_supply);
+        msg!(
+            "Initialized DRT type: {} with supply: {}",
+            drt_type,
+            drt_supply
+        );
         Ok(())
     }
 
     /// Generic “buy” instruction for any DRT.
     #[access_control(BuyDrt::validate(&ctx, &drt_type, fee))]
     pub fn buy_drt(ctx: Context<BuyDrt>, drt_type: String, fee: u64) -> Result<()> {
-        let pool = &mut ctx.accounts.pool;
+        let pool = &ctx.accounts.pool;
         let vault_drt_mint = ctx.accounts.drt_mint.key();
         if drt_type == "append" {
             if pool.append_mint.is_none() || pool.append_mint.unwrap() != vault_drt_mint {
                 return Err(ErrorCode::DRTNotInitialized.into());
             }
         } else if drt_type == "w_compute_median" {
-            if pool.w_compute_median_mint.is_none() || pool.w_compute_median_mint.unwrap() != vault_drt_mint {
+            if pool.w_compute_median_mint.is_none()
+                || pool.w_compute_median_mint.unwrap() != vault_drt_mint
+            {
                 return Err(ErrorCode::DRTNotInitialized.into());
             }
         } else if drt_type == "py_compute_median" {
-            if pool.py_compute_median_mint.is_none() || pool.py_compute_median_mint.unwrap() != vault_drt_mint {
+            if pool.py_compute_median_mint.is_none()
+                || pool.py_compute_median_mint.unwrap() != vault_drt_mint
+            {
                 return Err(ErrorCode::DRTNotInitialized.into());
             }
         } else {
             return Err(ErrorCode::InvalidDRTType.into());
         }
 
-        pool.fee_accumulator = pool.fee_accumulator
-            .checked_add(fee)
-            .ok_or(ErrorCode::Overflow)?;
         let vault_bump = ctx.bumps.vault;
         let pool_key = ctx.accounts.pool.key();
         let seeds = &[b"vault", pool_key.as_ref(), &[vault_bump]];
+
+        // Transfer fee lamports from the buyer’s wallet to the fee vault.
+        anchor_lang::system_program::transfer(
+            CpiContext::new(
+                ctx.accounts.system_program.to_account_info(),
+                anchor_lang::system_program::Transfer {
+                    from: ctx.accounts.buyer_wallet.to_account_info(),
+                    to: ctx.accounts.fee_vault.to_account_info(),
+                },
+            ),
+            fee,
+        )?;
 
         token::transfer(
             CpiContext::new_with_signer(
@@ -273,7 +293,6 @@ pub mod drt_manager {
     #[access_control(RedeemDrt::validate(&ctx, &drt_type))]
     pub fn redeem_drt(ctx: Context<RedeemDrt>, drt_type: String) -> Result<()> {
         let mint_before = ctx.accounts.drt_mint.supply;
-        // Burn the DRT token upon redemption.
         token::burn(
             CpiContext::new(
                 ctx.accounts.token_program.to_account_info(),
@@ -285,15 +304,13 @@ pub mod drt_manager {
             ),
             1,
         )?;
-
         let mint_after = ctx.accounts.drt_mint.supply;
         msg!(
             "{} DRT burned - Supply changed from {} to {}",
-            drt_type, 
-            mint_before, 
+            drt_type,
+            mint_before,
             mint_after
         );
-
         emit!(DrtRedeemed {
             pool: ctx.accounts.pool.key(),
             drt_type: drt_type.clone(),
@@ -301,12 +318,10 @@ pub mod drt_manager {
             new_supply: mint_after,
             timestamp: Clock::get()?.unix_timestamp,
         });
-
         if drt_type == "append" {
             let vault_bump = ctx.bumps.vault;
             let pool_key = ctx.accounts.pool.key();
             let seeds = &[b"vault", pool_key.as_ref(), &[vault_bump]];
-    
             token::mint_to(
                 CpiContext::new_with_signer(
                     ctx.accounts.token_program.to_account_info(),
@@ -317,7 +332,7 @@ pub mod drt_manager {
                     },
                     &[seeds],
                 ),
-                1, // Mint 1 ownership token
+                1,
             )?;
             msg!("Append DRT redeemed and 1 ownership token minted as reward");
         } else {
@@ -326,9 +341,54 @@ pub mod drt_manager {
         Ok(())
     }
 
+    /// Allows users to redeem ownership tokens for accumulated fees.
+    #[access_control(RedeemOwnershipTokens::validate(&ctx, amount))]
+    pub fn redeem_ownership_tokens(ctx: Context<RedeemOwnershipTokens>, amount: u64) -> Result<()> {
+        let total_supply = ctx.accounts.ownership_mint.supply;
+        let fee_vault_info = ctx.accounts.fee_vault.to_account_info();
+        let fee_vault_balance = fee_vault_info.lamports();
+        let rent = Rent::get()?;
+        let min_balance = rent.minimum_balance(fee_vault_info.data_len());
+        let available_fees = fee_vault_balance
+            .checked_sub(min_balance)
+            .ok_or(ErrorCode::NoFeesAvailable)?;
+        let fee_share = (available_fees as u128)
+            .checked_mul(amount as u128)
+            .ok_or(ErrorCode::Overflow)?
+            .checked_div(total_supply as u128)
+            .ok_or(ErrorCode::Overflow)?;
+        require!(fee_share > 0, ErrorCode::NoFeesAvailable);
+        let fee_lamports = fee_share as u64;
+        token::burn(
+            CpiContext::new(
+                ctx.accounts.token_program.to_account_info(),
+                Burn {
+                    mint: ctx.accounts.ownership_mint.to_account_info(),
+                    from: ctx.accounts.user_ownership_token_account.to_account_info(),
+                    authority: ctx.accounts.user.to_account_info(),
+                },
+            ),
+            amount,
+        )?;
+        **ctx
+            .accounts
+            .fee_vault
+            .to_account_info()
+            .try_borrow_mut_lamports()? -= fee_lamports;
+        **ctx
+            .accounts
+            .user_wallet
+            .to_account_info()
+            .try_borrow_mut_lamports()? += fee_lamports;
+        msg!(
+            "Redeemed {} ownership tokens for {} lamports in fees",
+            amount,
+            fee_lamports
+        );
+        Ok(())
+    }
+
     /// Sets token metadata using the Metaplex Metadata program.
-    ///
-    /// Creates on‑chain metadata for the specified mint.
     #[access_control(SetTokenMetadata::validate(&ctx))]
     pub fn set_token_metadata(
         ctx: Context<SetTokenMetadata>,
@@ -336,7 +396,12 @@ pub mod drt_manager {
         symbol: String,
         uri: String,
     ) -> Result<()> {
-        if !ctx.accounts.token_metadata_program.to_account_info().executable {
+        if !ctx
+            .accounts
+            .token_metadata_program
+            .to_account_info()
+            .executable
+        {
             msg!("Token metadata program not executable; skipping CPI.");
             return Ok(());
         }
@@ -369,8 +434,7 @@ pub mod drt_manager {
             update_authority: (ctx.accounts.vault.key(), true),
             system_program: ctx.accounts.system_program.key(),
             rent: Some(ctx.accounts.rent.key()),
-        }
-        .instruction(args);
+        }.instruction(args);
 
         let ix_converted = solana_program::instruction::Instruction {
             program_id: ix.program_id,
@@ -407,13 +471,13 @@ pub struct InitializePool<'info> {
         payer = owner,
         space = 8 + 500
     )]
-    pub pool: Account<'info, Pool>,
+    pub pool: Box<Account<'info, Pool>>,
 
     #[account(mut)]
     pub owner: Signer<'info>,
 
     #[account(mut)]
-    pub ownership_mint: Account<'info, Mint>,
+    pub ownership_mint: Box<Account<'info, Mint>>,
 
     #[account(
         init,
@@ -422,7 +486,7 @@ pub struct InitializePool<'info> {
         seeds = [b"vault", pool.key().as_ref()],
         bump
     )]
-    pub vault: Account<'info, Vault>,
+    pub vault: Box<Account<'info, Vault>>,
 
     #[account(
         init,
@@ -439,18 +503,34 @@ pub struct InitializePool<'info> {
 }
 
 #[derive(Accounts)]
+pub struct InitializeFeeVault<'info> {
+    /// CHECK: This account is initialized as a PDA.
+    #[account(
+        init,
+        payer = owner,
+        space = 8,
+        seeds = [b"fee_vault", pool.key().as_ref()],
+        bump,
+    )]
+    pub fee_vault: AccountInfo<'info>,
+    pub pool: Box<Account<'info, Pool>>,
+    #[account(mut)]
+    pub owner: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
 pub struct InitializeDrt<'info> {
     #[account(mut)]
-    pub pool: Account<'info, Pool>,
+    pub pool: Box<Account<'info, Pool>>,
     #[account(mut)]
-    pub drt_mint: Account<'info, Mint>,
-    /// CHECK: This is the vault PDA derived from seed "vault".
+    pub drt_mint: Box<Account<'info, Mint>>,
     #[account(
         mut,
         seeds = [b"vault", pool.key().as_ref()],
         bump,
     )]
-    pub vault: Account<'info, Vault>,
+    pub vault: Box<Account<'info, Vault>>,
     #[account(
         init,
         payer = owner,
@@ -468,49 +548,54 @@ pub struct InitializeDrt<'info> {
 #[derive(Accounts)]
 pub struct BuyDrt<'info> {
     #[account(mut)]
-    pub pool: Account<'info, Pool>,
+    pub pool: Box<Account<'info, Pool>>,
     #[account(mut)]
-    pub drt_mint: Account<'info, Mint>,
+    pub drt_mint: Box<Account<'info, Mint>>,
     #[account(
         mut,
         associated_token::mint = drt_mint,
         associated_token::authority = vault,
     )]
     pub vault_drt_token_account: Box<Account<'info, TokenAccount>>,
-    /// CHECK: Buyer’s associated token account for the DRT.
     #[account(mut)]
-    pub user_drt_token_account: AccountInfo<'info>,
-    /// CHECK: This is the vault PDA derived from seed "vault".
+    pub user_drt_token_account: Box<Account<'info, TokenAccount>>,
     #[account(
         mut,
         seeds = [b"vault", pool.key().as_ref()],
         bump,
     )]
-    pub vault: Account<'info, Vault>,
+    pub vault: Box<Account<'info, Vault>>,
+    /// CHECK: This is the fee vault PDA.
+    #[account(
+        mut,
+        seeds = [b"fee_vault", pool.key().as_ref()],
+        bump,
+    )]
+    pub fee_vault: AccountInfo<'info>,
+    #[account(mut)]
+    pub buyer_wallet: Signer<'info>,
     pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]
 pub struct RedeemDrt<'info> {
     #[account(mut)]
-    pub pool: Account<'info, Pool>,
+    pub pool: Box<Account<'info, Pool>>,
     #[account(mut)]
-    pub drt_mint: Account<'info, Mint>,
+    pub drt_mint: Box<Account<'info, Mint>>,
     #[account(mut)]
-    pub ownership_mint: Account<'info, Mint>,
-    /// CHECK: Buyer’s token account holding one DRT.
+    pub ownership_mint: Box<Account<'info, Mint>>,
     #[account(mut)]
-    pub user_drt_token_account: AccountInfo<'info>,
-    /// CHECK: Buyer’s token account for the ownership token.
+    pub user_drt_token_account: Box<Account<'info, TokenAccount>>,
     #[account(mut)]
-    pub user_ownership_token_account: AccountInfo<'info>,
-    /// CHECK: This is the vault PDA derived from seed "vault".
+    pub user_ownership_token_account: Box<Account<'info, TokenAccount>>,
     #[account(
         mut,
         seeds = [b"vault", pool.key().as_ref()],
         bump,
     )]
-    pub vault: Account<'info, Vault>,
+    pub vault: Box<Account<'info, Vault>>,
     #[account(mut)]
     pub owner: Signer<'info>,
     #[account(mut)]
@@ -523,25 +608,53 @@ pub struct SetTokenMetadata<'info> {
     /// CHECK: Metadata account.
     #[account(mut)]
     pub metadata: AccountInfo<'info>,
-    /// CHECK: Mint account.
     #[account(mut)]
-    pub mint: AccountInfo<'info>,
-    pub pool: Account<'info, Pool>,
-    /// CHECK: This is the vault PDA derived from seed "vault".
+    pub mint: Box<Account<'info, Mint>>,
+    pub pool: Box<Account<'info, Pool>>,
     #[account(
         mut,
         seeds = [b"vault", pool.key().as_ref()],
         bump,
     )]
-    pub vault: Account<'info, Vault>,
+    pub vault: Box<Account<'info, Vault>>,
     #[account(mut)]
     pub owner: Signer<'info>,
-    /// CHECK: We trust the provided token metadata program.
-    #[account(address = mpl_token_metadata::ID)]
+    /// CHECK: This is the Metaplex Token Metadata Program
+    #[account(address = METADATA_PROGRAM_ID)]
     pub token_metadata_program: AccountInfo<'info>,
     #[account(address = anchor_lang::system_program::ID)]
     pub system_program: Program<'info, System>,
     pub rent: Sysvar<'info, Rent>,
+}
+
+#[derive(Accounts)]
+pub struct RedeemOwnershipTokens<'info> {
+    #[account(mut)]
+    pub pool: Box<Account<'info, Pool>>,
+    #[account(mut)]
+    pub ownership_mint: Box<Account<'info, Mint>>,
+    #[account(mut)]
+    pub user_ownership_token_account: Box<Account<'info, TokenAccount>>,
+    /// CHECK: This is the user's wallet that will receive redeemed fees.
+    #[account(mut)]
+    pub user_wallet: AccountInfo<'info>,
+    /// CHECK: This is the fee vault PDA.
+    #[account(
+        mut,
+        seeds = [b"fee_vault", pool.key().as_ref()],
+        bump,
+    )]
+    pub fee_vault: AccountInfo<'info>,
+    #[account(
+        mut,
+        seeds = [b"vault", pool.key().as_ref()],
+        bump,
+    )]
+    pub vault: Box<Account<'info, Vault>>,
+    #[account(mut)]
+    pub user: Signer<'info>,
+    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
 }
 
 impl<'info> InitializePool<'info> {
@@ -554,12 +667,10 @@ impl<'info> InitializePool<'info> {
 
 impl<'info> InitializeDrt<'info> {
     pub fn validate(ctx: &Context<InitializeDrt>, drt_type: &str, drt_supply: u64) -> Result<()> {
-        // Only pool owner can initialize DRTs.
         require!(
             ctx.accounts.owner.key() == ctx.accounts.pool.owner,
             ErrorCode::Unauthorized
         );
-        // Validate DRT type.
         require!(
             matches!(
                 drt_type,
@@ -576,7 +687,6 @@ impl<'info> BuyDrt<'info> {
     pub fn validate(ctx: &Context<BuyDrt>, drt_type: &str, fee: u64) -> Result<()> {
         let pool = &ctx.accounts.pool;
         let vault_drt_mint = ctx.accounts.drt_mint.key();
-
         match drt_type {
             "append" => {
                 require!(
@@ -632,10 +742,13 @@ impl<'info> RedeemDrt<'info> {
             }
             _ => return Err(ErrorCode::InvalidDRTType.into()),
         }
-
-        let token_account =
-            spl_token::state::Account::unpack(&ctx.accounts.user_drt_token_account.data.borrow())
-                .map_err(|_| ErrorCode::InsufficientTokens)?;
+        let token_account = spl_token::state::Account::unpack(
+            &ctx.accounts
+                .user_drt_token_account
+                .to_account_info()
+                .data
+                .borrow(),
+        ).map_err(|_| ErrorCode::InsufficientTokens)?;
         require!(
             ctx.accounts.user.key() == token_account.owner,
             ErrorCode::NotTokenOwner
@@ -650,6 +763,28 @@ impl<'info> SetTokenMetadata<'info> {
         require!(
             ctx.accounts.owner.key() == ctx.accounts.pool.owner,
             ErrorCode::Unauthorized
+        );
+        Ok(())
+    }
+}
+
+impl<'info> RedeemOwnershipTokens<'info> {
+    pub fn validate(ctx: &Context<RedeemOwnershipTokens>, amount: u64) -> Result<()> {
+        require!(amount > 0, ErrorCode::InvalidRedemptionAmount);
+        let token_account = spl_token::state::Account::unpack(
+            &ctx.accounts
+                .user_ownership_token_account
+                .to_account_info()
+                .data
+                .borrow(),
+        ).map_err(|_| ErrorCode::InsufficientTokens)?;
+        require!(
+            ctx.accounts.user.key() == token_account.owner,
+            ErrorCode::NotTokenOwner
+        );
+        require!(
+            token_account.amount >= amount,
+            ErrorCode::InsufficientTokens
         );
         Ok(())
     }

@@ -39,4 +39,3 @@ idl-build = [
 anchor-lang = "0.30.1"
 anchor-spl = { version = "0.30.1", features = ["token"] }
 mpl-token-metadata = "5.1.0"
-solana-pubkey = "2.2.0"
