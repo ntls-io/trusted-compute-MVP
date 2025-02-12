@@ -47,7 +47,7 @@ model Pool {
 model User {
     id            String    @id
     clerkId       String    @unique  // Clerk user_id
-    walletAddress String    @unique  // Primary wallet address
+    walletAddress String?    @unique  // Primary wallet address
     createdAt     DateTime  @default(now())
     updatedAt     DateTime  @updatedAt
 

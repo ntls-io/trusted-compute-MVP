@@ -18,36 +18,70 @@
 
 "use client";
 
-import { Inter } from 'next/font/google';
-import './globals.css';
-import { ClerkProvider, SignedIn, SignedOut, RedirectToSignIn } from '@clerk/nextjs';
-import LayoutClient from './LayoutClient';
-import { usePathname } from 'next/navigation';
+import { useMemo } from "react";
+import { ClerkProvider } from "@clerk/nextjs";
+import { Inter } from "next/font/google";
+import "./globals.css";
 
-const inter = Inter({ subsets: ['latin'] });
+// Wallet adapter imports:
+import { WalletAdapterNetwork } from "@solana/wallet-adapter-base";
+import { clusterApiUrl } from "@solana/web3.js";
+import { ConnectionProvider, WalletProvider } from "@solana/wallet-adapter-react";
+import { WalletModalProvider } from "@solana/wallet-adapter-react-ui";
+import { PhantomWalletAdapter, SolflareWalletAdapter } from "@solana/wallet-adapter-wallets";
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname() ?? ""; // Ensure pathname is always a string
-  const isAuthPage = pathname.startsWith('/sign-in') || pathname.startsWith('/sign-up');
+// Default styles
+import "@solana/wallet-adapter-react-ui/styles.css";
+
+import LayoutClient from "./LayoutClient";
+import { SignedIn, SignedOut, RedirectToSignIn } from "@clerk/nextjs";
+import { usePathname } from "next/navigation";
+
+const inter = Inter({ subsets: ["latin"] });
+
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const network = WalletAdapterNetwork.Devnet;
+  const endpoint = useMemo(() => clusterApiUrl(network), [network]);
+  const wallets = useMemo(
+    () => [
+      new PhantomWalletAdapter(), 
+      new SolflareWalletAdapter({ network })
+    ],
+    [network]
+  );
+
+  const pathname = usePathname() ?? "";
+  const isAuthPage =
+    pathname.startsWith("/sign-in") || pathname.startsWith("/sign-up");
 
   return (
     <ClerkProvider>
       <html lang="en" suppressHydrationWarning>
         <body className={inter.className} suppressHydrationWarning>
-          <div id="app-root">
-            {isAuthPage ? (
-              children
-            ) : (
-              <>
-                <SignedIn>
-                  <LayoutClient>{children}</LayoutClient>
-                </SignedIn>
-                <SignedOut>
-                  <RedirectToSignIn />
-                </SignedOut>
-              </>
-            )}
-          </div>
+          <ConnectionProvider endpoint={endpoint}>
+            <WalletProvider wallets={wallets} autoConnect>
+              <WalletModalProvider>
+                <div id="app-root">
+                  {isAuthPage ? (
+                    children
+                  ) : (
+                    <>
+                      <SignedIn>
+                        <LayoutClient>{children}</LayoutClient>
+                      </SignedIn>
+                      <SignedOut>
+                        <RedirectToSignIn />
+                      </SignedOut>
+                    </>
+                  )}
+                </div>
+              </WalletModalProvider>
+            </WalletProvider>
+          </ConnectionProvider>
         </body>
       </html>
     </ClerkProvider>
