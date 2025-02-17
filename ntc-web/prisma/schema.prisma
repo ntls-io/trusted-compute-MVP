@@ -28,7 +28,10 @@ model Pool {
     id                  String    @id @default(uuid())
     name                String
     description         String
-    chainAddress        String    @unique  // Reference to on-chain pool program
+    chainAddress        String    @unique  // Pool PDA (on-chain pool address)
+    vaultAddress         String    // Vault PDA
+    feeVaultAddress      String    // Fee vault PDA
+    ownershipMintAddress String    // Ownership mint address
     schemaDefinition    Json
     ownerId            String    // References User who created/owns the pool
     createdAt          DateTime  @default(now())

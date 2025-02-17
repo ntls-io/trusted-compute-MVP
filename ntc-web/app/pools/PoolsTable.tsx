@@ -61,7 +61,7 @@ interface Pool {
   description: string;
   contractAddress: string;
   schemaDefinition: JSON; 
-  enclaveMeasurement: EnclaveMeasurement;
+  enclaveMeasurement?: EnclaveMeasurement;
   allowedDRTs: {
     drt: DRT;
   }[];
@@ -82,6 +82,25 @@ const EnclaveDialog = ({ pool, onAttest }: { pool: Pool; onAttest: () => void })
     await onAttest();
     setIsAttesting(false);
   };
+
+  // Early return if no enclave measurement
+  if (!pool.enclaveMeasurement) {
+    return (
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Enclave Verification - {pool.name}</DialogTitle>
+          <DialogDescription>
+            No enclave measurements available for this pool
+          </DialogDescription>
+        </DialogHeader>
+        <Alert>
+          <AlertDescription>
+            This pool does not have any enclave measurements configured.
+          </AlertDescription>
+        </Alert>
+      </DialogContent>
+    );
+  }
 
   return (
     <DialogContent className="max-w-2xl">
@@ -275,6 +294,17 @@ export function PoolsTable() {
   };
 
   const handleAttestation = async (pool: Pool) => {
+    if (!pool.enclaveMeasurement) {
+      setAttestationResults({
+        ...attestationResults,
+        [pool.id]: {
+          success: false,
+          error: 'No enclave measurements available'
+        }
+      });
+      return;
+    }
+
     await new Promise(resolve => setTimeout(resolve, 2000));
     setAttestationResults({
       ...attestationResults,
@@ -416,9 +446,14 @@ export function PoolsTable() {
                             variant="outline"
                             size="sm"
                             className={attestationResults[pool.id]?.success ? 'bg-green-50' : ''}
+                            disabled={!pool.enclaveMeasurement}
                           >
                             <Shield className="w-4 h-4 mr-2" />
-                            {attestationResults[pool.id]?.success ? 'Verified' : 'Verify Enclave'}
+                            {!pool.enclaveMeasurement 
+                              ? 'No Enclave Measurements'
+                              : attestationResults[pool.id]?.success 
+                                ? 'Verified' 
+                                : 'Verify Enclave'}
                           </Button>
                         </DialogTrigger>
                         <EnclaveDialog 
