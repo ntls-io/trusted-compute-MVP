@@ -35,8 +35,8 @@ Secure WASM binary execution environment with data sealing/unsealing capabilitie
 ### Front-end Next.js (/NTC-WEB)
 Next.js-based front-end for managing and interacting with Nautilus Trusted Compute.
 
-### Smart Contracts (/TBD)
-TBD blockchain integration for trusted compute verification and orchestration.
+### Solana Smart Contract (/drt-manager)
+Solana blockchain integration for trusted compute verification and orchestration.
 
 ### Oracle Node (/TBD)
 Blockchain network validator that validates the state of the blockchain.
