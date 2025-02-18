@@ -1,21 +1,3 @@
-/**
- * Nautilus Trusted Compute
- * Copyright (C) 2025 Nautilus
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Affero General Public License as published
- * by the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Affero General Public License for more details.
- *
- * You should have received a copy of the GNU Affero General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
-
 "use client"
 
 import React, { useState, useEffect, JSX } from 'react'
@@ -825,61 +807,69 @@ function PoolCreationStep({
         </div>
       </div>
 
-      {/* Pool ID (read-only) */}
-      <div>
-        <label className="text-sm font-medium block mb-1">Pool ID</label>
-        <Input
-          type="number"
-          value={poolId}
-          readOnly
-          className="bg-gray-100 cursor-not-allowed"
-        />
-      </div>
-
-      {/* Supplies in one gray box */}
-      <div className="p-4 bg-gray-50 rounded-md space-y-4">
-        <div>
-          <label className="block text-sm font-medium mb-1">Ownership Token Supply</label>
-          <Input
-            type="number"
-            min={1}
-            value={ownershipSupply}
-            onChange={(e) => setOwnershipSupply(Number(e.target.value))}
-          />
+      {/* Supplies displayed with dynamic positioning */}
+      <div className="p-4 bg-gray-50 rounded-md">
+        <div className="grid grid-cols-2 gap-4">
+          {/* Left column */}
+          <div className="space-y-4">
+            {/* Always show ownership */}
+            <div className="flex items-center space-x-2">
+              <label className="text-sm font-medium">Ownership Token Supply:</label>
+              <Input
+                type="number"
+                min={1}
+                value={ownershipSupply}
+                onChange={(e) => setOwnershipSupply(Number(e.target.value))}
+                className="w-32"
+              />
+            </div>
+            
+            {/* Show append if selected */}
+            {appendSelected && (
+              <div className="flex items-center space-x-2">
+                <label className="text-sm font-medium">Append DRT Supply:</label>
+                <Input
+                  type="number"
+                  min={1}
+                  value={appendSupply}
+                  onChange={(e) => setAppendSupply(Number(e.target.value))}
+                  className="w-32"
+                />
+              </div>
+            )}
+          </div>
+          
+          {/* Right column */}
+          <div className="space-y-4 flex flex-col items-end">
+            {/* W Compute if selected */}
+            {wComputeSelected && (
+              <div className="flex items-center space-x-2">
+                <label className="text-sm font-medium">W Compute Median DRT Supply:</label>
+                <Input
+                  type="number"
+                  min={1}
+                  value={wComputeSupply}
+                  onChange={(e) => setWComputeSupply(Number(e.target.value))}
+                  className="w-32"
+                />
+              </div>
+            )}
+            
+            {/* Py Compute if selected */}
+            {pyComputeSelected && (
+              <div className="flex items-center space-x-2">
+                <label className="text-sm font-medium">Py Compute Median DRT Supply:</label>
+                <Input
+                  type="number"
+                  min={1}
+                  value={pyComputeSupply}
+                  onChange={(e) => setPyComputeSupply(Number(e.target.value))}
+                  className="w-32"
+                />
+              </div>
+            )}
+          </div>
         </div>
-        {appendSelected && (
-          <div>
-            <label className="block text-sm font-medium mb-1">Append DRT Supply</label>
-            <Input
-              type="number"
-              min={1}
-              value={appendSupply}
-              onChange={(e) => setAppendSupply(Number(e.target.value))}
-            />
-          </div>
-        )}
-        {wComputeSelected && (
-          <div>
-            <label className="block text-sm font-medium mb-1">W Compute Median DRT Supply</label>
-            <Input
-              type="number"
-              min={1}
-              value={wComputeSupply}
-              onChange={(e) => setWComputeSupply(Number(e.target.value))}
-            />
-          </div>
-        )}
-        {pyComputeSelected && (
-          <div>
-            <label className="block text-sm font-medium mb-1">Py Compute Median DRT Supply</label>
-            <Input
-              type="number"
-              min={1}
-              value={pyComputeSupply}
-              onChange={(e) => setPyComputeSupply(Number(e.target.value))}
-            />
-          </div>
-        )}
       </div>
 
       {/* # wallet signatures required */}
@@ -897,7 +887,7 @@ function PoolCreationStep({
         </Button>
         <Button
           onClick={handleCreatePool}
-          disabled={isSubmitting}
+          disabled={!poolNameLocked || !description.trim() || isSubmitting}
           className={buttonBaseClass}
         >
           {isSubmitting ? 'Creating Pool...' : 'Create Pool'}

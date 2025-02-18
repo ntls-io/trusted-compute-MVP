@@ -31,6 +31,12 @@ export async function GET(req: Request) {
     }
     const userId = user.id;
 
+    const allUserPools = await prisma.pool.findMany({
+        where: { ownerId: userId },
+        select: { name: true, poolSequenceId: true }
+      });
+      console.log(`All pools for user ${userId}:`, allUserPools);
+
     // Debugging: log user info
     console.log(`🔍 Fetching pool ID for user: ${userId}`);
 
@@ -48,11 +54,13 @@ export async function GET(req: Request) {
       // Find the highest existing poolSequenceId for this user and pool name
       const highestSequencePool = await prisma.pool.findFirst({
         where: {
-          ownerId: userId,
-          name: {
-            equals: name,
-            mode: 'insensitive' // Make the search case insensitive
-          }
+            owner: {
+                clerkId: userId
+            },
+            name: {
+                equals: name,
+                mode: 'insensitive' // Make the search case insensitive
+            }
         },
         orderBy: {
           poolSequenceId: 'desc'
