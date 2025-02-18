@@ -1,11 +1,45 @@
+/**
+ * Nautilus Trusted Compute
+ * Copyright (C) 2025 Nautilus
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as published
+ * by the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, JSX } from "react";
 import { BN } from "@coral-xyz/anchor";
 import * as anchor from "@coral-xyz/anchor";
 import { useDrtProgram } from "@/lib/useDrtProgram";
 import { createPool, createNewMint, initializeDRT } from "@/lib/drtHelpers";
 import { useWallet } from "@solana/wallet-adapter-react";
+import { RefreshCcw, Check, Wallet, AlertTriangle } from "lucide-react";
+
+interface Progress {
+  step: number;
+  total: number;
+  message: string;
+  icon: JSX.Element;
+  status: 'loading' | 'success' | 'error';
+  details?: string;
+}
+
+type StepType = {
+  name: string;
+  description: string;
+  walletSignatureRequired: boolean;
+};
 
 const CreatePoolDashboardForm = () => {
   const program = useDrtProgram();
@@ -27,33 +61,139 @@ const CreatePoolDashboardForm = () => {
   const [wComputeSupply, setWComputeSupply] = useState(800);
   const [pyComputeSupply, setPyComputeSupply] = useState(800);
 
-  const [status, setStatus] = useState("");
+  // Overall progress state
+  const [progress, setProgress] = useState<Progress | null>(null);
+  const [steps, setSteps] = useState<StepType[]>([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Calculate total steps based on selections
+  useEffect(() => {
+    const calculateSteps = () => {
+      const stepsList: StepType[] = [
+        {
+          name: "Create Ownership Mint",
+          description: "Creating the ownership token mint",
+          walletSignatureRequired: true
+        },
+        {
+          name: "Initialize Pool",
+          description: "Setting up the pool on-chain",
+          walletSignatureRequired: true
+        },
+        {
+          name: "Initialize Fee Vault",
+          description: "Setting up the fee vault",
+          walletSignatureRequired: true
+        }
+      ];
+
+      if (appendSelected) {
+        stepsList.push(
+          {
+            name: "Create Append Mint",
+            description: "Creating the Append DRT mint",
+            walletSignatureRequired: true
+          },
+          {
+            name: "Initialize Append DRT",
+            description: "Setting up the Append DRT",
+            walletSignatureRequired: true
+          }
+        );
+      }
+
+      if (wComputeSelected) {
+        stepsList.push(
+          {
+            name: "Create W Compute Mint",
+            description: "Creating the W Compute DRT mint",
+            walletSignatureRequired: true
+          },
+          {
+            name: "Initialize W Compute DRT",
+            description: "Setting up the W Compute DRT",
+            walletSignatureRequired: true
+          }
+        );
+      }
+
+      if (pyComputeSelected) {
+        stepsList.push(
+          {
+            name: "Create Py Compute Mint",
+            description: "Creating the Py Compute DRT mint",
+            walletSignatureRequired: true
+          },
+          {
+            name: "Initialize Py Compute DRT",
+            description: "Setting up the Py Compute DRT",
+            walletSignatureRequired: true
+          }
+        );
+      }
+
+      stepsList.push(
+        {
+          name: "Save Pool Metadata",
+          description: "Saving pool data off-chain",
+          walletSignatureRequired: false
+        }
+      );
+
+      return stepsList;
+    };
+
+    setSteps(calculateSteps());
+  }, [appendSelected, wComputeSelected, pyComputeSelected]);
+
+  // Helper to update overall progress
+  const updateProgress = (
+    step: number,
+    message: string,
+    status: 'loading' | 'success' | 'error' = 'loading',
+    details?: string
+  ) => {
+    const totalSteps = steps.length;
+    const icon = status === 'loading' 
+      ? <RefreshCcw size={18} className="animate-spin text-blue-500" />
+      : status === 'success' 
+        ? <Check size={18} className="text-green-500" /> 
+        : <AlertTriangle size={18} className="text-red-500" />;
+
+    setProgress({
+      step,
+      total: totalSteps,
+      message,
+      icon,
+      status,
+      details
+    });
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!program || !publicKey) {
-      setStatus("Wallet not connected or program not loaded.");
+      updateProgress(0, "Wallet not connected or program not loaded.", 'error');
       return;
     }
 
+    setIsSubmitting(true);
     try {
-      // Calculate the number of selected DRT types.
-      const selectedCount =
-        (appendSelected ? 1 : 0) +
-        (wComputeSelected ? 1 : 0) +
-        (pyComputeSelected ? 1 : 0);
-      // Total steps: 2 (pool creation) + 2 * (DRT types) + 2 (final off-chain save)
-      const totalSteps = 4 + 2 * selectedCount;
-      let step = 1;
-
-      // Step 1: Create the pool on-chain.
-      setStatus(`Step ${step}/${totalSteps}: Creating pool on-chain...`);
-      // Build allowedDrts array from checkboxes.
+      // Validate that at least one DRT is selected
+      const selectedCount = (appendSelected ? 1 : 0) + (wComputeSelected ? 1 : 0) + (pyComputeSelected ? 1 : 0);
+      
+      let currentStep = 1;
       const allowedDrts: string[] = [];
       if (appendSelected) allowedDrts.push("append");
       if (wComputeSelected) allowedDrts.push("w_compute_median");
       if (pyComputeSelected) allowedDrts.push("py_compute_median");
 
+      // --- POOL CREATION PHASE ---
+      // Notify about wallet signature for creating ownership mint
+      updateProgress(currentStep, steps[currentStep-1].description, 'loading', 
+        "Please sign with your wallet to create the ownership token mint");
+      
+      // Create Pool calls multiple transactions internally
       const result = await createPool(
         program,
         program.provider as any,
@@ -62,20 +202,34 @@ const CreatePoolDashboardForm = () => {
         new BN(ownershipSupply),
         new BN(appendSelected ? appendSupply : 0),
         allowedDrts,
-        (msg: string) => console.log("createPool:", msg)
+        (status) => {
+          if (status.includes("1/3")) {
+            updateProgress(1, "Creating ownership token mint", 'loading', "Please sign with your wallet");
+          } else if (status.includes("2/3")) {
+            updateProgress(2, "Initializing pool on-chain", 'loading', "Please sign with your wallet");
+          } else if (status.includes("3/3")) {
+            updateProgress(3, "Initializing fee vault", 'loading', "Please sign with your wallet");
+          }
+        }
       );
+      
       const chainAddress = result.pool.toBase58();
-      setStatus(`Step ${++step}/${totalSteps}: Pool created on-chain! Chain address: ${chainAddress}`);
-
-      // Cast the provider to AnchorProvider so that createNewMint works.
+      updateProgress(3, "Pool and fee vault initialized", 'success');
+      
+      // --- DRT INITIALIZATION PHASE ---
       const provider = program.provider as anchor.AnchorProvider;
+      currentStep = 4; // Start at step 4 after pool creation
 
-      // For each selected DRT type, create a new mint and initialize on-chain.
       if (appendSelected) {
-        setStatus(`Step ${++step}/${totalSteps}: Creating new mint for Append DRT...`);
+        updateProgress(currentStep, "Creating mint for Append DRT", 'loading', 
+          "Please sign with your wallet to create the Append DRT mint");
         const appendMint = await createNewMint(provider, result.vault);
-        setStatus(`Step ${++step}/${totalSteps}: Initializing Append DRT on-chain...`);
-        const vaultAppendTokenAccount = await initializeDRT(
+        updateProgress(currentStep, "Mint for Append DRT created", 'success');
+
+        currentStep++;
+        updateProgress(currentStep, "Initializing Append DRT on-chain", 'loading',
+          "Please sign with your wallet to initialize the Append DRT");
+        await initializeDRT(
           program,
           result.pool,
           result.vault,
@@ -84,20 +238,20 @@ const CreatePoolDashboardForm = () => {
           new BN(appendSupply),
           "append"
         );
-        console.log("Append DRT Mint:", appendMint.toBase58());
-        console.log("Vault Append DRT Token Account:", vaultAppendTokenAccount.toBase58());
-        setStatus(`Step ${step}/${totalSteps}: Append DRT initialized.`);
+        updateProgress(currentStep, "Append DRT initialized", 'success');
+        currentStep++;
       }
 
       if (wComputeSelected) {
-        if (wComputeSupply <= 0) {
-          setStatus("Please provide a valid supply for W Compute Median.");
-          return;
-        }
-        setStatus(`Step ${++step}/${totalSteps}: Creating new mint for W Compute Median DRT...`);
+        updateProgress(currentStep, "Creating mint for W Compute Median DRT", 'loading',
+          "Please sign with your wallet to create the W Compute DRT mint");
         const wComputeMint = await createNewMint(provider, result.vault);
-        setStatus(`Step ${++step}/${totalSteps}: Initializing W Compute Median DRT on-chain...`);
-        const vaultWComputeTokenAccount = await initializeDRT(
+        updateProgress(currentStep, "Mint for W Compute Median created", 'success');
+
+        currentStep++;
+        updateProgress(currentStep, "Initializing W Compute Median DRT on-chain", 'loading',
+          "Please sign with your wallet to initialize the W Compute DRT");
+        await initializeDRT(
           program,
           result.pool,
           result.vault,
@@ -106,20 +260,20 @@ const CreatePoolDashboardForm = () => {
           new BN(wComputeSupply),
           "w_compute_median"
         );
-        console.log("W Compute Median Mint:", wComputeMint.toBase58());
-        console.log("Vault W Compute Token Account:", vaultWComputeTokenAccount.toBase58());
-        setStatus(`Step ${step}/${totalSteps}: W Compute Median DRT initialized.`);
+        updateProgress(currentStep, "W Compute Median DRT initialized", 'success');
+        currentStep++;
       }
 
       if (pyComputeSelected) {
-        if (pyComputeSupply <= 0) {
-          setStatus("Please provide a valid supply for Py Compute Median.");
-          return;
-        }
-        setStatus(`Step ${++step}/${totalSteps}: Creating new mint for Py Compute Median DRT...`);
+        updateProgress(currentStep, "Creating mint for Py Compute Median DRT", 'loading',
+          "Please sign with your wallet to create the Py Compute DRT mint");
         const pyComputeMint = await createNewMint(provider, result.vault);
-        setStatus(`Step ${++step}/${totalSteps}: Initializing Py Compute Median DRT on-chain...`);
-        const vaultPyComputeTokenAccount = await initializeDRT(
+        updateProgress(currentStep, "Mint for Py Compute Median created", 'success');
+
+        currentStep++;
+        updateProgress(currentStep, "Initializing Py Compute Median DRT on-chain", 'loading',
+          "Please sign with your wallet to initialize the Py Compute DRT");
+        await initializeDRT(
           program,
           result.pool,
           result.vault,
@@ -128,13 +282,12 @@ const CreatePoolDashboardForm = () => {
           new BN(pyComputeSupply),
           "py_compute_median"
         );
-        console.log("Py Compute Median Mint:", pyComputeMint.toBase58());
-        console.log("Vault Py Compute Token Account:", vaultPyComputeTokenAccount.toBase58());
-        setStatus(`Step ${step}/${totalSteps}: Py Compute Median DRT initialized.`);
+        updateProgress(currentStep, "Py Compute Median DRT initialized", 'success');
+        currentStep++;
       }
 
-      // Final steps: Save pool data off-chain.
-      setStatus(`Step ${++step}/${totalSteps}: Saving pool data off-chain...`);
+      // --- OFF-CHAIN SAVING PHASE ---
+      updateProgress(currentStep, "Saving pool data off-chain", 'loading');
       const payload = {
         name: poolName,
         description,
@@ -152,136 +305,278 @@ const CreatePoolDashboardForm = () => {
         },
       };
 
-      console.log("Sending payload to API:", payload);
       const res = await fetch("/api/pools-dashboard", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-
+      
       if (!res.ok) {
         const errorData = await res.json();
         throw new Error(errorData.error || "Failed to save pool to database");
       }
-
+      
       const responseData = await res.json();
       if (responseData.success) {
-        setStatus(`Step ${++step}/${totalSteps}: Pool successfully created and saved! Chain address: ${chainAddress}`);
+        updateProgress(currentStep, "Pool successfully created and saved!", 'success',
+          `Chain address: ${chainAddress}`);
       } else {
         throw new Error("Failed to save pool to database");
       }
-      
     } catch (error: any) {
       console.error("Form submission error:", error);
-      setStatus(`Error: ${error.message}`);
+      updateProgress(
+        progress?.step || 0, 
+        `Error during pool creation: ${error.message}`, 
+        'error',
+        "Please check console for details"
+      );
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   return (
-    <div className="p-4 border rounded shadow mb-4">
-      <h2 className="text-xl font-bold mb-2">Create New Pool</h2>
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <input
-          type="text"
-          placeholder="Pool Name"
-          value={poolName}
-          onChange={(e) => setPoolName(e.target.value)}
-          className="border p-1 rounded w-full"
-          required
-        />
-        <textarea
-          placeholder="Description"
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          className="border p-1 rounded w-full"
-          required
-        />
-        <p className="font-semibold">Pool ID:</p>
-        <input
-          type="number"
-          placeholder="Pool ID (number)"
-          value={poolId}
-          onChange={(e) => setPoolId(Number(e.target.value))}
-          className="border p-1 rounded w-full"
-          required
-        />
-        <p className="font-semibold">Enter Number of Ownership Tokens:</p>
-        <input
-          type="number"
-          placeholder="Ownership Supply (number)"
-          value={ownershipSupply}
-          onChange={(e) => setOwnershipSupply(Number(e.target.value))}
-          className="border p-1 rounded w-full"
-          required
-        />
+    <div className="p-6 border rounded-lg shadow-lg mb-6 bg-white dark:bg-gray-800">
+      <h2 className="text-2xl font-bold mb-4 text-gray-800 dark:text-white">Create New Pool</h2>
+      <form onSubmit={handleSubmit} className="space-y-5">
+        <div>
+          <label htmlFor="poolName" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            Pool Name
+          </label>
+          <input
+            id="poolName"
+            type="text"
+            placeholder="Enter pool name"
+            value={poolName}
+            onChange={(e) => setPoolName(e.target.value)}
+            className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+            required
+          />
+        </div>
 
-        {/* DRT Selection */}
-        <div className="border p-2 rounded">
-          <p className="font-semibold">Select DRT Types to Initialize:</p>
-          <div className="flex items-center space-x-2">
-            <label>
-              <input
-                type="checkbox"
-                checked={appendSelected}
-                onChange={(e) => setAppendSelected(e.target.checked)}
-              />{" "}
-              Append DRT
+        <div>
+          <label htmlFor="description" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            Description
+          </label>
+          <textarea
+            id="description"
+            placeholder="Describe the purpose of this pool"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+            rows={3}
+            required
+          />
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label htmlFor="poolId" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              Pool ID
             </label>
-            {appendSelected && (
-              <input
-                type="number"
-                placeholder="Append Supply"
-                value={appendSupply}
-                onChange={(e) => setAppendSupply(Number(e.target.value))}
-                className="border p-1 rounded w-32"
-              />
-            )}
+            <input
+              id="poolId"
+              type="number"
+              min="1"
+              placeholder="Pool ID (number)"
+              value={poolId}
+              onChange={(e) => setPoolId(Number(e.target.value))}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+              required
+            />
           </div>
-          <div className="flex items-center space-x-2">
-            <label>
-              <input
-                type="checkbox"
-                checked={wComputeSelected}
-                onChange={(e) => setWComputeSelected(e.target.checked)}
-              />{" "}
-              W Compute Median DRT
+          
+          <div>
+            <label htmlFor="ownershipSupply" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              Ownership Token Supply
             </label>
-            {wComputeSelected && (
-              <input
-                type="number"
-                placeholder="W Compute Supply"
-                value={wComputeSupply}
-                onChange={(e) => setWComputeSupply(Number(e.target.value))}
-                className="border p-1 rounded w-32"
-              />
-            )}
-          </div>
-          <div className="flex items-center space-x-2">
-            <label>
-              <input
-                type="checkbox"
-                checked={pyComputeSelected}
-                onChange={(e) => setPyComputeSelected(e.target.checked)}
-              />{" "}
-              Py Compute Median DRT
-            </label>
-            {pyComputeSelected && (
-              <input
-                type="number"
-                placeholder="Py Compute Supply"
-                value={pyComputeSupply}
-                onChange={(e) => setPyComputeSupply(Number(e.target.value))}
-                className="border p-1 rounded w-32"
-              />
-            )}
+            <input
+              id="ownershipSupply"
+              type="number"
+              min="1"
+              placeholder="Number of ownership tokens"
+              value={ownershipSupply}
+              onChange={(e) => setOwnershipSupply(Number(e.target.value))}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+              required
+            />
           </div>
         </div>
 
-        <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded">
-          Create Pool
-        </button>
+        {/* DRT Selection */}
+        <div className="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+          <h3 className="text-lg font-medium text-gray-800 dark:text-white mb-3">
+            Data Request Token (DRT) Types
+          </h3>
+          <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">
+            Select the types of DRTs to initialize for this pool. Each selection will require additional wallet signatures.
+          </p>
+          
+          <div className="space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center space-y-2 sm:space-y-0 sm:space-x-4">
+              <label className="inline-flex items-center">
+                <input
+                  type="checkbox"
+                  checked={appendSelected}
+                  onChange={(e) => setAppendSelected(e.target.checked)}
+                  className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                />
+                <span className="ml-2 text-gray-700 dark:text-gray-300">Append DRT</span>
+              </label>
+              {appendSelected && (
+                <div className="flex items-center">
+                  <span className="text-sm text-gray-500 dark:text-gray-400 mr-2">Supply:</span>
+                  <input
+                    type="number"
+                    min="1"
+                    placeholder="Supply"
+                    value={appendSupply}
+                    onChange={(e) => setAppendSupply(Number(e.target.value))}
+                    className="w-32 px-3 py-1 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+              )}
+            </div>
+            
+            <div className="flex flex-col sm:flex-row sm:items-center space-y-2 sm:space-y-0 sm:space-x-4">
+              <label className="inline-flex items-center">
+                <input
+                  type="checkbox"
+                  checked={wComputeSelected}
+                  onChange={(e) => setWComputeSelected(e.target.checked)}
+                  className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                />
+                <span className="ml-2 text-gray-700 dark:text-gray-300">W Compute Median DRT</span>
+              </label>
+              {wComputeSelected && (
+                <div className="flex items-center">
+                  <span className="text-sm text-gray-500 dark:text-gray-400 mr-2">Supply:</span>
+                  <input
+                    type="number"
+                    min="1"
+                    placeholder="Supply"
+                    value={wComputeSupply}
+                    onChange={(e) => setWComputeSupply(Number(e.target.value))}
+                    className="w-32 px-3 py-1 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+              )}
+            </div>
+            
+            <div className="flex flex-col sm:flex-row sm:items-center space-y-2 sm:space-y-0 sm:space-x-4">
+              <label className="inline-flex items-center">
+                <input
+                  type="checkbox"
+                  checked={pyComputeSelected}
+                  onChange={(e) => setPyComputeSelected(e.target.checked)}
+                  className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                />
+                <span className="ml-2 text-gray-700 dark:text-gray-300">Py Compute Median DRT</span>
+              </label>
+              {pyComputeSelected && (
+                <div className="flex items-center">
+                  <span className="text-sm text-gray-500 dark:text-gray-400 mr-2">Supply:</span>
+                  <input
+                    type="number"
+                    min="1"
+                    placeholder="Supply"
+                    value={pyComputeSupply}
+                    onChange={(e) => setPyComputeSupply(Number(e.target.value))}
+                    className="w-32 px-3 py-1 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between pt-4">
+          <div className="text-sm text-gray-500 dark:text-gray-400 flex items-center">
+            <Wallet size={16} className="mr-1" />
+            <span>
+              {steps.filter(step => step.walletSignatureRequired).length} wallet signatures required
+            </span>
+          </div>
+          <button 
+            type="submit" 
+            disabled={isSubmitting}
+            className={`px-6 py-3 rounded-md font-medium transition-all ${
+              isSubmitting 
+                ? 'bg-gray-400 cursor-not-allowed text-white' 
+                : 'bg-blue-600 hover:bg-blue-700 text-white shadow-md hover:shadow-lg'
+            }`}
+          >
+            {isSubmitting ? 'Creating Pool...' : 'Create Pool'}
+          </button>
+        </div>
       </form>
-      {status && <p className="mt-2 text-sm">{status}</p>}
+
+      {/* Enhanced progress display */}
+      {progress && (
+        <div className="mt-6 bg-gray-50 dark:bg-gray-700 p-4 rounded-lg">
+          <div className="mb-3 flex justify-between items-center">
+            <h3 className="font-medium text-gray-700 dark:text-gray-200">
+              Creation Progress
+            </h3>
+            <span className="text-sm font-medium text-gray-500 dark:text-gray-400">
+              Step {progress.step}/{progress.total}
+            </span>
+          </div>
+          
+          {/* Enhanced loading bar with gradient and animation */}
+          <div className="w-full h-2 bg-gray-200 dark:bg-gray-600 rounded-full overflow-hidden">
+            <div 
+              className={`h-full rounded-full transition-all duration-500 ${
+                progress.status === 'error' 
+                  ? 'bg-red-500' 
+                  : 'bg-gradient-to-r from-blue-400 to-blue-600'
+              }`}
+              style={{ 
+                width: `${Math.max((progress.step / progress.total) * 100, 5)}%`,
+                boxShadow: progress.status !== 'error' ? '0 0 8px rgba(59, 130, 246, 0.5)' : 'none'
+              }}
+            />
+          </div>
+          
+          {/* Current step message */}
+          <div className="mt-4 flex items-start space-x-3">
+            <div className={`p-2 rounded-full ${
+              progress.status === 'loading' ? 'bg-blue-100 dark:bg-blue-900/30' :
+              progress.status === 'success' ? 'bg-green-100 dark:bg-green-900/30' :
+              'bg-red-100 dark:bg-red-900/30'
+            }`}>
+              {progress.icon}
+            </div>
+            <div>
+              <div className="font-medium text-gray-800 dark:text-white">
+                {progress.message}
+              </div>
+              {progress.details && (
+                <p className="text-sm text-gray-600 dark:text-gray-300 mt-1">
+                  {progress.details}
+                </p>
+              )}
+            </div>
+          </div>
+          
+          {/* Step indicator circles */}
+          <div className="mt-6 flex items-center justify-center space-x-1">
+            {steps.map((_, index) => (
+              <div 
+                key={index}
+                className={`rounded-full transition-all duration-300 ${
+                  index < progress.step 
+                    ? 'bg-blue-500 w-2 h-2' 
+                    : index === progress.step - 1
+                      ? 'bg-blue-500 w-3 h-3 animate-pulse' 
+                      : 'bg-gray-300 dark:bg-gray-600 w-2 h-2'
+                }`}
+              />
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
