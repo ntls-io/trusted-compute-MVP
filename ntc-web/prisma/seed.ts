@@ -110,12 +110,13 @@ async function main() {
   console.log('✅ DRT Types created');
 
   // 🏦 Create pools with schema definitions and new on-chain addresses
+  // Using poolSequenceId for each pool
   const marketAnalysisPool = await prisma.pool.create({
     data: {
       name: 'Market Analysis Pool',
       description: 'Contains market trend data from 2023-2024',
+      poolSequenceId: 1, // First pool of this name for user1
       chainAddress: '7nYuwdHqwrxbr5CKqRqZY6ZduuB3ZSLJsBz8RPKkqvCp',
-      // New fields for on-chain addresses:
       vaultAddress: 'VaultPDA_marketAnalysis',
       feeVaultAddress: 'FeeVaultPDA_marketAnalysis',
       ownershipMintAddress: 'OwnershipMint_marketAnalysis',
@@ -156,6 +157,7 @@ async function main() {
     data: {
       name: 'Customer Insights',
       description: 'Aggregated customer behavior metrics',
+      poolSequenceId: 1, // First pool of this name for user2 
       chainAddress: 'BPFLoader2111111111111111111111111111111111',
       vaultAddress: 'VaultPDA_customerInsights',
       feeVaultAddress: 'FeeVaultPDA_customerInsights',
@@ -197,6 +199,7 @@ async function main() {
     data: {
       name: 'Financial Metrics',
       description: 'Quarterly financial performance data',
+      poolSequenceId: 1, // First pool of this name for user4
       chainAddress: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
       vaultAddress: 'VaultPDA_financialMetrics',
       feeVaultAddress: 'FeeVaultPDA_financialMetrics',
@@ -238,6 +241,7 @@ async function main() {
     data: {
       name: 'Developer Salaries',
       description: 'Monthly salary data for software developers',
+      poolSequenceId: 1, // First pool of this name for user4
       chainAddress: 'sdfhjkhasmnjjasdkhjkhsSsoadijsdklfjsd',
       vaultAddress: 'VaultPDA_developerSalary',
       feeVaultAddress: 'FeeVaultPDA_developerSalary',
@@ -273,7 +277,43 @@ async function main() {
         ]
       },
     },
-  });    
+  });  
+  
+  // Create a second Financial Metrics pool for user4 to demonstrate poolSequenceId incrementing
+  const financialMetricsPool2 = await prisma.pool.create({
+    data: {
+      name: 'Financial Metrics',
+      description: 'Annual financial performance data', // Different description
+      poolSequenceId: 2, // Second pool of this name for user4
+      chainAddress: 'F1nanc1alM3tr1cs2T0k3nAddressSec0ndInstance',
+      vaultAddress: 'VaultPDA_financialMetrics2',
+      feeVaultAddress: 'FeeVaultPDA_financialMetrics2',
+      ownershipMintAddress: 'OwnershipMint_financialMetrics2',
+      ownerId: user4.id,
+      schemaDefinition: {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "yearlyRevenue": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          },
+          "yearlyProfit": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          }
+        },
+        "required": [
+          "yearlyRevenue",
+          "yearlyProfit"
+        ]
+      },
+    },
+  });
 
   console.log('✅ Pools created');
 
@@ -288,6 +328,8 @@ async function main() {
       { poolId: financialMetricsPool.id, drtId: executeMedianPythonDrt.id },
       { poolId: developerSalaryPool.id, drtId: appendDrt.id },
       { poolId: developerSalaryPool.id, drtId: executeMedianPythonDrt.id },
+      { poolId: financialMetricsPool2.id, drtId: appendDrt.id }, // Add relationships for second pool
+      { poolId: financialMetricsPool2.id, drtId: executeMedianWASMDrt.id },
     ],
   });
 
@@ -331,6 +373,16 @@ async function main() {
       poolId: developerSalaryPool.id,
       mrenclave: 'JKASHDKLKJSDYS79s7d61972jkhsajkhfd76979asd',
       mrsigner: 'sdfkhg32j4h4jl32891789asldhnjksdaghkgwyiqu28',
+      isvProdId: '0',
+      isvSvn: '0',
+    },
+  });
+  
+  await prisma.enclaveMeasurement.create({
+    data: {
+      poolId: financialMetricsPool2.id,
+      mrenclave: 'JKASHDKLKJSDYS79s7d61972jkhsajkhfd76979bce',
+      mrsigner: 'sdfkhg32j4h4jl32891789asldhnjksdaghkgwyiqu99',
       isvProdId: '0',
       isvSvn: '0',
     },
@@ -430,6 +482,25 @@ async function main() {
         state: 'active',
         isListed: false,
         price: 2.4,
+      },
+      // DRT instances for the second financial metrics pool
+      {
+        mintAddress: 'financial2_append_1',
+        drtId: appendDrt.id,
+        poolId: financialMetricsPool2.id,
+        ownerId: user4.id,
+        state: 'active',
+        isListed: true,
+        price: 3.5,
+      },
+      {
+        mintAddress: 'financial2_wasm_1',
+        drtId: executeMedianWASMDrt.id,
+        poolId: financialMetricsPool2.id,
+        ownerId: user4.id,
+        state: 'active',
+        isListed: true,
+        price: 4.0,
       },
     ],
   });

@@ -16,10 +16,17 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-'use client'
+"use client"
 
-import React from 'react';
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect, JSX } from 'react'
+import { BN } from "@coral-xyz/anchor"
+import * as anchor from "@coral-xyz/anchor"
+import { useDrtProgram } from "@/lib/useDrtProgram"
+import { createPool, createNewMint, initializeDRT } from "@/lib/drtHelpers"
+import { useWallet } from "@solana/wallet-adapter-react"
+import { RefreshCcw, Check, AlertTriangle, Wallet, Copy } from "lucide-react"
+
+// UI components
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -28,21 +35,19 @@ import { Textarea } from "@/components/ui/textarea"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import FilePicker from '@/components/FilePicker';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { SchemaPreview, validateJsonSchema } from '@/components/schemaUtils';
 import PoolsTable from './PoolsTable'
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { Copy, Check } from 'lucide-react'
 
-// Common styles
+/* ------------------------------------------------------------------
+   Common Button Style Helpers
+------------------------------------------------------------------ */
 const buttonBaseClass = "bg-gray-900 text-white hover:bg-gray-800"
 const buttonOutlineClass = "border-2 border-gray-900 text-gray-900 hover:bg-gray-100"
 
-interface StepProps {
-  isActive: boolean;
-  onNext: () => void;
-  onPrev?: () => void;
-}
-
+/* ------------------------------------------------------------------
+   Types
+------------------------------------------------------------------ */
 interface DigitalRight {
   id: string;
   name: string;
@@ -51,20 +56,36 @@ interface DigitalRight {
   hash: string | null;
 }
 
-interface HashDisplayProps {
-  hash: string | null;
+interface StepProps {
+  isActive: boolean;
+  onNext: () => void;
+  onPrev?: () => void;
 }
 
 interface DigitalRightsTableProps {
   digitalRights: DigitalRight[];
-  selectedRights: string[];
-  setSelectedRights: (rights: string[]) => void;
+  onToggleRight: (right: DigitalRight, checked: boolean) => void;
+  appendSelected: boolean;
+  wComputeSelected: boolean;
+  pyComputeSelected: boolean;
 }
 
-const HashDisplay: React.FC<HashDisplayProps> = ({ hash }) => {
+interface Progress {
+  step: number;
+  total: number;
+  message: string;
+  icon: JSX.Element;
+  status: 'loading' | 'success' | 'error';
+  details?: string;
+}
+
+/* ------------------------------------------------------------------
+   HashDisplay - small helper for showing/copying a hash
+------------------------------------------------------------------ */
+function HashDisplay({ hash }: { hash: string | null }) {
   const [copied, setCopied] = useState(false);
   
-  if (!hash) return "-";
+  if (!hash) return <span>-</span>;
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(hash);
@@ -78,7 +99,7 @@ const HashDisplay: React.FC<HashDisplayProps> = ({ hash }) => {
     <TooltipProvider>
       <Tooltip>
         <TooltipTrigger asChild>
-          <div className="font-mono text-sm bg-gray-100 p-2 rounded-md overflow-x-auto whitespace-nowrap flex items-center justify-between group">
+          <div className="font-mono text-sm bg-gray-100 p-2 rounded-md overflow-x-auto whitespace-nowrap flex items-center justify-between group cursor-pointer">
             <span>{truncatedHash}</span>
             <Button
               variant="ghost"
@@ -100,13 +121,18 @@ const HashDisplay: React.FC<HashDisplayProps> = ({ hash }) => {
       </Tooltip>
     </TooltipProvider>
   );
-};
+}
 
-const DigitalRightsTable: React.FC<DigitalRightsTableProps> = ({ 
-  digitalRights, 
-  selectedRights, 
-  setSelectedRights 
-}) => {
+/* ------------------------------------------------------------------
+   DigitalRightsTable - Step 2 table
+------------------------------------------------------------------ */
+function DigitalRightsTable({
+  digitalRights,
+  onToggleRight,
+  appendSelected,
+  wComputeSelected,
+  pyComputeSelected
+}: DigitalRightsTableProps) {
   return (
     <Table>
       <TableHeader>
@@ -119,49 +145,55 @@ const DigitalRightsTable: React.FC<DigitalRightsTableProps> = ({
         </TableRow>
       </TableHeader>
       <TableBody>
-        {digitalRights.map((right) => (
-          <TableRow key={right.id}>
-            <TableCell className="font-medium">{right.name}</TableCell>
-            <TableCell>{right.description}</TableCell>
-            <TableCell>
-              {right.githubUrl ? (
-                <a 
-                  href={right.githubUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-blue-600 hover:text-blue-800 underline"
-                >
-                  View Source
-                </a>
-              ) : (
-                "-"
-              )}
-            </TableCell>
-            <TableCell>
-              <HashDisplay hash={right.hash} />
-            </TableCell>
-            <TableCell>
-              <Checkbox
-                checked={selectedRights.includes(right.id)}
-                onCheckedChange={(checked) => {
-                  if (checked) {
-                    setSelectedRights([...selectedRights, right.id])
-                  } else {
-                    setSelectedRights(selectedRights.filter(id => id !== right.id))
-                  }
-                }}
-              />
-            </TableCell>
-          </TableRow>
-        ))}
+        {digitalRights.map((right) => {
+          // We map the known names to booleans
+          let checked = false
+          if (right.name.toLowerCase().includes('append')) {
+            checked = appendSelected
+          } else if (right.name.toLowerCase().includes('wasm')) {
+            checked = wComputeSelected
+          } else if (right.name.toLowerCase().includes('python')) {
+            checked = pyComputeSelected
+          }
+
+          return (
+            <TableRow key={right.id}>
+              <TableCell className="font-medium">{right.name}</TableCell>
+              <TableCell>{right.description}</TableCell>
+              <TableCell>
+                {right.githubUrl ? (
+                  <a 
+                    href={right.githubUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 hover:text-blue-800 underline"
+                  >
+                    View Source
+                  </a>
+                ) : (
+                  "-"
+                )}
+              </TableCell>
+              <TableCell>
+                <HashDisplay hash={right.hash} />
+              </TableCell>
+              <TableCell>
+                <Checkbox
+                  checked={checked}
+                  onCheckedChange={(c) => onToggleRight(right, !!c)}
+                />
+              </TableCell>
+            </TableRow>
+          )
+        })}
       </TableBody>
     </Table>
   );
-};
+}
 
-export { HashDisplay, DigitalRightsTable };
-
-// Step 1: File Selection Component
+/* ------------------------------------------------------------------
+   Step 1: File Selection
+------------------------------------------------------------------ */
 function FileSelectionStep({ isActive, onNext }: StepProps) {
   const [schemaFile, setSchemaFile] = useState<File | null>(null)
   const [dataFile, setDataFile] = useState<File | null>(null)
@@ -171,7 +203,7 @@ function FileSelectionStep({ isActive, onNext }: StepProps) {
   })
   const [isValidating, setIsValidating] = useState(false)
 
-  // Reset state when component becomes inactive
+  // Reset when not active
   useEffect(() => {
     if (!isActive) {
       setSchemaFile(null)
@@ -257,9 +289,27 @@ function FileSelectionStep({ isActive, onNext }: StepProps) {
   )
 }
 
-// Step 2: Digital Rights Assignment
-function DigitalRightsStep({ isActive, onNext, onPrev }: StepProps) {
-  const [selectedRights, setSelectedRights] = useState<string[]>([])
+/* ------------------------------------------------------------------
+   Step 2: Select which DRTs to use
+------------------------------------------------------------------ */
+function DigitalRightsStep({
+  isActive,
+  onNext,
+  onPrev,
+  appendSelected,
+  setAppendSelected,
+  wComputeSelected,
+  setWComputeSelected,
+  pyComputeSelected,
+  setPyComputeSelected
+}: StepProps & {
+  appendSelected: boolean;
+  setAppendSelected: (b: boolean) => void;
+  wComputeSelected: boolean;
+  setWComputeSelected: (b: boolean) => void;
+  pyComputeSelected: boolean;
+  setPyComputeSelected: (b: boolean) => void;
+}) {
   const [digitalRights, setDigitalRights] = useState<DigitalRight[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -286,6 +336,17 @@ function DigitalRightsStep({ isActive, onNext, onPrev }: StepProps) {
     }
   }, [isActive])
 
+  const handleToggleRight = (right: DigitalRight, checked: boolean) => {
+    const name = right.name.toLowerCase()
+    if (name.includes('append')) {
+      setAppendSelected(checked)
+    } else if (name.includes('wasm')) {
+      setWComputeSelected(checked)
+    } else if (name.includes('python')) {
+      setPyComputeSelected(checked)
+    }
+  }
+
   if (!isActive) return null
 
   if (isLoading) {
@@ -311,8 +372,10 @@ function DigitalRightsStep({ isActive, onNext, onPrev }: StepProps) {
       <Card>
         <DigitalRightsTable 
           digitalRights={digitalRights}
-          selectedRights={selectedRights}
-          setSelectedRights={setSelectedRights}
+          onToggleRight={handleToggleRight}
+          appendSelected={appendSelected}
+          wComputeSelected={wComputeSelected}
+          pyComputeSelected={pyComputeSelected}
         />
       </Card>
 
@@ -322,7 +385,6 @@ function DigitalRightsStep({ isActive, onNext, onPrev }: StepProps) {
         </Button>
         <Button 
           onClick={onNext} 
-          disabled={selectedRights.length === 0}
           className={buttonBaseClass}
         >
           Next
@@ -332,147 +394,664 @@ function DigitalRightsStep({ isActive, onNext, onPrev }: StepProps) {
   )
 }
 
-// Step 3: Pool Description
-function DescriptionStep({ isActive, onNext, onPrev }: StepProps) {
-  const [name, setName] = useState('')
-  const [description, setDescription] = useState('')
-  const [validation, setValidation] = useState<{ error: string | null }>({ error: null })
+/* ------------------------------------------------------------------
+   Step 3: Final pool creation (Name, Description, Supplies, On-Chain)
+------------------------------------------------------------------ */
+function PoolCreationStep({
+  isActive,
+  onNext,
+  onPrev,
+  appendSelected,
+  wComputeSelected,
+  pyComputeSelected,
+}: StepProps & {
+  appendSelected: boolean;
+  wComputeSelected: boolean;
+  pyComputeSelected: boolean;
+}) {
+  const program = useDrtProgram();
+  const { publicKey } = useWallet();
 
-  const validateAndProceed = () => {
-    if (!name.trim()) {
-      setValidation({ error: 'Pool name is required' })
-      return
-    }
-    if (!description.trim()) {
-      setValidation({ error: 'Pool description is required' })
-      return
-    }
-    onNext()
-  }
+  // Pool-level fields
+  const [poolName, setPoolName] = useState("");
+  const [description, setDescription] = useState("");
+  const [poolId, setPoolId] = useState(1);
+  const [poolNameLocked, setPoolNameLocked] = useState(false);
+  const [isCheckingName, setIsCheckingName] = useState(false);
 
-  if (!isActive) return null
+  // Token supplies
+  const [ownershipSupply, setOwnershipSupply] = useState(1000000);
+  const [appendSupply, setAppendSupply] = useState(5000);
+  const [wComputeSupply, setWComputeSupply] = useState(800);
+  const [pyComputeSupply, setPyComputeSupply] = useState(800);
+
+  // Steps for on-chain creation
+  const [steps, setSteps] = useState<{
+    name: string;
+    walletSignatureRequired: boolean;
+  }[]>([]);
+
+  // Progress bar (show step=0 by default)
+  const [progress, setProgress] = useState<Progress>({
+    step: 0,
+    total: 1, // will set properly once we know how many steps
+    message: "Awaiting pool creation",
+    icon: <RefreshCcw size={18} className="animate-spin text-blue-500" />,
+    status: "loading",
+  });
+
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Handle locking the pool name and fetching the next sequence ID
+  const handleLockPoolName = async () => {
+    if (!poolName.trim() || !publicKey) {
+      // Show error if no wallet connected
+      if (!publicKey) {
+        alert("Please connect your wallet first");
+      }
+      return;
+    }
+    
+    setIsCheckingName(true);
+    try {
+      // Add debugging info to URL as query param for easier troubleshooting
+      const url = `/api/user-pool-next-id?name=${encodeURIComponent(poolName)}&_debug=${Date.now()}`;
+      console.log(`🔍 Fetching from: ${url}`);
+      
+      const res = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Cache-Control': 'no-cache' // Prevent caching issues
+        }
+      });
+      
+      // Log the raw response for debugging
+      console.log(`🔍 Response status: ${res.status}`);
+      
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error('API error response:', errorText);
+        
+        // Try to parse as JSON, but don't fail if it's not valid JSON
+        let errorJson;
+        try {
+          errorJson = JSON.parse(errorText);
+        } catch (e) {
+          // Not JSON, use text as is
+        }
+        
+        throw new Error(
+          errorJson?.error || 
+          `Failed to fetch next pool ID (Status ${res.status})`
+        );
+      }
+      
+      const data = await res.json();
+      console.log('API response data:', data);
+      
+      if (data.nextId !== undefined) {
+        setPoolId(data.nextId);
+        setPoolNameLocked(true);
+        
+        // Show warning if present
+        if (data.warning) {
+          console.warn(`API Warning: ${data.warning}`);
+        }
+      } else {
+        throw new Error("API response missing nextId field");
+      }
+    } catch (error) {
+      console.error("Error fetching next ID:", error);
+      
+      // Fallback to ID 1 if we can't get from API
+      setPoolId(1);
+      setPoolNameLocked(true);
+      
+      // Notify user but don't block them
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      alert(`Warning: Using fallback ID 1. Error details: ${errorMessage}`);
+    } finally {
+      setIsCheckingName(false);
+    }
+  };
+
+  // Calculate total steps based on selections
+  useEffect(() => {
+    const stepsList = [
+      { name: "Create Ownership Mint", walletSignatureRequired: true },
+      { name: "Initialize Pool", walletSignatureRequired: true },
+      { name: "Initialize Fee Vault", walletSignatureRequired: true },
+    ];
+    if (appendSelected) {
+      stepsList.push(
+        { name: "Create Append Mint", walletSignatureRequired: true },
+        { name: "Initialize Append DRT", walletSignatureRequired: true }
+      );
+    }
+    if (wComputeSelected) {
+      stepsList.push(
+        { name: "Create W Compute Mint", walletSignatureRequired: true },
+        { name: "Initialize W Compute DRT", walletSignatureRequired: true }
+      );
+    }
+    if (pyComputeSelected) {
+      stepsList.push(
+        { name: "Create Py Compute Mint", walletSignatureRequired: true },
+        { name: "Initialize Py Compute DRT", walletSignatureRequired: true }
+      );
+    }
+    // Save off-chain
+    stepsList.push(
+      { name: "Save Pool Metadata", walletSignatureRequired: false }
+    );
+    setSteps(stepsList);
+
+    // Also update total steps in the progress bar
+    setProgress(prev => ({
+      ...prev,
+      total: stepsList.length
+    }));
+  }, [appendSelected, wComputeSelected, pyComputeSelected]);
+
+  // Helper to update overall progress
+  const updateProgress = (
+    step: number,
+    message: string,
+    status: 'loading' | 'success' | 'error' = 'loading',
+    details?: string
+  ) => {
+    const totalSteps = steps.length;
+    const icon = status === 'loading' 
+      ? <RefreshCcw size={18} className="animate-spin text-blue-500" />
+      : status === 'success' 
+        ? <Check size={18} className="text-green-500" /> 
+        : <AlertTriangle size={18} className="text-red-500" />;
+
+    setProgress({
+      step,
+      total: totalSteps,
+      message,
+      icon,
+      status,
+      details
+    });
+  };
+
+  const handleCreatePool = async () => {
+    if (!program || !publicKey) {
+      updateProgress(0, "Wallet not connected or program not loaded.", 'error');
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      // Validate user inputs
+      if (!poolName.trim()) {
+        throw new Error("Pool name is required");
+      }
+      if (!description.trim()) {
+        throw new Error("Pool description is required");
+      }
+      if (!poolNameLocked) {
+        throw new Error("Please lock the pool name before creating");
+      }
+
+      // We track the step # in code
+      let currentStep = 1;
+
+      // Allowed DRT list
+      const allowedDrts: string[] = [];
+      if (appendSelected) allowedDrts.push("append");
+      if (wComputeSelected) allowedDrts.push("w_compute_median");
+      if (pyComputeSelected) allowedDrts.push("py_compute_median");
+
+      // Start the creation steps
+      updateProgress(
+        0,
+        "Starting on-chain creation...",
+        "loading",
+        "Please confirm your wallet is connected"
+      );
+
+      // 1) Create pool + ownership mint + fee vault
+      updateProgress(
+        currentStep,
+        "Creating ownership token mint",
+        "loading",
+        "Please sign with your wallet"
+      );
+
+      const result = await createPool(
+        program,
+        program.provider as any,
+        poolName,
+        poolId,
+        new BN(ownershipSupply),
+        new BN(appendSelected ? appendSupply : 0),
+        allowedDrts,
+        (status) => {
+          // We can parse your existing status callback
+          if (status.includes("1/3")) {
+            updateProgress(1, "Creating ownership token mint", 'loading', "Please sign with your wallet");
+          } else if (status.includes("2/3")) {
+            updateProgress(2, "Initializing pool on-chain", 'loading', "Please sign with your wallet");
+          } else if (status.includes("3/3")) {
+            updateProgress(3, "Initializing fee vault", 'loading', "Please sign with your wallet");
+          }
+        }
+      );
+
+      const chainAddress = result.pool.toBase58();
+      updateProgress(3, "Pool and fee vault initialized", 'success');
+
+      // 2) Initialize each selected DRT
+      const provider = program.provider as anchor.AnchorProvider;
+      currentStep = 4;
+
+      if (appendSelected) {
+        updateProgress(currentStep, "Creating mint for Append DRT", 'loading', 
+          "Please sign with your wallet");
+        const appendMint = await createNewMint(provider, result.vault);
+        updateProgress(currentStep, "Mint for Append DRT created", 'success');
+
+        currentStep++;
+        updateProgress(currentStep, "Initializing Append DRT on-chain", 'loading',
+          "Please sign with your wallet");
+        await initializeDRT(
+          program,
+          result.pool,
+          result.vault,
+          publicKey,
+          appendMint,
+          new BN(appendSupply),
+          "append"
+        );
+        updateProgress(currentStep, "Append DRT initialized", 'success');
+        currentStep++;
+      }
+
+      if (wComputeSelected) {
+        updateProgress(currentStep, "Creating mint for W Compute Median DRT", 'loading',
+          "Please sign with your wallet");
+        const wComputeMint = await createNewMint(provider, result.vault);
+        updateProgress(currentStep, "Mint for W Compute Median created", 'success');
+
+        currentStep++;
+        updateProgress(currentStep, "Initializing W Compute Median DRT on-chain", 'loading',
+          "Please sign with your wallet");
+        await initializeDRT(
+          program,
+          result.pool,
+          result.vault,
+          publicKey,
+          wComputeMint,
+          new BN(wComputeSupply),
+          "w_compute_median"
+        );
+        updateProgress(currentStep, "W Compute Median DRT initialized", 'success');
+        currentStep++;
+      }
+
+      if (pyComputeSelected) {
+        updateProgress(currentStep, "Creating mint for Py Compute Median DRT", 'loading',
+          "Please sign with your wallet");
+        const pyComputeMint = await createNewMint(provider, result.vault);
+        updateProgress(currentStep, "Mint for Py Compute Median created", 'success');
+
+        currentStep++;
+        updateProgress(currentStep, "Initializing Py Compute Median DRT on-chain", 'loading',
+          "Please sign with your wallet");
+        await initializeDRT(
+          program,
+          result.pool,
+          result.vault,
+          publicKey,
+          pyComputeMint,
+          new BN(pyComputeSupply),
+          "py_compute_median"
+        );
+        updateProgress(currentStep, "Py Compute Median DRT initialized", 'success');
+        currentStep++;
+      }
+
+      // 3) Off-chain save
+      updateProgress(currentStep, "Saving pool data off-chain", 'loading');
+      const payload = {
+        name: poolName,
+        description,
+        poolSequenceId: poolId, // Include poolSequenceId in payload
+        chainAddress,
+        vaultAddress: result.vault.toBase58(),
+        feeVaultAddress: result.feeVault.toBase58(),
+        ownershipMintAddress: result.ownershipMint.toBase58(),
+        schemaDefinition: {
+          poolId,
+          ownershipSupply,
+          appendSupply: appendSelected ? appendSupply : 0,
+          wComputeSupply: wComputeSelected ? wComputeSupply : 0,
+          pyComputeSupply: pyComputeSelected ? pyComputeSupply : 0,
+          allowedDrts
+        },
+      };
+
+      const res = await fetch("/api/pools-dashboard", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.error || "Failed to save pool to database");
+      }
+      
+      const responseData = await res.json();
+      if (responseData.success) {
+        updateProgress(currentStep, "Pool successfully created and saved!", 'success',
+          `Chain address: ${chainAddress}`);
+      } else {
+        throw new Error("Failed to save pool to database");
+      }
+    } catch (error: any) {
+      console.error("Pool creation error:", error);
+      updateProgress(
+        progress?.step || 0, 
+        `Error during pool creation: ${error.message}`, 
+        'error',
+        "Please check console for details"
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  if (!isActive) return null;
 
   return (
     <div className="space-y-6">
-      <h2 className="text-xl font-semibold">Add Description</h2>
-
+      <h2 className="text-xl font-semibold">Pool Information</h2>
+      {/* Name + Description */}
       <div className="space-y-4">
-        <div className="space-y-2">
-          <label className="text-sm font-medium">Pool Name</label>
-          <Input
-            placeholder="Enter name (Max 50 Characters)"
-            maxLength={50}
-            value={name}
-            onChange={(e) => {
-              setName(e.target.value)
-              setValidation({ error: null })
-            }}
-          />
+        <div>
+          <label className="text-sm font-medium block mb-1">Pool Name</label>
+          <div className="flex space-x-2">
+            <Input
+              placeholder="Enter name (Max 50 Characters)"
+              maxLength={50}
+              value={poolName}
+              onChange={(e) => setPoolName(e.target.value)}
+              disabled={poolNameLocked}
+              className={poolNameLocked ? "bg-gray-100" : ""}
+            />
+            <Button 
+              onClick={handleLockPoolName}
+              disabled={!poolName.trim() || poolNameLocked || isSubmitting}
+              className="whitespace-nowrap"
+              variant={poolNameLocked ? "outline" : "default"}
+            >
+              {poolNameLocked ? (
+                <>
+                  <span>Locked</span>
+                  <Check size={16} className="ml-1 text-green-500" />
+                </>
+              ) : (
+                <>
+                  {isCheckingName ? (
+                    <>
+                      <span>Checking...</span>
+                      <RefreshCcw size={16} className="ml-1 animate-spin" />
+                    </>
+                  ) : (
+                    "Lock Name"
+                  )}
+                </>
+              )}
+            </Button>
+          </div>
+          {poolNameLocked && (
+            <p className="mt-1 text-xs text-gray-500">
+              This pool will be created with ID #{poolId}
+            </p>
+          )}
         </div>
-
-        <div className="space-y-2">
-          <label className="text-sm font-medium">Pool Description</label>
+        <div>
+          <label className="text-sm font-medium block mb-1">Pool Description</label>
           <Textarea
             placeholder="Enter description (Max 200 Characters)"
             maxLength={200}
             value={description}
-            onChange={(e) => {
-              setDescription(e.target.value)
-              setValidation({ error: null })
-            }}
+            onChange={(e) => setDescription(e.target.value)}
           />
         </div>
+      </div>
 
-        {validation.error && (
-          <Alert variant="destructive">
-            <AlertDescription>{validation.error}</AlertDescription>
-          </Alert>
+      {/* Pool ID (read-only) */}
+      <div>
+        <label className="text-sm font-medium block mb-1">Pool ID</label>
+        <Input
+          type="number"
+          value={poolId}
+          readOnly
+          className="bg-gray-100 cursor-not-allowed"
+        />
+      </div>
+
+      {/* Supplies in one gray box */}
+      <div className="p-4 bg-gray-50 rounded-md space-y-4">
+        <div>
+          <label className="block text-sm font-medium mb-1">Ownership Token Supply</label>
+          <Input
+            type="number"
+            min={1}
+            value={ownershipSupply}
+            onChange={(e) => setOwnershipSupply(Number(e.target.value))}
+          />
+        </div>
+        {appendSelected && (
+          <div>
+            <label className="block text-sm font-medium mb-1">Append DRT Supply</label>
+            <Input
+              type="number"
+              min={1}
+              value={appendSupply}
+              onChange={(e) => setAppendSupply(Number(e.target.value))}
+            />
+          </div>
+        )}
+        {wComputeSelected && (
+          <div>
+            <label className="block text-sm font-medium mb-1">W Compute Median DRT Supply</label>
+            <Input
+              type="number"
+              min={1}
+              value={wComputeSupply}
+              onChange={(e) => setWComputeSupply(Number(e.target.value))}
+            />
+          </div>
+        )}
+        {pyComputeSelected && (
+          <div>
+            <label className="block text-sm font-medium mb-1">Py Compute Median DRT Supply</label>
+            <Input
+              type="number"
+              min={1}
+              value={pyComputeSupply}
+              onChange={(e) => setPyComputeSupply(Number(e.target.value))}
+            />
+          </div>
         )}
       </div>
 
+      {/* # wallet signatures required */}
+      <div className="flex items-center mt-2 text-sm text-gray-600 space-x-2">
+        <Wallet size={16} />
+        <span>
+          {steps.filter(s => s.walletSignatureRequired).length} wallet signatures required
+        </span>
+      </div>
+
+      {/* Action buttons */}
       <div className="flex justify-between">
         <Button variant="outline" onClick={onPrev} className={buttonOutlineClass}>
           Previous
         </Button>
-        <Button onClick={validateAndProceed} className={buttonBaseClass}>
-          Create Pool
+        <Button
+          onClick={handleCreatePool}
+          disabled={isSubmitting}
+          className={buttonBaseClass}
+        >
+          {isSubmitting ? 'Creating Pool...' : 'Create Pool'}
         </Button>
       </div>
+
+      {/* Enhanced progress display */}
+      <Card className="p-4 mt-6">
+        <div className="mb-3 flex justify-between items-center">
+          <h3 className="font-medium text-gray-700">
+            Creation Progress
+          </h3>
+          <span className="text-sm font-medium text-gray-500">
+            Step {progress.step}/{progress.total}
+          </span>
+        </div>
+
+        {/* Loading bar */}
+        <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
+          <div 
+            className={`h-full rounded-full transition-all duration-500 ${
+              progress.status === 'error' 
+                ? 'bg-red-500' 
+                : 'bg-gradient-to-r from-blue-400 to-blue-600'
+            }`}
+            style={{ 
+              width: `${Math.max((progress.step / progress.total) * 100, 5)}%`,
+              boxShadow: progress.status !== 'error' ? '0 0 8px rgba(59, 130, 246, 0.5)' : 'none'
+            }}
+          />
+        </div>
+        
+        {/* Current step message */}
+        <div className="mt-4 flex items-start space-x-3">
+          <div className={`p-2 rounded-full ${
+            progress.status === 'loading' ? 'bg-blue-100' :
+            progress.status === 'success' ? 'bg-green-100' :
+            'bg-red-100'
+          }`}>
+            {progress.icon}
+          </div>
+          <div>
+            <div className="font-medium text-gray-800">
+              {progress.message}
+            </div>
+            {progress.details && (
+              <p className="text-sm text-gray-600 mt-1">
+                {progress.details}
+              </p>
+            )}
+          </div>
+        </div>
+        
+        {/* Step indicator circles */}
+        <div className="mt-6 flex items-center justify-center space-x-1">
+          {steps.map((_, index) => (
+            <div 
+              key={index}
+              className={`rounded-full transition-all duration-300 ${
+                index < progress.step 
+                  ? 'bg-blue-500 w-2 h-2' 
+                  : index === progress.step - 1
+                    ? 'bg-blue-500 w-3 h-3 animate-pulse' 
+                    : 'bg-gray-300 w-2 h-2'
+              }`}
+            />
+          ))}
+        </div>
+      </Card>
     </div>
   )
 }
 
-function CreatePool() {
+/* ------------------------------------------------------------------
+   Main "CreatePool" multi-step wizard + Pools listing
+------------------------------------------------------------------ */
+export default function Pools() {
   const [currentStep, setCurrentStep] = useState(1)
 
-  return (
-    <Card className="p-6">
-      {/* Progress Steps */}
-      <div className="mb-8">
-        <div className="flex justify-between">
-          {[1, 2, 3].map((step) => (
-            <div 
-              key={step}
-              className={`flex items-center ${
-                step < 3 ? 'flex-1' : ''
-              }`}
-            >
-              <div 
-                className={`w-8 h-8 rounded-full flex items-center justify-center border-2 
-                  ${currentStep >= step 
-                    ? 'bg-gray-900 text-white border-gray-900' 
-                    : 'border-gray-300 text-gray-400'
-                  }`}
-              >
-                {step}
-              </div>
-              {step < 3 && (
-                <div 
-                  className={`flex-1 h-1 mx-4 ${
-                    currentStep > step ? 'bg-gray-900' : 'bg-gray-200'
-                  }`}
-                />
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
+  // Step 2 booleans for known DRTs
+  const [appendSelected, setAppendSelected] = useState(false)
+  const [wComputeSelected, setWComputeSelected] = useState(false)
+  const [pyComputeSelected, setPyComputeSelected] = useState(false)
 
-      {/* Step Components */}
-      <FileSelectionStep 
-        isActive={currentStep === 1}
-        onNext={() => setCurrentStep(2)}
-      />
-      
-      <DigitalRightsStep 
-        isActive={currentStep === 2}
-        onNext={() => setCurrentStep(3)}
-        onPrev={() => setCurrentStep(1)}
-      />
-      
-      <DescriptionStep 
-        isActive={currentStep === 3}
-        onNext={() => {
-          alert('Pool created successfully!')
-          setCurrentStep(1)
-        }}
-        onPrev={() => setCurrentStep(2)}
-      />
-    </Card>
-  )
-}
-
-export default function Pools() {
   return (
     <div className="space-y-6 container mx-auto px-4 max-w-7xl">
       <h1 className="text-2xl font-bold text-gray-900 mb-4">Create Pool</h1>
       
-      <div className="w-full">
-        <Card className="p-6">
-          <CreatePool />
-        </Card>
-      </div>
+      {/* Wizard Container */}
+      <Card className="p-6">
+        {/* Top progress for Steps 1, 2, 3 */}
+        <div className="mb-8">
+          <div className="flex justify-between">
+            {[1, 2, 3].map((step) => (
+              <div 
+                key={step}
+                className={`flex items-center ${step < 3 ? 'flex-1' : ''}`}
+              >
+                <div 
+                  className={`w-8 h-8 rounded-full flex items-center justify-center border-2 
+                    ${currentStep >= step 
+                      ? 'bg-gray-900 text-white border-gray-900' 
+                      : 'border-gray-300 text-gray-400'
+                    }`}
+                >
+                  {step}
+                </div>
+                {step < 3 && (
+                  <div 
+                    className={`flex-1 h-1 mx-4 ${
+                      currentStep > step ? 'bg-gray-900' : 'bg-gray-200'
+                    }`}
+                  />
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
 
+        {/* Step 1: File Selection */}
+        <FileSelectionStep 
+          isActive={currentStep === 1}
+          onNext={() => setCurrentStep(2)}
+        />
+
+        {/* Step 2: Digital Rights */}
+        <DigitalRightsStep 
+          isActive={currentStep === 2}
+          onNext={() => setCurrentStep(3)}
+          onPrev={() => setCurrentStep(1)}
+          appendSelected={appendSelected}
+          setAppendSelected={setAppendSelected}
+          wComputeSelected={wComputeSelected}
+          setWComputeSelected={setWComputeSelected}
+          pyComputeSelected={pyComputeSelected}
+          setPyComputeSelected={setPyComputeSelected}
+        />
+
+        {/* Step 3: Final creation (Name, Desc, Supplies, On-Chain) */}
+        <PoolCreationStep
+          isActive={currentStep === 3}
+          onNext={() => {
+            // If you want to reset or do something else after creation success
+            alert('Pool creation flow completed!')
+            setCurrentStep(1)
+          }}
+          onPrev={() => setCurrentStep(2)}
+          appendSelected={appendSelected}
+          wComputeSelected={wComputeSelected}
+          pyComputeSelected={pyComputeSelected}
+        />
+      </Card>
+
+      {/* Existing Pools */}
       <div className="mt-8">
         <h2 className="text-2xl font-semibold mb-4">Existing Pools</h2>
         <PoolsTable />

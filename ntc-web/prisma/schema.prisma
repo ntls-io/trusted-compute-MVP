@@ -28,6 +28,7 @@ model Pool {
     id                  String    @id @default(uuid())
     name                String
     description         String
+    poolSequenceId      Int       // Field to track sequence number per user
     chainAddress        String    @unique  // Pool PDA (on-chain pool address)
     vaultAddress         String    // Vault PDA
     feeVaultAddress      String    // Fee vault PDA
@@ -44,7 +45,7 @@ model Pool {
     allowedDRTs        PoolAllowedDRT[]    // New relationship to track allowed DRT types
 
     @@index([chainAddress])
-    @@index([ownerId])
+    @@index([ownerId, name, poolSequenceId])
 }
 
 model User {

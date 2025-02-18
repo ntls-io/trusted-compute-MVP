@@ -43,7 +43,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: "Invalid JSON payload" }, { status: 400 });
     }
     
-    const { name, description, chainAddress, vaultAddress, feeVaultAddress, ownershipMintAddress, schemaDefinition } = body;
+    const { name, description, poolSequenceId, chainAddress, vaultAddress, feeVaultAddress, ownershipMintAddress, schemaDefinition } = body;
     
     // Validate that all required fields are present
     if (!name || !description || !chainAddress || !vaultAddress || !feeVaultAddress || !ownershipMintAddress || !schemaDefinition) {
@@ -94,6 +94,7 @@ export async function POST(request: NextRequest) {
       data: {
         name,
         description,
+        poolSequenceId,
         chainAddress,
         vaultAddress,
         feeVaultAddress,
