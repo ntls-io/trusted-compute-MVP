@@ -208,6 +208,39 @@ export async function buyDrt(
     .rpc();
 }
 
+/** Initializes a DRT (for example, the “append” type).
+ *  Returns the vault’s associated DRT token account.
+ */
+export async function initializeDRT(
+  program: anchor.Program,
+  pool: PublicKey,
+  vault: PublicKey,
+  owner: PublicKey,
+  drtMint: PublicKey,
+  drtSupply: BN,
+  drtType: string
+): Promise<PublicKey> {
+  const vaultDRTTokenAccount = await getAssociatedTokenAddress(
+    drtMint,
+    vault,
+    true
+  );
+  await program.methods
+    .initializeDrt(drtType, drtSupply)
+    .accounts({
+      pool: pool,
+      drtMint: drtMint,
+      vault: vault,
+      vaultDrtTokenAccount: vaultDRTTokenAccount,
+      owner: owner,
+      systemProgram: SystemProgram.programId,
+      tokenProgram: TOKEN_PROGRAM_ID,
+      associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+    })
+    .rpc();
+  return vaultDRTTokenAccount;
+}
+
 /** Redeem a DRT (again, a simplified version). */
 export async function redeemDrt(
   program: anchor.Program,
