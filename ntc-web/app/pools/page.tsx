@@ -1,3 +1,21 @@
+/**
+ * Nautilus Trusted Compute
+ * Copyright (C) 2025 Nautilus
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as published
+ * by the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 "use client"
 
 import React, { useState, useEffect, JSX } from 'react'
@@ -423,6 +441,9 @@ function PoolCreationStep({
   });
 
   const [isSubmitting, setIsSubmitting] = useState(false);
+  
+  // Track whether all inputs should be locked (after create pool is clicked)
+  const [allInputsLocked, setAllInputsLocked] = useState(false);
 
   // Handle locking the pool name and fetching the next sequence ID
   const handleLockPoolName = async () => {
@@ -566,6 +587,9 @@ function PoolCreationStep({
     }
 
     setIsSubmitting(true);
+    // Lock all inputs immediately when Create Pool is clicked
+    setAllInputsLocked(true);
+    
     try {
       // Validate user inputs
       if (!poolName.trim()) {
@@ -742,6 +766,8 @@ function PoolCreationStep({
         'error',
         "Please check console for details"
       );
+      // Only unlock inputs if there was an error
+      setAllInputsLocked(false);
     } finally {
       setIsSubmitting(false);
     }
@@ -750,42 +776,42 @@ function PoolCreationStep({
   if (!isActive) return null;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <h2 className="text-xl font-semibold">Pool Information</h2>
-      {/* Name + Description */}
-      <div className="space-y-4">
+      
+      {/* 1/3 - 2/3 layout for name/description */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {/* Left column (1/3) - Pool name */}
         <div>
           <label className="text-sm font-medium block mb-1">Pool Name</label>
           <div className="flex space-x-2">
             <Input
-              placeholder="Enter name (Max 50 Characters)"
+              placeholder="Enter name"
               maxLength={50}
               value={poolName}
               onChange={(e) => setPoolName(e.target.value)}
-              disabled={poolNameLocked}
-              className={poolNameLocked ? "bg-gray-100" : ""}
+              disabled={allInputsLocked || (poolNameLocked && !isSubmitting)}
+              className={`${(poolNameLocked || allInputsLocked) ? "bg-gray-100" : ""} w-full`}
             />
             <Button 
-              onClick={handleLockPoolName}
-              disabled={!poolName.trim() || poolNameLocked || isSubmitting}
-              className="whitespace-nowrap"
+              onClick={poolNameLocked ? () => setPoolNameLocked(false) : handleLockPoolName}
+              disabled={(!poolName.trim() && !poolNameLocked) || isSubmitting || allInputsLocked || isCheckingName}
+              className="whitespace-nowrap flex-shrink-0"
               variant={poolNameLocked ? "outline" : "default"}
+              size="sm"
             >
-              {poolNameLocked ? (
+              {isCheckingName ? (
                 <>
-                  <span>Locked</span>
-                  <Check size={16} className="ml-1 text-green-500" />
+                  <span>Checking</span>
+                  <RefreshCcw size={14} className="ml-1 animate-spin" />
+                </>
+              ) : poolNameLocked ? (
+                <>
+                  <span>Change Name</span>
                 </>
               ) : (
                 <>
-                  {isCheckingName ? (
-                    <>
-                      <span>Checking...</span>
-                      <RefreshCcw size={16} className="ml-1 animate-spin" />
-                    </>
-                  ) : (
-                    "Lock Name"
-                  )}
+                  <span>Set Pool Name</span>
                 </>
               )}
             </Button>
@@ -796,165 +822,188 @@ function PoolCreationStep({
             </p>
           )}
         </div>
-        <div>
+        
+        {/* Right column (2/3) - Pool description */}
+        <div className="md:col-span-2">
           <label className="text-sm font-medium block mb-1">Pool Description</label>
           <Textarea
             placeholder="Enter description (Max 200 Characters)"
             maxLength={200}
             value={description}
             onChange={(e) => setDescription(e.target.value)}
+            className={`h-full min-h-[40px] ${allInputsLocked ? "bg-gray-100" : ""}`}
+            disabled={allInputsLocked}
           />
         </div>
       </div>
+      <div className="h-2" />
+      {/* Supply settings and signatures */}
+      <Card className="p-4 mt-2">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-medium text-gray-800">Token Supply Configuration</h3>
+          <div className="flex items-center text-sm text-gray-600 space-x-2">
+            <Wallet size={16} />
+            <span>
+              {steps.filter(s => s.walletSignatureRequired).length} wallet signatures required
+            </span>
+          </div>
+        </div>
+  
+        {/* Supplies grid */}
+        <div className="bg-gray-50 rounded-md p-3">
+          <div className="grid grid-cols-2 gap-4">
+            {/* Left column */}
+            <div className="space-y-4">
+              {/* Always show ownership */}
+              <div className="flex items-center space-x-2">
+                <label className="text-sm font-medium">Ownership Token Supply:</label>
+                <Input
+                  type="number"
+                  min={1}
+                  value={ownershipSupply}
+                  onChange={(e) => setOwnershipSupply(Number(e.target.value))}
+                  className={`w-32 ${allInputsLocked ? "bg-gray-100" : ""}`}
+                  disabled={allInputsLocked}
+                />
+              </div>
+              
+              {/* Show append if selected */}
+              {appendSelected && (
+                <div className="flex items-center space-x-2">
+                  <label className="text-sm font-medium">Append DRT Supply:</label>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={appendSupply}
+                    onChange={(e) => setAppendSupply(Number(e.target.value))}
+                    className={`w-32 ${allInputsLocked ? "bg-gray-100" : ""}`}
+                    disabled={allInputsLocked}
+                  />
+                </div>
+              )}
+            </div>
+            
+            {/* Right column */}
+            <div className="space-y-4 flex flex-col items-end">
+              {/* W Compute if selected */}
+              {wComputeSelected && (
+                <div className="flex items-center space-x-2">
+                  <label className="text-sm font-medium">W Compute Median DRT Supply:</label>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={wComputeSupply}
+                    onChange={(e) => setWComputeSupply(Number(e.target.value))}
+                    className={`w-32 ${allInputsLocked ? "bg-gray-100" : ""}`}
+                    disabled={allInputsLocked}
+                  />
+                </div>
+              )}
+              
+              {/* Py Compute if selected */}
+              {pyComputeSelected && (
+                <div className="flex items-center space-x-2">
+                  <label className="text-sm font-medium">Py Compute Median DRT Supply:</label>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={pyComputeSupply}
+                    onChange={(e) => setPyComputeSupply(Number(e.target.value))}
+                    className={`w-32 ${allInputsLocked ? "bg-gray-100" : ""}`}
+                    disabled={allInputsLocked}
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </Card>
+  
+      {/* Action buttons + Progress display in same card */}
+      <Card className="p-4">
+        <div className="flex flex-col space-y-4">
+          {/* Action buttons at top */}
+          <div className="flex justify-between">
+            <Button 
+              variant="outline" 
+              onClick={onPrev} 
+              className={buttonOutlineClass}
+              disabled={isSubmitting || allInputsLocked}
+            >
+              Previous
+            </Button>
+            <Button
+              onClick={handleCreatePool}
+              disabled={!poolNameLocked || !description.trim() || isSubmitting || allInputsLocked}
+              className={buttonBaseClass}
+            >
+              {isSubmitting ? 'Creating Pool...' : 'Create Pool'}
+            </Button>
+          </div>
+          
+          {/* Progress section - always show */}
+          <div className="pt-2">
+            <div className="mb-2 flex justify-between items-center">
+              <h3 className="font-medium text-gray-700">
+                Creation Progress
+              </h3>
+              <span className="text-sm font-medium text-gray-500">
+                Step {progress.step}/{progress.total}
+              </span>
+            </div>
 
-      {/* Supplies displayed with dynamic positioning */}
-      <div className="p-4 bg-gray-50 rounded-md">
-        <div className="grid grid-cols-2 gap-4">
-          {/* Left column */}
-          <div className="space-y-4">
-            {/* Always show ownership */}
-            <div className="flex items-center space-x-2">
-              <label className="text-sm font-medium">Ownership Token Supply:</label>
-              <Input
-                type="number"
-                min={1}
-                value={ownershipSupply}
-                onChange={(e) => setOwnershipSupply(Number(e.target.value))}
-                className="w-32"
+            {/* Loading bar */}
+            <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
+              <div 
+                className={`h-full rounded-full transition-all duration-500 ${
+                  progress.status === 'error' 
+                    ? 'bg-red-500' 
+                    : 'bg-gradient-to-r from-blue-400 to-blue-600'
+                }`}
+                style={{ 
+                  width: `${Math.max((progress.step / progress.total) * 100, 5)}%`,
+                  boxShadow: progress.status !== 'error' ? '0 0 8px rgba(59, 130, 246, 0.5)' : 'none'
+                }}
               />
             </div>
             
-            {/* Show append if selected */}
-            {appendSelected && (
-              <div className="flex items-center space-x-2">
-                <label className="text-sm font-medium">Append DRT Supply:</label>
-                <Input
-                  type="number"
-                  min={1}
-                  value={appendSupply}
-                  onChange={(e) => setAppendSupply(Number(e.target.value))}
-                  className="w-32"
-                />
+            {/* Current step message - condensed */}
+            <div className="mt-3 flex items-center space-x-3">
+              <div className={`p-1.5 rounded-full flex-shrink-0 ${
+                progress.status === 'loading' ? 'bg-blue-100' :
+                progress.status === 'success' ? 'bg-green-100' :
+                'bg-red-100'
+              }`}>
+                {progress.icon}
               </div>
-            )}
-          </div>
-          
-          {/* Right column */}
-          <div className="space-y-4 flex flex-col items-end">
-            {/* W Compute if selected */}
-            {wComputeSelected && (
-              <div className="flex items-center space-x-2">
-                <label className="text-sm font-medium">W Compute Median DRT Supply:</label>
-                <Input
-                  type="number"
-                  min={1}
-                  value={wComputeSupply}
-                  onChange={(e) => setWComputeSupply(Number(e.target.value))}
-                  className="w-32"
-                />
+              <div className="min-w-0">
+                <div className="font-medium text-gray-800 text-sm">
+                  {progress.message}
+                  {progress.details && (
+                    <span className="text-xs text-gray-600 ml-1">
+                      ({progress.details})
+                    </span>
+                  )}
+                </div>
               </div>
-            )}
-            
-            {/* Py Compute if selected */}
-            {pyComputeSelected && (
-              <div className="flex items-center space-x-2">
-                <label className="text-sm font-medium">Py Compute Median DRT Supply:</label>
-                <Input
-                  type="number"
-                  min={1}
-                  value={pyComputeSupply}
-                  onChange={(e) => setPyComputeSupply(Number(e.target.value))}
-                  className="w-32"
-                />
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* # wallet signatures required */}
-      <div className="flex items-center mt-2 text-sm text-gray-600 space-x-2">
-        <Wallet size={16} />
-        <span>
-          {steps.filter(s => s.walletSignatureRequired).length} wallet signatures required
-        </span>
-      </div>
-
-      {/* Action buttons */}
-      <div className="flex justify-between">
-        <Button variant="outline" onClick={onPrev} className={buttonOutlineClass}>
-          Previous
-        </Button>
-        <Button
-          onClick={handleCreatePool}
-          disabled={!poolNameLocked || !description.trim() || isSubmitting}
-          className={buttonBaseClass}
-        >
-          {isSubmitting ? 'Creating Pool...' : 'Create Pool'}
-        </Button>
-      </div>
-
-      {/* Enhanced progress display */}
-      <Card className="p-4 mt-6">
-        <div className="mb-3 flex justify-between items-center">
-          <h3 className="font-medium text-gray-700">
-            Creation Progress
-          </h3>
-          <span className="text-sm font-medium text-gray-500">
-            Step {progress.step}/{progress.total}
-          </span>
-        </div>
-
-        {/* Loading bar */}
-        <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
-          <div 
-            className={`h-full rounded-full transition-all duration-500 ${
-              progress.status === 'error' 
-                ? 'bg-red-500' 
-                : 'bg-gradient-to-r from-blue-400 to-blue-600'
-            }`}
-            style={{ 
-              width: `${Math.max((progress.step / progress.total) * 100, 5)}%`,
-              boxShadow: progress.status !== 'error' ? '0 0 8px rgba(59, 130, 246, 0.5)' : 'none'
-            }}
-          />
-        </div>
-        
-        {/* Current step message */}
-        <div className="mt-4 flex items-start space-x-3">
-          <div className={`p-2 rounded-full ${
-            progress.status === 'loading' ? 'bg-blue-100' :
-            progress.status === 'success' ? 'bg-green-100' :
-            'bg-red-100'
-          }`}>
-            {progress.icon}
-          </div>
-          <div>
-            <div className="font-medium text-gray-800">
-              {progress.message}
             </div>
-            {progress.details && (
-              <p className="text-sm text-gray-600 mt-1">
-                {progress.details}
-              </p>
-            )}
+            
+            {/* Compact step indicator dots */}
+            <div className="mt-3 flex items-center justify-center space-x-1">
+              {steps.map((_, index) => (
+                <div 
+                  key={index}
+                  className={`rounded-full transition-all duration-300 ${
+                    index < progress.step 
+                      ? 'bg-blue-500 w-1.5 h-1.5' 
+                      : index === progress.step - 1
+                        ? 'bg-blue-500 w-2 h-2 animate-pulse' 
+                        : 'bg-gray-300 w-1.5 h-1.5'
+                  }`}
+                />
+              ))}
+            </div>
           </div>
-        </div>
-        
-        {/* Step indicator circles */}
-        <div className="mt-6 flex items-center justify-center space-x-1">
-          {steps.map((_, index) => (
-            <div 
-              key={index}
-              className={`rounded-full transition-all duration-300 ${
-                index < progress.step 
-                  ? 'bg-blue-500 w-2 h-2' 
-                  : index === progress.step - 1
-                    ? 'bg-blue-500 w-3 h-3 animate-pulse' 
-                    : 'bg-gray-300 w-2 h-2'
-              }`}
-            />
-          ))}
         </div>
       </Card>
     </div>
@@ -971,6 +1020,7 @@ export default function Pools() {
   const [appendSelected, setAppendSelected] = useState(false)
   const [wComputeSelected, setWComputeSelected] = useState(false)
   const [pyComputeSelected, setPyComputeSelected] = useState(false)
+  const [poolCreated, setPoolCreated] = useState(false);
 
   return (
     <div className="space-y-6 container mx-auto px-4 max-w-7xl">
