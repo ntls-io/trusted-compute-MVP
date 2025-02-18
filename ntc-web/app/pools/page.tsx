@@ -404,10 +404,12 @@ function PoolCreationStep({
   appendSelected,
   wComputeSelected,
   pyComputeSelected,
+  setPoolCreated
 }: StepProps & {
   appendSelected: boolean;
   wComputeSelected: boolean;
   pyComputeSelected: boolean;
+  setPoolCreated: (value: React.SetStateAction<boolean>) => void;
 }) {
   const program = useDrtProgram();
   const { publicKey } = useWallet();
@@ -755,6 +757,7 @@ function PoolCreationStep({
       if (responseData.success) {
         updateProgress(currentStep, "Pool successfully created and saved!", 'success',
           `Chain address: ${chainAddress}`);
+        setPoolCreated(prev => !prev);
       } else {
         throw new Error("Failed to save pool to database");
       }
@@ -1088,13 +1091,14 @@ export default function Pools() {
           appendSelected={appendSelected}
           wComputeSelected={wComputeSelected}
           pyComputeSelected={pyComputeSelected}
+          setPoolCreated={setPoolCreated}
         />
       </Card>
 
       {/* Existing Pools */}
       <div className="mt-8">
         <h2 className="text-2xl font-semibold mb-4">Existing Pools</h2>
-        <PoolsTable />
+        <PoolsTable poolCreated={poolCreated} />
       </div>
     </div>
   )

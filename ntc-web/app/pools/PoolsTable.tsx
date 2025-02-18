@@ -270,7 +270,7 @@ const JoinPoolDialog = ({ pool }: { pool: Pool }) => {
   );
 };
 
-export function PoolsTable() {
+export function PoolsTable({ poolCreated }: { poolCreated?: boolean })  {
   const [search, setSearch] = useState('');
   const [showMyPools, setShowMyPools] = useState(false);
   const [pools, setPools] = useState<Pool[]>([]);
@@ -281,7 +281,7 @@ export function PoolsTable() {
 
   useEffect(() => {
     fetchPools();
-  }, []);
+  }, [poolCreated]);
 
   const fetchPools = async () => {
     try {
