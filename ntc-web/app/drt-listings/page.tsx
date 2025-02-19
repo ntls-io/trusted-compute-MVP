@@ -16,14 +16,13 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-// app/drt-listings/page.tsx
 "use client";
 
 import React, { useEffect, useState } from "react";
 import { fetchAvailableDRTs, buyDRT } from "@/lib/drtHelpers";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useDrtProgram } from "@/lib/useDrtProgram";
-import { useUser } from '@clerk/nextjs';
+import { useUser } from "@clerk/nextjs";
 import {
   Table,
   TableBody,
@@ -43,20 +42,25 @@ import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { 
-  LoaderCircle, 
-  ShoppingCart, 
-  Wallet, 
-  Info, 
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
+  LoaderCircle,
+  ShoppingCart,
+  Wallet,
+  Info,
   AlertTriangle,
-  Shield, 
+  Shield,
   Check,
   Coins,
   RefreshCcw,
   CheckCircle2,
   XCircle,
-  ExternalLink
+  ExternalLink,
 } from "lucide-react";
 
 interface Pool {
@@ -87,16 +91,29 @@ interface DRTInstance {
   price: number | null;
 }
 
+// Colors for each DRT type
 const DrtTypeColors: Record<string, string> = {
-  append: "bg-indigo-100 text-indigo-800 hover:bg-indigo-200",
-  w_compute_median: "bg-emerald-100 text-emerald-800 hover:bg-emerald-200",
-  py_compute_median: "bg-amber-100 text-amber-800 hover:bg-amber-200"
+  // For valid types from the database:
+  APPEND_DATA_POOL: "bg-indigo-100 text-indigo-800 hover:bg-indigo-200",
+  EXECUTE_MEDIAN_WASM: "bg-emerald-100 text-emerald-800 hover:bg-emerald-200",
+  EXECUTE_MEDIAN_PYTHON: "bg-amber-100 text-amber-800 hover:bg-amber-200",
 };
 
+// Colors for token availability status
 const DrtStatusColors: Record<string, string> = {
   available: "bg-green-100 text-green-800",
   limited: "bg-amber-100 text-amber-800",
-  sold_out: "bg-red-100 text-red-800"
+  sold_out: "bg-red-100 text-red-800",
+};
+
+// Centralized mapping for DRT descriptions used in tooltips (using valid database IDs)
+const drtDescriptions: Record<string, string> = {
+  APPEND_DATA_POOL:
+    "Allows adding new data entries while maintaining schema integrity.",
+  EXECUTE_MEDIAN_WASM:
+    "Runs Rust WebAssembly-based median calculations.",
+  EXECUTE_MEDIAN_PYTHON:
+    "Runs Python-based median computations on data pools.",
 };
 
 const DrtStatusBadge = ({ available }: { available: number }) => {
@@ -114,6 +131,33 @@ const DrtStatusBadge = ({ available }: { available: number }) => {
       {status === "sold_out" && "Sold Out"}
     </Badge>
   );
+};
+
+// Helper to return the proper color based on the valid DRT type from the database
+const getDrtTypeColor = (drtId: string) => {
+  if (drtId === "APPEND_DATA_POOL") return DrtTypeColors.APPEND_DATA_POOL;
+  if (drtId === "EXECUTE_MEDIAN_WASM")
+    return DrtTypeColors.EXECUTE_MEDIAN_WASM;
+  if (drtId === "EXECUTE_MEDIAN_PYTHON")
+    return DrtTypeColors.EXECUTE_MEDIAN_PYTHON;
+  return "bg-gray-100 text-gray-800";
+};
+
+// Helper to return a formatted label for the DRT type
+const formatDrtName = (drtName: string) => {
+  switch (drtName.toLowerCase()) {
+    case "append":
+    case "append_data_pool":
+      return "Append Data Pool";
+    case "w_compute_median":
+    case "execute_median_wasm":
+      return "Execute Median WASM";
+    case "py_compute_median":
+    case "execute_median_python":
+      return "Execute Median Python";
+    default:
+      return drtName;
+  }
 };
 
 export default function DrtListings() {
@@ -141,7 +185,7 @@ export default function DrtListings() {
         }
         const poolsData = await poolsResponse.json();
         setPools(poolsData);
-        
+
         // Only fetch user DRTs if the user is logged in
         if (user?.id) {
           const drtsResponse = await fetch("/api/drts/user");
@@ -162,7 +206,7 @@ export default function DrtListings() {
         setLoading(false);
       }
     }
-    
+
     if (isUserLoaded) {
       loadInitialData();
     }
@@ -170,8 +214,8 @@ export default function DrtListings() {
 
   // Store DRT purchase in database
   async function recordPurchase(
-    transactions: string[], 
-    drt: DRTInfo, 
+    transactions: string[],
+    drt: DRTInfo,
     quantity: number,
     pool: Pool
   ) {
@@ -183,20 +227,20 @@ export default function DrtListings() {
     try {
       // Main transaction signature (first one if multiple)
       const transactionSignature = transactions[0];
-      
+
       console.log("Recording purchase in database:", {
         transactionSignature,
         poolId: pool.id,
         drtId: drt.name,
         mintAddress: drt.mint,
         quantity,
-        price: drt.cost
+        price: drt.cost,
       });
-      
-      const response = await fetch('/api/drts/purchase', {
-        method: 'POST',
+
+      const response = await fetch("/api/drts/purchase", {
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
           transactionSignature,
@@ -204,31 +248,30 @@ export default function DrtListings() {
           drtId: drt.name,
           mintAddress: drt.mint,
           quantity,
-          price: drt.cost || 0.01
+          price: drt.cost || 0.01,
         }),
       });
 
       const result = await response.json();
-      
+
       if (!response.ok) {
-        console.error('Failed to record purchase in database:', result);
+        console.error("Failed to record purchase in database:", result);
         return null;
-      } 
-      
-      console.log('Purchase successfully recorded in database:', result);
+      }
+
+      console.log("Purchase successfully recorded in database:", result);
       return result.drtInstances;
-      
     } catch (error) {
-      console.error('Error recording purchase:', error);
+      console.error("Error recording purchase:", error);
       return null;
     }
   }
 
   const handleQuantityChange = (drtName: string, value: number) => {
-    setAvailableDRTs(current => 
-      current.map(drt => 
-        drt.name === drtName 
-          ? { ...drt, quantity: Math.max(1, Math.min(drt.available, value || 1)) } 
+    setAvailableDRTs((current) =>
+      current.map((drt) =>
+        drt.name === drtName
+          ? { ...drt, quantity: Math.max(1, Math.min(drt.available, value || 1)) }
           : drt
       )
     );
@@ -238,31 +281,38 @@ export default function DrtListings() {
     const index = e.target.value;
     setError(null);
     setSuccess(null);
-    
+
     if (index === "") {
       setSelectedPool(null);
       setAvailableDRTs([]);
       return;
     }
-    
+
     const pool = pools[parseInt(index)];
     setSelectedPool(pool);
     setLoading(true);
-    
+
     try {
       if (!program) throw new Error("DRT Program not available");
-      
+
       const drtsOnChain = await fetchAvailableDRTs(program, pool.chainAddress);
-      
+
       // Hardcode cost as 0.01 SOL for all tokens
       const drts: DRTInfo[] = drtsOnChain.map((drt: DRTInfo) => {
-        return { 
-          ...drt, 
+        // Convert the blockchain token name to the standardized ID
+        let normalizedName = drt.name;
+        if (drt.name === "append") normalizedName = "APPEND_DATA_POOL";
+        else if (drt.name === "w_compute_median") normalizedName = "EXECUTE_MEDIAN_WASM";
+        else if (drt.name === "py_compute_median") normalizedName = "EXECUTE_MEDIAN_PYTHON";
+      
+        return {
+          ...drt,
+          name: normalizedName,
           cost: 0.01,
-          quantity: 1 // Default quantity
+          quantity: 1,
         };
       });
-      
+
       setAvailableDRTs(drts);
     } catch (error) {
       console.error("Error fetching DRTs:", error);
@@ -277,7 +327,7 @@ export default function DrtListings() {
       setError("Please connect your wallet and select a pool.");
       return;
     }
-    
+
     // Ensure the DRT has a cost and quantity
     if (!drt.cost || drt.cost <= 0) {
       setError(`Cannot purchase ${drt.name}: Invalid price.`);
@@ -289,14 +339,16 @@ export default function DrtListings() {
       setError(`Invalid quantity. Please choose between 1 and ${drt.available}.`);
       return;
     }
-    
+
     setPurchaseLoading(drt.name);
     setError(null);
     setSuccess(null);
-    
+
     try {
-      console.log(`Buying ${quantity} ${drt.name} tokens for ${drt.cost * quantity} SOL total`);
-      
+      console.log(
+        `Buying ${quantity} ${drt.name} tokens for ${drt.cost * quantity} SOL total`
+      );
+
       // Execute blockchain transactions
       const transactions = await buyDRT(
         program,
@@ -307,63 +359,59 @@ export default function DrtListings() {
         drt.cost,
         quantity
       );
-      
+
       setSuccess(`Successfully purchased ${quantity} ${drt.name} token(s)!`);
-      
+
       // Only attempt database recording if user is logged in
       if (user) {
         // Record purchase in database
-        const newDrtInstances = await recordPurchase(transactions, drt, quantity, selectedPool);
+        const newDrtInstances = await recordPurchase(
+          transactions,
+          drt,
+          quantity,
+          selectedPool
+        );
         if (newDrtInstances) {
-            // Add new purchases to the list of owned DRTs without filtering duplicates
-            setMyDRTs(prev => {
-              // Simply combine previous DRTs with new ones, allowing duplicates
-              return [...prev, ...newDrtInstances];
-            });
-            console.log(`Added ${newDrtInstances.length} new DRT instances to your collection`);
-          }
+          // Add new purchases to the list of owned DRTs without filtering duplicates
+          setMyDRTs((prev) => {
+            // Simply combine previous DRTs with new ones, allowing duplicates
+            return [...prev, ...newDrtInstances];
+          });
+          console.log(
+            `Added ${newDrtInstances.length} new DRT instances to your collection`
+          );
+        }
       } else {
         console.log("User not logged in - skipping database recording");
       }
-      
+
       // Refresh the DRT availability after purchase
-      const drtsOnChain = await fetchAvailableDRTs(program, selectedPool.chainAddress);
+      const drtsOnChain = await fetchAvailableDRTs(
+        program,
+        selectedPool.chainAddress
+      );
       const updatedDrts: DRTInfo[] = drtsOnChain.map((updatedDrt: DRTInfo) => {
         // Preserve existing quantity settings where possible
-        const existingDrt = availableDRTs.find(d => d.name === updatedDrt.name);
+        const existingDrt = availableDRTs.find((d) => d.name === updatedDrt.name);
         const quantity = existingDrt?.quantity || 1;
-        
+
         return {
           ...updatedDrt,
           cost: 0.01, // Hardcoded to 0.01 SOL
-          quantity: Math.min(quantity, updatedDrt.available) // Ensure quantity <= available
+          quantity: Math.min(quantity, updatedDrt.available), // Ensure quantity <= available
         };
       });
-      
+
       setAvailableDRTs(updatedDrts);
     } catch (error) {
       console.error("Error purchasing DRT:", error);
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const errorMessage =
+        error instanceof Error ? error.message : "Unknown error";
       setError(`Failed to purchase ${drt.name}. ${errorMessage}`);
     } finally {
       setPurchaseLoading(null);
     }
   }
-
-  // Get color based on DRT type
-  const getDrtTypeColor = (name: string) => {
-    if (name.includes('append')) return DrtTypeColors.append;
-    if (name.includes('w_compute')) return DrtTypeColors.w_compute_median;
-    if (name.includes('py_compute')) return DrtTypeColors.py_compute_median;
-    return "bg-gray-100 text-gray-800";
-  };
-
-  const formatDrtName = (name: string) => {
-    return name
-      .split('_')
-      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-      .join(' ');
-  };
 
   return (
     <div className="container mx-auto px-4 py-6 max-w-7xl">
@@ -371,25 +419,31 @@ export default function DrtListings() {
         {/* Header */}
         <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <h1 className="text-2xl font-bold text-gray-900">Digital Rights Token (DRT) Marketplace</h1>
+            <h1 className="text-2xl font-bold text-gray-900">
+              Digital Rights Token (DRT) Marketplace
+            </h1>
           </div>
-          
+
           <div className="bg-gray-800 rounded-md p-4 shadow-sm text-white">
             <div className="flex items-start space-x-3">
               <div className="bg-blue-900/60 p-2 rounded-full">
                 <Info className="h-5 w-5 text-blue-100" />
               </div>
               <div>
-                <h2 className="text-base font-medium text-gray-100">About Digital Rights Tokens</h2>
+                <h2 className="text-base font-medium text-gray-100">
+                  About Digital Rights Tokens
+                </h2>
                 <p className="text-gray-300 text-sm mt-1">
-                  DRTs represent computational permissions: append data, run WASM computations, or execute Python algorithms - all in secure SGX enclaves.
+                  DRTs represent computational permissions: append data, run
+                  WASM computations, or execute Python algorithms - all in secure
+                  SGX enclaves.
                 </p>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Connection Alerts - More compact */}
+        {/* Connection Alerts */}
         <div className="space-y-2">
           {!wallet.connected && (
             <Alert variant="default" className="bg-amber-50 border-amber-200 py-2">
@@ -399,7 +453,7 @@ export default function DrtListings() {
               </AlertDescription>
             </Alert>
           )}
-          
+
           {!isUserLoaded ? (
             <Alert className="bg-blue-50 border-blue-200 py-2">
               <RefreshCcw className="h-4 w-4 animate-spin text-blue-600" />
@@ -417,7 +471,7 @@ export default function DrtListings() {
           ) : null}
         </div>
 
-        {/* Pool Selection Card - More compact */}
+        {/* Pool Selection Card */}
         <Card className="overflow-hidden border-gray-200 shadow-md">
           <CardHeader className="bg-gray-900 text-white py-3">
             <CardTitle className="flex items-center text-lg">
@@ -426,7 +480,7 @@ export default function DrtListings() {
             </CardTitle>
           </CardHeader>
           <CardContent className="p-4">
-            <select 
+            <select
               className="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               onChange={handlePoolSelect}
               disabled={loading}
@@ -440,8 +494,8 @@ export default function DrtListings() {
             </select>
           </CardContent>
         </Card>
-        
-        {/* Success Alert - Positioned here per request */}
+
+        {/* Success Alert */}
         {success && (
           <Alert className="bg-green-50 border-green-200 shadow-sm">
             <CheckCircle2 className="h-5 w-5 text-green-600" />
@@ -449,7 +503,7 @@ export default function DrtListings() {
             <AlertDescription className="text-green-800">{success}</AlertDescription>
           </Alert>
         )}
-        
+
         {/* Error Alert */}
         {error && (
           <Alert variant="destructive" className="bg-red-50 border-red-300 shadow-sm">
@@ -459,7 +513,7 @@ export default function DrtListings() {
           </Alert>
         )}
 
-        {/* DRT Listings Section - More compact */}
+        {/* DRT Listings Section */}
         {loading ? (
           <div className="flex flex-col items-center justify-center py-10 bg-white rounded-lg shadow-sm">
             <LoaderCircle className="h-8 w-8 animate-spin text-blue-600 mb-3" />
@@ -473,7 +527,10 @@ export default function DrtListings() {
                   <Coins className="mr-2 h-4 w-4" />
                   Available Digital Rights Tokens
                 </div>
-                <Badge variant="outline" className="bg-blue-900/30 text-blue-100 border-blue-700 px-2 py-1 text-xs">
+                <Badge
+                  variant="outline"
+                  className="bg-blue-900/30 text-blue-100 border-blue-700 px-2 py-1 text-xs"
+                >
                   {selectedPool.name}
                 </Badge>
               </CardTitle>
@@ -491,91 +548,89 @@ export default function DrtListings() {
                     <TableHead className="text-center py-2">Action</TableHead>
                   </TableRow>
                 </TableHeader>
-                <TableBody>
-                  {availableDRTs.map((drt) => {
-                    const quantity = drt.quantity || 1;
-                    const totalCost = 0.01 * quantity; // Fixed 0.01 SOL cost
-                    const drtDisplayName = formatDrtName(drt.name);
-                    
-                    return (
-                      <TableRow key={drt.name} className="hover:bg-gray-50">
-                        <TableCell className="py-2">
-                          <TooltipProvider>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Badge className={`${getDrtTypeColor(drt.name)} py-1 px-2 font-medium text-xs`}>
-                                  {drtDisplayName}
-                                </Badge>
-                              </TooltipTrigger>
-                              <TooltipContent className="p-3 max-w-xs bg-gray-900 text-white">
-                                <h3 className="font-semibold mb-1">{drtDisplayName}</h3>
-                                <p className="text-sm text-gray-200">
-                                  {drt.name === 'append' && 
-                                    "Allows adding new data to the pool while maintaining schema integrity."}
-                                  {drt.name === 'w_compute_median' && 
-                                    "Executes WASM-based median computation within secure SGX enclaves."}
-                                  {drt.name === 'py_compute_median' && 
-                                    "Runs Python-based median algorithms on pool data in trusted execution environments."}
-                                </p>
-                              </TooltipContent>
-                            </Tooltip>
-                          </TooltipProvider>
-                        </TableCell>
-                        <TableCell className="py-2">
-                          <DrtStatusBadge available={drt.available} />
-                        </TableCell>
-                        <TableCell className="text-right font-mono py-2 text-sm">
-                          {drt.available}/{drt.initialSupply}
-                        </TableCell>
-                        <TableCell className="text-right font-mono py-2 text-sm">
-                          0.01
-                        </TableCell>
-                        <TableCell className="py-2">
-                          <div className="flex justify-center">
-                            <Input
-                              type="number"
-                              min={1}
-                              max={drt.available}
-                              value={quantity}
-                              onChange={(e) => handleQuantityChange(drt.name, parseInt(e.target.value))}
-                              className="w-16 text-center h-8 text-sm"
-                              disabled={purchaseLoading !== null || drt.available <= 0}
-                            />
-                          </div>
-                        </TableCell>
-                        <TableCell className="font-medium text-right font-mono py-2 text-sm">
-                          {totalCost.toFixed(2)}
-                        </TableCell>
-                        <TableCell className="py-2">
-                          <div className="flex justify-center">
-                            <Button 
-                              onClick={() => handleBuy(drt)} 
-                              disabled={
-                                purchaseLoading !== null || 
-                                drt.available <= 0 || 
-                                !wallet.connected
-                              }
-                              className="relative h-8 px-3 bg-gray-800 text-white hover:bg-gray-700 text-sm"
-                              size="sm"
-                            >
-                              {purchaseLoading === drt.name ? (
-                                <div className="flex items-center">
-                                  <LoaderCircle className="animate-spin h-3 w-3 mr-1" />
-                                  <span>Buying...</span>
-                                </div>
-                              ) : (
-                                <div className="flex items-center">
-                                  <ShoppingCart className="h-3 w-3 mr-1" />
-                                  <span>Buy</span>
-                                </div>
-                              )}
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
+                  <TableBody>
+                    {availableDRTs.map((drt) => {
+                      // Use the normalized name (set during fetch) to get a friendly display name.
+                      const quantity = drt.quantity || 1;
+                      const totalCost = (drt.cost || 0.01) * quantity;
+                      const drtDisplayName = formatDrtName(drt.name);
+
+                      return (
+                        <TableRow key={drt.name} className="hover:bg-gray-50">
+                          <TableCell className="py-2">
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Badge
+                                    className={`${getDrtTypeColor(drt.name)} py-1 px-2 font-medium text-xs`}
+                                  >
+                                    {drtDisplayName}
+                                  </Badge>
+                                </TooltipTrigger>
+                                <TooltipContent className="p-3 max-w-xs bg-gray-900 text-white">
+                                  <h3 className="font-semibold mb-1">{drtDisplayName}</h3>
+                                  <p className="text-sm text-gray-200">
+                                    {drtDescriptions[drt.name] || "Description not available."}
+                                  </p>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          </TableCell>
+                          <TableCell className="py-2">
+                            <DrtStatusBadge available={drt.available} />
+                          </TableCell>
+                          <TableCell className="text-right font-mono py-2 text-sm">
+                            {drt.available}/{drt.initialSupply}
+                          </TableCell>
+                          <TableCell className="text-right font-mono py-2 text-sm">
+                            {(drt.cost || 0.01).toFixed(2)}
+                          </TableCell>
+                          <TableCell className="py-2">
+                            <div className="flex justify-center">
+                              <Input
+                                type="number"
+                                min={1}
+                                max={drt.available}
+                                value={quantity}
+                                onChange={(e) =>
+                                  handleQuantityChange(drt.name, parseInt(e.target.value))
+                                }
+                                className="w-16 text-center h-8 text-sm"
+                                disabled={purchaseLoading !== null || drt.available <= 0}
+                              />
+                            </div>
+                          </TableCell>
+                          <TableCell className="font-medium text-right font-mono py-2 text-sm">
+                            {totalCost.toFixed(2)}
+                          </TableCell>
+                          <TableCell className="py-2">
+                            <div className="flex justify-center">
+                              <Button
+                                onClick={() => handleBuy(drt)}
+                                disabled={
+                                  purchaseLoading !== null || drt.available <= 0 || !wallet.connected
+                                }
+                                className="relative h-8 px-3 bg-gray-800 text-white hover:bg-gray-700 text-sm"
+                                size="sm"
+                              >
+                                {purchaseLoading === drt.name ? (
+                                  <div className="flex items-center">
+                                    <LoaderCircle className="animate-spin h-3 w-3 mr-1" />
+                                    <span>Buying...</span>
+                                  </div>
+                                ) : (
+                                  <div className="flex items-center">
+                                    <ShoppingCart className="h-3 w-3 mr-1" />
+                                    <span>Buy</span>
+                                  </div>
+                                )}
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
               </Table>
             </div>
           </Card>
@@ -586,8 +641,8 @@ export default function DrtListings() {
             </AlertDescription>
           </Alert>
         ) : null}
-        
-        {/* My DRT Purchases Section - More compact */}
+
+        {/* My DRT Purchases Section */}
         <div className="mt-6">
           <Card className="overflow-hidden border-gray-200 shadow-md">
             <CardHeader className="bg-gray-800 text-white py-3">
@@ -618,42 +673,45 @@ export default function DrtListings() {
                     </TableHeader>
                     <TableBody>
                       {myDRTs.map((drt) => {
-                        const pool = pools.find(p => p.id === drt.poolId);
+                        const pool = pools.find((p) => p.id === drt.poolId);
                         return (
                           <TableRow key={drt.id} className="hover:bg-gray-50">
                             <TableCell className="py-2">
                               <TooltipProvider>
                                 <Tooltip>
                                   <TooltipTrigger asChild>
-                                    <Badge className={`${getDrtTypeColor(drt.drtId)} py-1 px-2 font-medium text-xs`}>
+                                    <Badge
+                                      className={`${getDrtTypeColor(
+                                        drt.drtId
+                                      )} py-1 px-2 font-medium text-xs`}
+                                    >
                                       {formatDrtName(drt.drtId)}
                                     </Badge>
                                   </TooltipTrigger>
                                   <TooltipContent className="p-3 max-w-xs bg-gray-900 text-white">
-                                    <h3 className="font-semibold mb-1">{formatDrtName(drt.drtId)}</h3>
+                                    <h3 className="font-semibold mb-1">
+                                      {formatDrtName(drt.drtId)}
+                                    </h3>
                                     <p className="text-sm text-gray-200">
-                                      {drt.drtId === 'append' && 
-                                        "Allows adding new data to the pool while maintaining schema integrity."}
-                                      {drt.drtId === 'w_compute_median' && 
-                                        "Executes WASM-based median computation within secure SGX enclaves."}
-                                      {drt.drtId === 'py_compute_median' && 
-                                        "Runs Python-based median algorithms on pool data in trusted execution environments."}
+                                      {drtDescriptions[drt.drtId] || "Description not available."}
                                     </p>
                                   </TooltipContent>
                                 </Tooltip>
                               </TooltipProvider>
                             </TableCell>
                             <TableCell className="py-2 text-sm">
-                              {pool?.name || 'Unknown Pool'}
+                              {pool?.name || "Unknown Pool"}
                             </TableCell>
                             <TableCell className="py-2">
-                              <a 
+                              <a
                                 href={`https://explorer.solana.com/address/${drt.mintAddress}?cluster=devnet`}
                                 target="_blank"
-                                rel="noopener noreferrer" 
+                                rel="noopener noreferrer"
                                 className="font-mono text-xs text-blue-600 hover:text-blue-800 hover:underline flex items-center"
                               >
-                                {`${drt.mintAddress.slice(0, 6)}...${drt.mintAddress.slice(-4)}`}
+                                {`${drt.mintAddress.slice(0, 6)}...${drt.mintAddress.slice(
+                                  -4
+                                )}`}
                                 <ExternalLink className="h-3 w-3 ml-1" />
                               </a>
                             </TableCell>
@@ -661,15 +719,27 @@ export default function DrtListings() {
                               {drt.price?.toFixed(2) || "0.01"} SOL
                             </TableCell>
                             <TableCell className="py-2">
-                              <span className={`
-                                px-2 py-1 rounded-full text-xs inline-flex items-center
-                                ${drt.state === 'active' ? 'bg-green-100 text-green-800' : 
-                                  drt.state === 'pending' ? 'bg-amber-100 text-amber-800' : 
-                                  'bg-blue-100 text-blue-800'}
-                              `}>
-                                {drt.state === 'active' && <Check className="h-3 w-3 mr-1" />}
-                                {drt.state === 'pending' && <LoaderCircle className="h-3 w-3 mr-1 animate-spin" />}
-                                {drt.state === 'completed' && <CheckCircle2 className="h-3 w-3 mr-1" />}
+                              <span
+                                className={`
+                                  px-2 py-1 rounded-full text-xs inline-flex items-center
+                                  ${
+                                    drt.state === "active"
+                                      ? "bg-green-100 text-green-800"
+                                      : drt.state === "pending"
+                                      ? "bg-amber-100 text-amber-800"
+                                      : "bg-blue-100 text-blue-800"
+                                  }
+                                `}
+                              >
+                                {drt.state === "active" && (
+                                  <Check className="h-3 w-3 mr-1" />
+                                )}
+                                {drt.state === "pending" && (
+                                  <LoaderCircle className="h-3 w-3 mr-1 animate-spin" />
+                                )}
+                                {drt.state === "completed" && (
+                                  <CheckCircle2 className="h-3 w-3 mr-1" />
+                                )}
                                 {drt.state}
                               </span>
                             </TableCell>
@@ -685,7 +755,8 @@ export default function DrtListings() {
                     <ShoppingCart className="h-6 w-6 text-gray-500" />
                   </div>
                   <p className="text-gray-600 text-sm">
-                    Your purchased Digital Rights Tokens will appear here after you complete a transaction.
+                    Your purchased Digital Rights Tokens will appear here after you
+                    complete a transaction.
                   </p>
                 </CardContent>
               )

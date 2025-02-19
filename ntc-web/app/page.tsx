@@ -34,7 +34,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Input } from "@/components/ui/input";
-import { ExternalLink, ChevronDown, ChevronUp, ChevronsUpDown, Shield, Code2 } from 'lucide-react';
+import { ExternalLink, ChevronDown, ChevronUp, ChevronsUpDown, Shield, Code2, Loader2 } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -50,6 +50,8 @@ interface Pool {
   name: string;
   description: string;
   chainAddress: string;
+  vaultAddress: string;
+  feeVaultAddress: string;
   schemaDefinition: any;
   enclaveMeasurement?: {
     mrenclave: string;
@@ -180,9 +182,43 @@ const EnclaveDialog = ({ pool, onAttest }: { pool: Pool; onAttest: () => void })
   );
 };
 
+const PoolTableSkeleton = () => (
+  <TableBody>
+    <TableRow>
+      <TableCell colSpan={4} className="h-16">
+        <div className="flex items-center space-x-4 animate-pulse">
+          <Loader2 className="mr-2 h-8 w-8 animate-spin text-gray-500" />
+          <div className="flex-1 space-y-2">
+            <div className="h-4 bg-gray-200 rounded w-3/4"></div>
+            <div className="h-4 bg-gray-200 rounded w-1/2"></div>
+          </div>
+        </div>
+      </TableCell>
+    </TableRow>
+  </TableBody>
+);
+
+const DRTTableSkeleton = () => (
+  <TableBody>
+    <TableRow>
+      <TableCell colSpan={8} className="h-16">
+        <div className="flex items-center space-x-4 animate-pulse">
+          <Loader2 className="mr-2 h-8 w-8 animate-spin text-gray-500" />
+          <div className="flex-1 space-y-2">
+            <div className="h-4 bg-gray-200 rounded w-3/4"></div>
+            <div className="h-4 bg-gray-200 rounded w-1/2"></div>
+          </div>
+        </div>
+      </TableCell>
+    </TableRow>
+  </TableBody>
+);
+
 export default function Home() {
   // Connect to loading context
   const { setIsLoading } = useLoading();
+  const [isLoadingPools, setIsLoadingPools] = useState(true);
+  const [isLoadingDRTs, setIsLoadingDRTs] = useState(true);
   
   // State declarations - remove local loading state
   const [pools, setPools] = useState<Pool[]>([]);
@@ -198,6 +234,8 @@ export default function Home() {
     async function fetchData() {
       // Keep the global loading state active while fetching
       setIsLoading(true);
+      setIsLoadingPools(true);
+      setIsLoadingDRTs(true);
       
       try {
         const response = await fetch('/api/user-data');
@@ -232,6 +270,8 @@ export default function Home() {
       } finally {
         // Release the global loading state when data is ready
         setIsLoading(false);
+        setIsLoadingPools(false);
+        setIsLoadingDRTs(false);
       }
     }
   
@@ -288,8 +328,8 @@ export default function Home() {
     {
       label: "Amount Paid Out",
       value: Array.isArray(drtInstances) && drtInstances.length > 0 
-        ? `$${drtInstances.reduce((sum, drt) => sum + (drt.isListed ? drt.price : 0), 0).toFixed(2)}`
-        : "$0.00"
+        ? `${drtInstances.reduce((sum, drt) => sum + (drt.isListed ? drt.price : 0), 0).toFixed(2)} SOL`
+        : "0.00 SOL"
     }
   ];
 
@@ -395,59 +435,110 @@ export default function Home() {
                 <TableHead className="w-[35%] text-white">Sources</TableHead>
               </TableRow>
             </TableHeader>
-            <TableBody>
-              {pools
-                .filter(pool =>
-                  pool.name.toLowerCase().includes(poolSearch.toLowerCase()) ||
-                  pool.description.toLowerCase().includes(poolSearch.toLowerCase()) ||
-                  !poolSearch
-                )
-                .map((pool) => (
-                  <TableRow key={pool.id}>
-                    <TableCell className="font-medium">{pool.name}</TableCell>
-                    <TableCell>{pool.description}</TableCell>
-                    <TableCell>
-                      <div className="flex flex-wrap gap-2">
-                        {pool.allowedDRTs.map(({ drt }) => (
-                          <TooltipProvider key={drt.id}>
-                            <Tooltip>
-                              <TooltipTrigger>
-                                <Badge variant="secondary" className="cursor-help">
-                                  {drt.name}
-                                </Badge>
-                              </TooltipTrigger>
-                              <TooltipContent>
-                                <p>{drt.description}</p>
-                              </TooltipContent>
-                            </Tooltip>
-                          </TooltipProvider>
-                        ))}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="space-y-2">
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium whitespace-nowrap">Smart Contract:</span>
-                          <TooltipProvider>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <a
-                                  href={getSolanaExplorerUrl(pool.chainAddress)}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="flex items-center gap-1 text-blue-500 hover:text-blue-700"
-                                >
-                                  <span>Link</span>
-                                  <ExternalLink size={16} />
-                                </a>
-                              </TooltipTrigger>
-                              <TooltipContent>
-                                <p className="font-mono text-xs">{pool.chainAddress}</p>
-                              </TooltipContent>
-                            </Tooltip>
-                          </TooltipProvider>
+            {isLoadingPools ? (
+              <PoolTableSkeleton />
+            ) : (
+              <TableBody>
+                {pools
+                  .filter(pool =>
+                    pool.name.toLowerCase().includes(poolSearch.toLowerCase()) ||
+                    pool.description.toLowerCase().includes(poolSearch.toLowerCase()) ||
+                    !poolSearch
+                  )
+                  .map((pool) => (
+                    <TableRow key={pool.id}>
+                      <TableCell className="font-medium">{pool.name}</TableCell>
+                      <TableCell>{pool.description}</TableCell>
+                      <TableCell>
+                        <div className="flex flex-wrap gap-2">
+                          {pool.allowedDRTs.map(({ drt }) => (
+                            <TooltipProvider key={drt.id}>
+                              <Tooltip>
+                                <TooltipTrigger>
+                                  <Badge variant="secondary" className="cursor-help">
+                                    {drt.name}
+                                  </Badge>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  <p>{drt.description}</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          ))}
                         </div>
-                        {pool.enclaveMeasurement && (
+                      </TableCell>
+                      <TableCell>
+                        <div className="space-y-2">
+                          {/* Pool PDA */}
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium whitespace-nowrap">Pool PDA:</span>
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <a
+                                    href={`https://explorer.solana.com/address/${pool.chainAddress}?cluster=devnet`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="flex items-center gap-1 text-blue-500 hover:text-blue-700"
+                                  >
+                                    <span>Link</span>
+                                    <ExternalLink size={16} />
+                                  </a>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  <p className="font-mono text-xs">{pool.chainAddress}</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          </div>
+
+                          {/* Vault PDA */}
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium whitespace-nowrap">Vault PDA:</span>
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <a
+                                    href={`https://explorer.solana.com/address/${pool.vaultAddress}?cluster=devnet`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="flex items-center gap-1 text-blue-500 hover:text-blue-700"
+                                  >
+                                    <span>Link</span>
+                                    <ExternalLink size={16} />
+                                  </a>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  <p className="font-mono text-xs">{pool.vaultAddress}</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          </div>
+
+                          {/* Fee Vault PDA */}
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium whitespace-nowrap">Fee Vault PDA:</span>
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <a
+                                    href={`https://explorer.solana.com/address/${pool.feeVaultAddress}?cluster=devnet`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="flex items-center gap-1 text-blue-500 hover:text-blue-700"
+                                  >
+                                    <span>Link</span>
+                                    <ExternalLink size={16} />
+                                  </a>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  <p className="font-mono text-xs">{pool.feeVaultAddress}</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          </div>
+
+                          {/* Enclave Verification */}
                           <div className="flex items-center gap-2">
                             <span className="font-medium whitespace-nowrap">Enclave:</span>
                             <Dialog>
@@ -456,30 +547,36 @@ export default function Home() {
                                   variant="outline"
                                   size="sm"
                                   className={attestationResults[pool.id]?.success ? 'bg-green-50' : ''}
+                                  disabled={!pool.enclaveMeasurement}
                                 >
                                   <Shield className="w-4 h-4 mr-2" />
-                                  {attestationResults[pool.id]?.success ? 'Verified' : 'Verify Enclave'}
+                                  {!pool.enclaveMeasurement 
+                                    ? 'No Enclave Measurements'
+                                    : attestationResults[pool.id]?.success 
+                                      ? 'Verified' 
+                                      : 'Verify Enclave'}
                                 </Button>
                               </DialogTrigger>
                               <EnclaveDialog 
-                                pool={pool}
-                                onAttest={() => handleAttestation(pool)}
+                                pool={pool} 
+                                onAttest={() => handleAttestation(pool)} 
                               />
                             </Dialog>
                           </div>
-                        )}
-                      </div>
+                        </div>
+                      </TableCell>
+
+                    </TableRow>
+                  ))}
+                {pools.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={4} className="h-24 text-center text-xl font-semibold">
+                      No pools found.
                     </TableCell>
                   </TableRow>
-                ))}
-              {pools.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={4} className="h-24 text-center text-xl font-semibold">
-                    No pools found.
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
+                )}
+              </TableBody>
+            )}
           </Table>
         </Card>
       </div>
@@ -610,80 +707,84 @@ export default function Home() {
                   <TableHead className="text-white w-[200px]">Actions</TableHead>
                 </TableRow>
               </TableHeader>
-              <TableBody>
-                {drtInstances
-                  .filter(item => {
-                    const searchTerm = drtSearch.toLowerCase();
-                    const matchesSearch = 
-                      item.pool.name.toLowerCase().includes(searchTerm) ||
-                      item.pool.description.toLowerCase().includes(searchTerm) ||
-                      item.drt.name.toLowerCase().includes(searchTerm) ||
-                      item.state.toLowerCase().includes(searchTerm);
+              {isLoadingDRTs ? (
+                <DRTTableSkeleton />
+              ) : (
+                <TableBody>
+                  {drtInstances
+                    .filter(item => {
+                      const searchTerm = drtSearch.toLowerCase();
+                      const matchesSearch = 
+                        item.pool.name.toLowerCase().includes(searchTerm) ||
+                        item.pool.description.toLowerCase().includes(searchTerm) ||
+                        item.drt.name.toLowerCase().includes(searchTerm) ||
+                        item.state.toLowerCase().includes(searchTerm);
 
-                    const matchesState = stateFilters.length === 0 || stateFilters.includes(item.state);
-                    const matchesMarketplace = marketplaceFilter.length === 0 || 
-                      marketplaceFilter.includes(item.isListed ? 'yes' : 'no');
+                      const matchesState = stateFilters.length === 0 || stateFilters.includes(item.state);
+                      const matchesMarketplace = marketplaceFilter.length === 0 || 
+                        marketplaceFilter.includes(item.isListed ? 'yes' : 'no');
 
-                    return matchesSearch && matchesState && matchesMarketplace;
-                  })
-                  .map((item) => (
-                    <TableRow key={item.id}>
-                      <TableCell className="font-medium">{item.pool.name}</TableCell>
-                      <TableCell>
-                        <TooltipProvider>
-                          <Tooltip>
-                            <TooltipTrigger>
-                              <Badge variant="secondary" className="cursor-help">
-                                {item.drt.name}
-                              </Badge>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                              <p>{item.drt.description}</p>
-                            </TooltipContent>
-                          </Tooltip>
-                        </TooltipProvider>
-                      </TableCell>
-                      <TableCell>
-                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                          item.state === 'active' ? 'bg-green-100 text-green-700' :
-                          item.state === 'pending' ? 'bg-yellow-100 text-yellow-700' :
-                          'bg-gray-100 text-gray-700'
-                        }`}>
-                          {item.state}
-                        </span>
-                      </TableCell>
-                      <TableCell>
-                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                          item.isListed ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'
-                        }`}>
-                          {item.isListed ? 'Yes' : 'No'}
-                        </span>
-                      </TableCell>
-                      <TableCell>{item.price ? `${item.price.toFixed(2)} SOL` : '-'}</TableCell>
-                      <TableCell>
-                        <div className="flex justify-around gap-2">
-                          <Button 
-                            variant="outline" 
-                            size="sm"
-                            disabled={item.isListed || item.state === 'pending' || item.state === 'completed'}
-                          >
-                            Sell
-                          </Button>
-                          <Button variant="outline" size="sm">
-                            View results
-                          </Button>
-                        </div>
+                      return matchesSearch && matchesState && matchesMarketplace;
+                    })
+                    .map((item) => (
+                      <TableRow key={item.id}>
+                        <TableCell className="font-medium">{item.pool.name}</TableCell>
+                        <TableCell>
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger>
+                                <Badge variant="secondary" className="cursor-help">
+                                  {item.drt.name}
+                                </Badge>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                <p>{item.drt.description}</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        </TableCell>
+                        <TableCell>
+                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                            item.state === 'active' ? 'bg-green-100 text-green-700' :
+                            item.state === 'pending' ? 'bg-yellow-100 text-yellow-700' :
+                            'bg-gray-100 text-gray-700'
+                          }`}>
+                            {item.state}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                            item.isListed ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'
+                          }`}>
+                            {item.isListed ? 'Yes' : 'No'}
+                          </span>
+                        </TableCell>
+                        <TableCell>{item.price ? `${item.price.toFixed(2)} SOL` : '-'}</TableCell>
+                        <TableCell>
+                          <div className="flex justify-around gap-2">
+                            <Button 
+                              variant="outline" 
+                              size="sm"
+                              disabled={item.isListed || item.state === 'pending' || item.state === 'completed'}
+                            >
+                              Sell
+                            </Button>
+                            <Button variant="outline" size="sm">
+                              View results
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  {drtInstances.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={6} className="h-24 text-center text-xl font-semibold">
+                        No DRTs found.
                       </TableCell>
                     </TableRow>
-                  ))}
-                {drtInstances.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={6} className="h-24 text-center text-xl font-semibold">
-                      No DRTs found.
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
+                  )}
+                </TableBody>
+              )}
             </Table>
           </div>
         </Card>

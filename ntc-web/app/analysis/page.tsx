@@ -258,7 +258,7 @@ export default function Analysis() {
           <div className="flex justify-between items-center">
             <span className="text-gray-700">Total Value</span>
             <span className="bg-purple-600 text-white px-3 py-1 rounded-full text-sm">
-              ${stats.totalValue.toFixed(2)}
+              {stats.totalValue.toFixed(2)} SOL
             </span>
           </div>
         </Card>
@@ -449,7 +449,7 @@ export default function Analysis() {
                       </TooltipProvider>
                     </TableCell>
                     <TableCell>
-                      {item.price ? `$${item.price.toFixed(2)}` : '-'}
+                      {item.price ? `${item.price.toFixed(2)} SOL` : '-'}
                     </TableCell>
                   </TableRow>
                 ))}

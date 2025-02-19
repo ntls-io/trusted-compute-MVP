@@ -22,16 +22,18 @@
 import React, { useEffect, useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
-import { Connection, clusterApiUrl, LAMPORTS_PER_SOL } from "@solana/web3.js";
 import { useUser } from "@clerk/nextjs";
 import { Copy } from "lucide-react";
+import WalletBalance from "@/components/WalletBalance"; 
+import { Connection, clusterApiUrl } from "@solana/web3.js";
 
 const WalletConnector = () => {
   const { publicKey, connected, disconnect } = useWallet();
   const { user } = useUser();
-  const [balance, setBalance] = useState<number | null>(null);
   const [isLinked, setIsLinked] = useState<boolean>(false);
   const [loadingLinkStatus, setLoadingLinkStatus] = useState<boolean>(true);
+
+  const connection = new Connection(clusterApiUrl("devnet"));
 
   // Fetch the current wallet link status from your API
   useEffect(() => {
@@ -48,17 +50,21 @@ const WalletConnector = () => {
     }
   }, [user]);
 
-  // When a wallet is connected, get its balance from devnet
+  // Add listener for transactions affecting the wallet
   useEffect(() => {
-    if (publicKey) {
-      const connection = new Connection(clusterApiUrl("devnet"));
-      connection.getBalance(publicKey).then((lamports) => {
-        setBalance(lamports / LAMPORTS_PER_SOL);
-      });
-    }
-  }, [publicKey]);
+    if (!publicKey || !connected) return;
 
-  // Call your API to link the wallet address to the user
+    const listenerId = connection.onAccountChange(publicKey, () => {
+      console.log("🔄 Wallet transaction detected! Refreshing balance...");
+      window.dispatchEvent(new Event("walletTransaction")); // Dispatch event for balance update
+    });
+
+    return () => {
+      connection.removeAccountChangeListener(listenerId);
+    };
+  }, [publicKey, connected]);
+
+  // Call API to link wallet
   const handleLinkWallet = async () => {
     if (!publicKey) return;
     const res = await fetch("/api/wallet", {
@@ -71,7 +77,7 @@ const WalletConnector = () => {
     }
   };
 
-  // Unlink the wallet (and optionally disconnect the adapter)
+  // Unlink wallet (and optionally disconnect)
   const handleUnlinkWallet = async () => {
     const res = await fetch("/api/wallet", { method: "DELETE" });
     if (res.ok) {
@@ -90,19 +96,13 @@ const WalletConnector = () => {
     <div className="flex items-center space-x-4">
       {connected && publicKey ? (
         <>
-          {/* Display SOL balance */}
-          <span className="text-sm">
-            <span className="font-bold">
-              {balance !== null ? `${balance.toFixed(2)} SOL` : "Loading balance..."}
-            </span>
-          </span>
+          {/* Display SOL balance using WalletBalance component */}
+          <WalletBalance />
 
-          {/* Display a truncated wallet address with copy button */}
+          {/* Display wallet address */}
           <div className="flex items-center space-x-2">
             <span className="text-sm font-mono">
-              {publicKey.toBase58().slice(0, 8) +
-                "..." +
-                publicKey.toBase58().slice(-8)}
+              {publicKey.toBase58().slice(0, 8) + "..." + publicKey.toBase58().slice(-8)}
             </span>
             <button 
               onClick={handleCopyAddress}
@@ -113,26 +113,19 @@ const WalletConnector = () => {
             </button>
           </div>
 
-          {/* Show a button to link or unlink the wallet */}
+          {/* Link/Unlink wallet */}
           {!loadingLinkStatus && !isLinked && (
-            <button
-              onClick={handleLinkWallet}
-              className="px-2 py-1 bg-green-500 text-white rounded"
-            >
+            <button onClick={handleLinkWallet} className="px-2 py-1 bg-green-500 text-white rounded">
               Link Wallet
             </button>
           )}
           {!loadingLinkStatus && isLinked && (
-            <button
-              onClick={handleUnlinkWallet}
-              className="px-2 py-1 bg-red-500 text-white rounded"
-            >
+            <button onClick={handleUnlinkWallet} className="px-2 py-1 bg-red-500 text-white rounded">
               Unlink Wallet
             </button>
           )}
         </>
       ) : (
-        // If not connected, show the wallet connection button provided by the adapter UI.
         <WalletMultiButton />
       )}
     </div>

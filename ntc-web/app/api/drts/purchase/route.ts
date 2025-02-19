@@ -130,8 +130,8 @@ export async function POST(req: NextRequest) {
     
     for (let i = 0; i < quantity; i++) {
       try {
-        // For multiple tokens, create unique addresses by appending an index
-        const mintAddress = quantity > 1 ? `${baseAddress}_${i+1}` : baseAddress;
+
+        const mintAddress = baseAddress;
         
         const drtInstance = await prisma.dRTInstance.create({
           data: {
