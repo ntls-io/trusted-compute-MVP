@@ -17,21 +17,34 @@
  */
 
 // LayoutClient.tsx
-'use client'
+"use client";
 
-import { useState } from 'react'
-import Sidebar from '@/components/Sidebar'
-import TopBar from '@/components/TopBar'
+import { useEffect, useState } from "react";
+import Sidebar from "@/components/Sidebar";
+import TopBar from "@/components/TopBar";
+import { useAuth } from "@clerk/nextjs";
 
 export default function LayoutClient({
   children,
 }: {
-  children: React.ReactNode
+  children: React.ReactNode;
 }) {
-  const [isNavOpen, setIsNavOpen] = useState(true)
-  const [isHovered, setIsHovered] = useState(false)
+  const { isSignedIn, userId } = useAuth();
+  const [isNavOpen, setIsNavOpen] = useState(true);
+  const [isHovered, setIsHovered] = useState(false);
 
-  const isExpanded = isNavOpen || isHovered
+  const isExpanded = isNavOpen || isHovered;
+
+  // Ensure user exists in database
+  useEffect(() => {
+    if (isSignedIn && userId) {
+      fetch("/api/auth/check-user", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId }),
+      }).catch(console.error);
+    }
+  }, [isSignedIn, userId]);
 
   return (
     <div className="flex flex-col h-screen bg-gray-100">
@@ -47,5 +60,5 @@ export default function LayoutClient({
         </main>
       </div>
     </div>
-  )
+  );
 }

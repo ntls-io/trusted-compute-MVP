@@ -55,8 +55,7 @@ export default function RootLayout({
   );
 
   const pathname = usePathname() ?? "";
-  const isAuthPage =
-    pathname.startsWith("/sign-in") || pathname.startsWith("/sign-up");
+  const isAuthPage = pathname.startsWith("/sign-in") || pathname.startsWith("/sign-up");
 
   return (
     <ClerkProvider>
