@@ -19,7 +19,6 @@
 "use client";
 
 import { useEffect, useState } from 'react';
-import { useLoading } from '@/components/LoadingContext';
 import {
   Table,
   TableBody,
@@ -216,7 +215,6 @@ const DRTTableSkeleton = () => (
 
 export default function Home() {
   // Connect to loading context
-  const { setIsLoading } = useLoading();
   const [isLoadingPools, setIsLoadingPools] = useState(true);
   const [isLoadingDRTs, setIsLoadingDRTs] = useState(true);
   
@@ -233,7 +231,6 @@ export default function Home() {
   useEffect(() => {
     async function fetchData() {
       // Keep the global loading state active while fetching
-      setIsLoading(true);
       setIsLoadingPools(true);
       setIsLoadingDRTs(true);
       
@@ -269,14 +266,13 @@ export default function Home() {
         setDrtInstances([]);
       } finally {
         // Release the global loading state when data is ready
-        setIsLoading(false);
         setIsLoadingPools(false);
         setIsLoadingDRTs(false);
       }
     }
   
     fetchData();
-  }, [setIsLoading]);  
+  }, []);  
 
 
   const handlePoolSort = (field: typeof sortField) => {

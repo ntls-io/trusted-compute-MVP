@@ -39,7 +39,7 @@ import {
 import FilePicker from '@/components/FilePicker';
 import { SchemaPreview, validateJsonSchema } from '@/components/schemaUtils';
 import { ExternalLink, Shield, Upload, Code2, Eye } from 'lucide-react';
-import { ChevronDown, ChevronUp, ChevronsUpDown } from "lucide-react";
+import { ChevronDown, ChevronUp, ChevronsUpDown, Loader2 } from "lucide-react";
 
 
 interface EnclaveMeasurement {
@@ -270,6 +270,41 @@ const JoinPoolDialog = ({ pool }: { pool: Pool }) => {
   );
 };
 
+const PoolsTableSkeleton = () => (
+  <Card className="w-full overflow-hidden">
+    <div className="bg-gray-800 p-4 flex justify-between items-center gap-4">
+      <div className="h-10 bg-gray-200 w-full max-w-md rounded animate-pulse"></div>
+      <div className="flex items-center space-x-2">
+        <div className="h-6 w-12 bg-gray-200 rounded animate-pulse"></div>
+        <div className="h-6 w-32 bg-gray-200 rounded animate-pulse"></div>
+      </div>
+    </div>
+
+    <Table>
+      <TableHeader className="bg-gray-800 [&_tr]:border-0">
+        <TableRow className="hover:bg-gray-800">
+          {['Pool Name', 'Description', 'Digital Rights Tokens', 'Sources', 'Actions'].map((header, index) => (
+            <TableHead key={index} className="text-white">
+              {header}
+            </TableHead>
+          ))}
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        <TableRow>
+          {[...Array(5)].map((_, cellIndex) => (
+            <TableCell key={cellIndex}>
+              <div className="flex items-center space-x-4 animate-pulse">
+                <div className="h-4 bg-gray-200 rounded w-3/4"></div>
+              </div>
+            </TableCell>
+          ))}
+        </TableRow>
+      </TableBody>
+    </Table>
+  </Card>
+);
+
 export function PoolsTable({ poolCreated }: { poolCreated?: boolean })  {
   const [search, setSearch] = useState('');
   const [showMyPools, setShowMyPools] = useState(false);
@@ -284,6 +319,7 @@ export function PoolsTable({ poolCreated }: { poolCreated?: boolean })  {
   }, [poolCreated]);
 
   const fetchPools = async () => {
+    setLoading(true);
     try {
       const response = await fetch('/api/pools');
       const data = await response.json();
@@ -350,7 +386,7 @@ export function PoolsTable({ poolCreated }: { poolCreated?: boolean })  {
     
 
   if (loading) {
-    return <div>Loading...</div>;
+    return <PoolsTableSkeleton />;
   }
 
   return (

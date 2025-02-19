@@ -31,7 +31,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { ChevronDown, ChevronUp, ChevronsUpDown, ExternalLink } from "lucide-react"
+import { ChevronDown, ChevronUp, ChevronsUpDown } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 
@@ -68,6 +68,49 @@ interface Stats {
   listedDRTs: number
   totalValue: number
 }
+
+const StatsCardSkeleton = () => (
+  <div className="grid grid-cols-4 gap-4">
+    {[...Array(4)].map((_, index) => (
+      <Card key={index} className="p-4 animate-pulse">
+        <div className="flex justify-between items-center">
+          <div className="h-4 bg-gray-200 w-1/2 rounded"></div>
+          <div className="h-6 bg-gray-300 w-16 rounded-full"></div>
+        </div>
+      </Card>
+    ))}
+  </div>
+);
+
+const AnalysisTableSkeleton = () => (
+  <Card>
+    <div className="bg-gray-800 p-4 animate-pulse">
+      <div className="h-10 bg-gray-700 w-full rounded"></div>
+    </div>
+    <Table>
+      <TableHeader className="bg-gray-800 [&_tr]:border-0">
+        <TableRow className="hover:bg-gray-800">
+          {['Digital Rights Token', 'State', 'Listed', 'Owner', 'Price'].map((header, index) => (
+            <TableHead key={index} className="text-white">
+              {header}
+            </TableHead>
+          ))}
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {[...Array(5)].map((_, rowIndex) => (
+          <TableRow key={rowIndex}>
+            {[...Array(5)].map((_, cellIndex) => (
+              <TableCell key={cellIndex}>
+                <div className="h-4 bg-gray-200 rounded w-3/4 animate-pulse"></div>
+              </TableCell>
+            ))}
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  </Card>
+);
 
 export default function Analysis() {
   const [search, setSearch] = useState('')
@@ -221,7 +264,15 @@ export default function Analysis() {
   }
 
   if (loading) {
-    return <div className="flex items-center justify-center h-screen">Loading...</div>
+    return (
+      <div className="container mx-auto p-4 space-y-6">
+        <h1 className="text-4xl font-bold text-gray-900">Analysis</h1>
+        
+        <StatsCardSkeleton />
+        
+        <AnalysisTableSkeleton />
+      </div>
+    )
   }
 
   return (
