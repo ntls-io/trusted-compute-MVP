@@ -19,7 +19,7 @@
 "use client";
 
 import { useEffect, useState } from 'react';
-import { useLoading } from '@/components/LoadingContent';
+import { useLoading } from '@/components/LoadingContext';
 import {
   Table,
   TableBody,
@@ -659,7 +659,7 @@ export default function Home() {
                           {item.isListed ? 'Yes' : 'No'}
                         </span>
                       </TableCell>
-                      <TableCell>{item.price ? `$${item.price.toFixed(2)}` : '-'}</TableCell>
+                      <TableCell>{item.price ? `${item.price.toFixed(2)} SOL` : '-'}</TableCell>
                       <TableCell>
                         <div className="flex justify-around gap-2">
                           <Button 

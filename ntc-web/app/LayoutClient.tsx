@@ -24,7 +24,7 @@ import Sidebar from "@/components/Sidebar";
 import TopBar from "@/components/TopBar";
 import { useAuth } from "@clerk/nextjs";
 import { LoaderCircle } from "lucide-react";
-import { LoadingProvider, useLoading } from "@/components/LoadingContent";
+import { LoadingProvider, useLoading } from "@/components/LoadingContext";
 import { useState } from "react";
 
 function LayoutClientInner({
