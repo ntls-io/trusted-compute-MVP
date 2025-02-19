@@ -119,10 +119,13 @@ const drtDescriptions: Record<string, string> = {
 const DrtStatusBadge = ({ available }: { available: number }) => {
   let status: keyof typeof DrtStatusColors = "available";
   if (available === 0) status = "sold_out";
-  else if (available < 5) status = "limited";
+  else if (available < 15) status = "limited";
 
   return (
-    <Badge className={`${DrtStatusColors[status]} font-medium py-1 px-2`}>
+    <Badge
+      className={`${DrtStatusColors[status]} font-medium py-1 px-2`}
+      style={{ pointerEvents: "none" }}
+    >
       {status === "available" && <CheckCircle2 className="w-3.5 h-3.5 mr-1" />}
       {status === "limited" && <AlertTriangle className="w-3.5 h-3.5 mr-1" />}
       {status === "sold_out" && <XCircle className="w-3.5 h-3.5 mr-1" />}
