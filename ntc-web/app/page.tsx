@@ -19,6 +19,7 @@
 "use client";
 
 import { useEffect, useState } from 'react';
+import { useLoading } from '@/components/LoadingContent';
 import {
   Table,
   TableBody,
@@ -43,7 +44,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 
-// Updated interfaces to match Prisma schema
+// Interfaces remain the same
 interface Pool {
   id: string;
   name: string;
@@ -93,8 +94,7 @@ interface AttestationResult {
   };
 }
 
-// Enclave Dialog Component
-// Enclave Dialog Component
+// Enclave Dialog Component remains the same
 const EnclaveDialog = ({ pool, onAttest }: { pool: Pool; onAttest: () => void }) => {
   const [isAttesting, setIsAttesting] = useState(false);
 
@@ -181,19 +181,24 @@ const EnclaveDialog = ({ pool, onAttest }: { pool: Pool; onAttest: () => void })
 };
 
 export default function Home() {
-  // State declarations
+  // Connect to loading context
+  const { setIsLoading } = useLoading();
+  
+  // State declarations - remove local loading state
   const [pools, setPools] = useState<Pool[]>([]);
   const [drtInstances, setDrtInstances] = useState<DRTInstance[]>([]);
-  const [loading, setLoading] = useState(true);
   const [poolSearch, setPoolSearch] = useState('');
   const [sortField, setSortField] = useState<'name' | 'description' | null>(null);
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc' | null>(null);
   const [attestationResults, setAttestationResults] = useState<{[key: string]: AttestationResult}>({});
   const [apiError, setApiError] = useState<string | null>(null);
 
-  // Data fetching
+  // Data fetching - updated to use global loading state
   useEffect(() => {
     async function fetchData() {
+      // Keep the global loading state active while fetching
+      setIsLoading(true);
+      
       try {
         const response = await fetch('/api/user-data');
   
@@ -225,14 +230,15 @@ export default function Home() {
         setPools([]); 
         setDrtInstances([]);
       } finally {
-        setLoading(false);
+        // Release the global loading state when data is ready
+        setIsLoading(false);
       }
     }
   
     fetchData();
-  }, []);  
+  }, [setIsLoading]);  
 
-  // Helper functions
+
   const handlePoolSort = (field: typeof sortField) => {
     if (sortField === field) {
       if (sortDirection === 'asc') {
@@ -296,7 +302,6 @@ export default function Home() {
     direction: 'asc' | 'desc' | null;
   }>({ key: null, direction: null });
 
-  // DRT handlers
   const handleDrtSort = (key: keyof DRTInstance) => {
     let direction: 'asc' | 'desc' | null = 'asc';
     
@@ -330,10 +335,6 @@ export default function Home() {
         : [...prev, value]
     );
   };
-
-  if (loading) {
-    return <div className="flex items-center justify-center h-screen">Loading...</div>;
-  }
 
   return (
     <div className="container mx-auto p-4">

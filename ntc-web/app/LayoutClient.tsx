@@ -16,15 +16,18 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-// LayoutClient.tsx
+// app/LayoutClient.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import Sidebar from "@/components/Sidebar";
 import TopBar from "@/components/TopBar";
 import { useAuth } from "@clerk/nextjs";
+import { LoaderCircle } from "lucide-react";
+import { LoadingProvider, useLoading } from "@/components/LoadingContent";
+import { useState } from "react";
 
-export default function LayoutClient({
+function LayoutClientInner({
   children,
 }: {
   children: React.ReactNode;
@@ -32,8 +35,26 @@ export default function LayoutClient({
   const { isSignedIn, userId } = useAuth();
   const [isNavOpen, setIsNavOpen] = useState(true);
   const [isHovered, setIsHovered] = useState(false);
+  const { isLoading, stopLoading } = useLoading();
 
   const isExpanded = isNavOpen || isHovered;
+
+  // Global loading handler
+  useEffect(() => {
+    const handleLoad = () => {
+      // Set a minimum display time for loading
+      setTimeout(() => {
+        stopLoading();
+      }, 800);
+    };
+
+    if (document.readyState === 'complete') {
+      handleLoad();
+    } else {
+      window.addEventListener('load', handleLoad);
+      return () => window.removeEventListener('load', handleLoad);
+    }
+  }, [stopLoading]);
 
   // Ensure user exists in database
   useEffect(() => {
@@ -47,7 +68,20 @@ export default function LayoutClient({
   }, [isSignedIn, userId]);
 
   return (
-    <div className="flex flex-col h-screen bg-gray-100">
+    <div className="flex flex-col h-screen bg-gray-100 relative">
+      {/* Global loading overlay */}
+      {isLoading && (
+        <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-50 flex items-center justify-center">
+          <div className="bg-white rounded-lg p-8 shadow-xl flex flex-col items-center max-w-md mx-auto">
+            <LoaderCircle className="h-14 w-14 animate-spin text-blue-600 mb-6" />
+            <h3 className="text-2xl font-semibold text-gray-800 mb-3">Loading application</h3>
+            <p className="text-gray-600 text-center">
+              Please wait while we prepare your dashboard...
+            </p>
+          </div>
+        </div>
+      )}
+
       <TopBar isNavOpen={isExpanded} toggleNav={() => setIsNavOpen(!isNavOpen)} />
       <div className="flex flex-1 overflow-hidden">
         <Sidebar 
@@ -62,3 +96,13 @@ export default function LayoutClient({
     </div>
   );
 }
+
+// Wrapper component to provide the loading context
+export default function LayoutClient({ children }: { children: React.ReactNode }) {
+  return (
+    <LoadingProvider>
+      <LayoutClientInner>{children}</LayoutClientInner>
+    </LoadingProvider>
+  );
+}
+

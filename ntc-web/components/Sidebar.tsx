@@ -35,6 +35,7 @@ export default function Sidebar({ isOpen, onHoverStart, onHoverEnd }: SidebarPro
     { name: 'Home', href: '/', icon: Home, disabled: false },
     { name: 'Pools', href: '/pools', icon: LayoutDashboard, disabled: false },
     { name: 'Analysis', href: '/analysis', icon: LineChart, disabled: false },
+    { name: 'DRT Marketplace', href: '/drt-listings', icon: ShoppingCart, disabled: false },
     { name: 'Market', href: '/market', icon: ShoppingCart, disabled: true },
   ]
 

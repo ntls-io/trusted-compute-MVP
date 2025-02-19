@@ -76,7 +76,7 @@ model DigitalRightToken {
 // Tracks DRT instances that exist on-chain
 model DRTInstance {
     id           String    @id @default(uuid())
-    mintAddress  String    @unique  // On-chain mint address
+    mintAddress  String    // On-chain mint address
     drtId        String    // References DigitalRightToken type
     poolId       String    // References Pool
     ownerId      String    // References User (for UI queries)

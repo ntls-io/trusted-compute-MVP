@@ -178,36 +178,6 @@ export async function createPool(
   };
 }
 
-/** Buy a DRT of a given type.
- *  (This is a simplified version; adjust accounts and parameters as needed.)
- */
-export async function buyDrt(
-  program: anchor.Program,
-  pool: PublicKey,
-  drtMint: PublicKey,
-  vaultDrtTokenAccount: PublicKey,
-  userDrtTokenAccount: PublicKey,
-  vault: PublicKey,
-  feeVault: PublicKey,
-  fee: BN
-) {
-  const buyerWallet = (anchor.getProvider() as AnchorProvider).wallet.publicKey;
-  await program.methods
-    .buyDrt("append", fee) // Here we hard-code the drt type “append”
-    .accounts({
-      pool,
-      drtMint,
-      vaultDrtTokenAccount,
-      userDrtTokenAccount,
-      vault,
-      feeVault,
-      buyerWallet,
-      tokenProgram: TOKEN_PROGRAM_ID,
-      systemProgram: SystemProgram.programId,
-    })
-    .rpc();
-}
-
 /** Initializes a DRT (for example, the “append” type).
  *  Returns the vault’s associated DRT token account.
  */
@@ -265,4 +235,224 @@ export async function redeemDrt(
       tokenProgram: TOKEN_PROGRAM_ID,
     })
     .rpc();
+}
+
+
+/**
+ * Fetch live available DRT data for a given pool.
+ * @param program - an initialized anchor.Program instance
+ * @param poolAddress - the on-chain pool address as a string
+ */
+export async function fetchAvailableDRTs(
+  program: anchor.Program,
+  poolAddress: string
+) {
+  const poolPubkey = new PublicKey(poolAddress);
+  const poolAccount = await program.account.pool.fetch(poolPubkey);
+  const connection = (program.provider as AnchorProvider).connection;
+  const availableDRTs: Array<{
+    name: string;
+    mint: string;
+    initialSupply: number;
+    available: number;
+  }> = [];
+
+  // Get the allowed DRT types from the account - handle both camelCase and snake_case fields
+  const allowedDrtsField: string[] =
+    Array.isArray(poolAccount.allowedDrts)
+      ? poolAccount.allowedDrts
+      : Array.isArray(poolAccount.allowed_drts)
+      ? poolAccount.allowed_drts
+      : [];
+
+  // Compute the vault PDA once
+  const [vaultPda] = await PublicKey.findProgramAddress(
+    [Buffer.from("vault"), poolPubkey.toBuffer()],
+    program.programId
+  );
+
+  // Loop through allowed DRT types stored on-chain
+  for (const drtType of allowedDrtsField) {
+    let drtMint: PublicKey | null = null;
+    let initialSupply = 0;
+    
+    // Handle both camelCase and snake_case field names for compatibility
+    if (drtType === "append") {
+      drtMint = poolAccount.appendMint || poolAccount.append_mint;
+      initialSupply = poolAccount.appendSupply?.toNumber() || poolAccount.append_supply?.toNumber() || 0;
+    } else if (drtType === "w_compute_median") {
+      drtMint = poolAccount.wComputeMedianMint || poolAccount.w_compute_median_mint;
+      initialSupply = poolAccount.wComputeSupply?.toNumber() || poolAccount.w_compute_supply?.toNumber() || 0;
+    } else if (drtType === "py_compute_median") {
+      drtMint = poolAccount.pyComputeMedianMint || poolAccount.py_compute_median_mint;
+      initialSupply = poolAccount.pyComputeSupply?.toNumber() || poolAccount.py_compute_supply?.toNumber() || 0;
+    }
+    
+    if (drtMint) {
+      // Use getAssociatedTokenAddress to calculate the correct vault DRT token account address
+      const vaultDrtTokenPda = await getAssociatedTokenAddress(
+        drtMint,
+        vaultPda,
+        true  // Allow owner off-curve (since vault is a PDA)
+      );
+
+      // Query the token account balance (available supply)
+      let available = 0;
+      try {
+        const tokenBalance = await connection.getTokenAccountBalance(vaultDrtTokenPda);
+        available = tokenBalance.value.uiAmount || 0;
+      } catch (error) {
+        console.error(`Error fetching token balance for ${drtType}:`, error);
+        // This means the token account probably doesn't exist yet
+      }
+
+      availableDRTs.push({
+        name: drtType,
+        mint: drtMint.toBase58(),
+        initialSupply,
+        available,
+      });
+    }
+  }
+  return availableDRTs;
+}
+
+/**
+ * Executes the buy_drt instruction with quantity support.
+ * @param program - an initialized anchor.Program instance
+ * @param wallet - the connected wallet
+ * @param poolAddress - the on-chain pool address as string
+ * @param drtMintStr - the mint address (as string) for the chosen DRT type
+ * @param drtType - the DRT type (e.g. "append")
+ * @param fee - cost in SOL (will be converted to lamports)
+ * @param quantity - number of tokens to purchase (default: 1)
+ * @returns Array of transaction signatures
+ */
+export async function buyDRT(
+  program: anchor.Program,
+  wallet: any,
+  poolAddress: string,
+  drtMintStr: string,
+  drtType: string,
+  fee: number,
+  quantity: number = 1
+): Promise<string[]> {
+  const poolPubkey = new PublicKey(poolAddress);
+  const drtMint = new PublicKey(drtMintStr);
+  const connection = (program.provider as AnchorProvider).connection;
+
+  // Convert fee from SOL to lamports
+  const feeInLamports = Math.floor(fee * 1_000_000_000);
+  
+  console.log(`Fee: ${fee} SOL (${feeInLamports} lamports) × ${quantity} tokens`);
+  
+  if (feeInLamports <= 0) {
+    throw new Error("Fee must be greater than zero");
+  }
+
+  if (quantity <= 0 || !Number.isInteger(quantity)) {
+    throw new Error("Quantity must be a positive integer");
+  }
+
+  // Compute vault PDA ("vault" seed)
+  const [vaultPda] = await PublicKey.findProgramAddress(
+    [Buffer.from("vault"), poolPubkey.toBuffer()],
+    program.programId
+  );
+
+  // Compute fee_vault PDA ("fee_vault" seed)
+  const [feeVaultPda] = await PublicKey.findProgramAddress(
+    [Buffer.from("fee_vault"), poolPubkey.toBuffer()],
+    program.programId
+  );
+
+  // Use standard associated token account address calculation
+  const vaultDrtTokenPda = await getAssociatedTokenAddress(
+    drtMint,
+    vaultPda,
+    true  // Allow owner off-curve (since vault is a PDA)
+  );
+
+  // Get the buyer's associated token account for the DRT mint
+  const userDrtTokenAccount = await getAssociatedTokenAddress(
+    drtMint,
+    wallet.publicKey
+  );
+
+  try {
+    // Check if the user's token account exists
+    const userAccountInfo = await connection.getAccountInfo(userDrtTokenAccount);
+    
+    const transactionSignatures: string[] = [];
+    
+    // For each token in the quantity
+    for (let i = 0; i < quantity; i++) {
+      let transaction: string;
+      
+      if (i === 0 && !userAccountInfo) {
+        // For the first token, create the token account if it doesn't exist
+        console.log("Creating user token account and buying first DRT token...");
+        
+        // Create instruction to initialize the user's token account
+        const createTokenAccountIx = createAssociatedTokenAccountInstruction(
+          wallet.publicKey,             // payer
+          userDrtTokenAccount,          // associated token account address
+          wallet.publicKey,             // owner
+          drtMint                       // mint
+        );
+        
+        // Execute the transaction with both instructions
+        transaction = await program.methods
+          .buyDrt(drtType, new BN(feeInLamports))
+          .accounts({
+            pool: poolPubkey,
+            drtMint: drtMint,
+            vaultDrtTokenAccount: vaultDrtTokenPda,
+            userDrtTokenAccount: userDrtTokenAccount,
+            vault: vaultPda,
+            feeVault: feeVaultPda,
+            buyerWallet: wallet.publicKey,
+            tokenProgram: TOKEN_PROGRAM_ID,
+            systemProgram: SystemProgram.programId,
+          })
+          .preInstructions([createTokenAccountIx])
+          .rpc();
+      } else {
+        // For subsequent tokens or if account exists
+        console.log(`Buying DRT token ${i + 1} of ${quantity}...`);
+        
+        // Execute the buy instruction
+        transaction = await program.methods
+          .buyDrt(drtType, new BN(feeInLamports))
+          .accounts({
+            pool: poolPubkey,
+            drtMint: drtMint,
+            vaultDrtTokenAccount: vaultDrtTokenPda,
+            userDrtTokenAccount: userDrtTokenAccount,
+            vault: vaultPda,
+            feeVault: feeVaultPda,
+            buyerWallet: wallet.publicKey,
+            tokenProgram: TOKEN_PROGRAM_ID,
+            systemProgram: SystemProgram.programId,
+          })
+          .rpc();
+      }
+
+      console.log(`DRT token ${i + 1} purchase successful, tx signature:`, transaction);
+      transactionSignatures.push(transaction);
+      
+      // Small delay between transactions to prevent rate limiting
+      if (i < quantity - 1) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+    }
+
+    return transactionSignatures;
+  } catch (error) {
+    console.error("Error executing buyDRT instruction:", error);
+    if (error instanceof Error && 'logs' in error) {
+      console.error("Transaction logs:", error.logs);
+    }
+    throw error;
+  }
 }
