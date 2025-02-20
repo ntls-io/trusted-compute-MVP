@@ -227,13 +227,24 @@ const JoinPoolDialog = ({ pool }: { pool: Pool }) => {
           <h5 className="font-medium mb-2">Available Digital Rights</h5>
           <div className="flex flex-wrap gap-2">
             {pool.allowedDRTs.map(({ drt }) => (
-              <Badge key={drt.id} variant="secondary">
-                {drt.name}
-              </Badge>
+              <TooltipProvider key={drt.id} delayDuration={3}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Badge 
+                      className={`${getDrtTypeColor(drt.name)} cursor-help`}
+                    >
+                      {drt.name}
+                    </Badge>
+                  </TooltipTrigger>
+                  <TooltipContent className="p-3 max-w-xs bg-gray-900 text-white">
+                    <h3 className="font-semibold mb-1">{drt.name}</h3>
+                    <p className="text-sm text-gray-200">{drt.description}</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
             ))}
           </div>
         </div>
-
         <div className="p-4 bg-gray-50 flex justify-center">
           <SchemaPreview schema={pool.schemaDefinition} />
         </div>
@@ -304,6 +315,37 @@ const PoolsTableSkeleton = () => (
     </Table>
   </Card>
 );
+
+// Color schema for different DRT types
+const DrtTypeColors: Record<string, string> = {
+  // Blue schema for append operations
+  APPEND_DATA_POOL: "bg-blue-100 text-blue-800",
+  
+  // Yellow schema for Python computations
+  EXECUTE_MEDIAN_PYTHON: "bg-yellow-100 text-yellow-800",
+  
+  // Green schema for WASM computations
+  EXECUTE_MEDIAN_WASM: "bg-green-100 text-green-800",
+};
+
+// Helper function to determine DRT color based on name
+const getDrtTypeColor = (name: string): string => {
+  // Direct match in color mapping
+  if (DrtTypeColors[name]) return DrtTypeColors[name];
+  
+  // Pattern matching for partial names
+  if (name.includes('Append')) 
+    return "bg-blue-100 text-blue-800";
+    
+  if (name.includes('Python')) 
+    return "bg-yellow-100 text-yellow-800";
+    
+  if (name.includes('WASM')) 
+    return "bg-green-100 text-green-800";
+    
+  // Default fallback
+  return "bg-gray-100 text-gray-800";
+};
 
 export function PoolsTable({ poolCreated }: { poolCreated?: boolean })  {
   const [search, setSearch] = useState('');
@@ -441,12 +483,15 @@ export function PoolsTable({ poolCreated }: { poolCreated?: boolean })  {
                       <TooltipProvider key={drt.id}>
                         <Tooltip>
                           <TooltipTrigger>
-                            <Badge variant="secondary" className="cursor-help">
+                            <Badge 
+                              className={`cursor-help ${getDrtTypeColor(drt.name)}`}
+                            >
                               {drt.name}
                             </Badge>
                           </TooltipTrigger>
-                          <TooltipContent>
-                            <p>{drt.description}</p>
+                          <TooltipContent className="p-3 max-w-xs bg-gray-900 text-white">
+                            <h3 className="font-semibold mb-1">{drt.name}</h3>
+                            <p className="text-sm text-gray-200">{drt.description}</p>
                           </TooltipContent>
                         </Tooltip>
                       </TooltipProvider>

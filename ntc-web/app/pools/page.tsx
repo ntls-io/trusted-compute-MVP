@@ -194,7 +194,11 @@ function DigitalRightsTable({
 /* ------------------------------------------------------------------
    Step 1: File Selection
 ------------------------------------------------------------------ */
-function FileSelectionStep({ isActive, onNext }: StepProps) {
+interface FileSelectionStepProps extends StepProps {
+  setSchemaDefinition: (schema: any) => void;
+}
+
+function FileSelectionStep({ isActive, onNext, setSchemaDefinition }: FileSelectionStepProps) {
   const [schemaFile, setSchemaFile] = useState<File | null>(null)
   const [dataFile, setDataFile] = useState<File | null>(null)
   const [validation, setValidation] = useState<{ success: boolean; error: string | null }>({
@@ -225,7 +229,18 @@ function FileSelectionStep({ isActive, onNext }: StepProps) {
       setValidation(result)
       
       if (result.success) {
-        onNext()
+        // Read the schema file and parse it as JSON
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          try {
+            const parsed = JSON.parse(e.target?.result as string);
+            setSchemaDefinition(parsed);
+            onNext();
+          } catch (err) {
+            setValidation({ success: false, error: 'Invalid JSON in schema file' });
+          }
+        };
+        reader.readAsText(schemaFile);
       }
     } catch (error) {
       setValidation({ 
@@ -397,6 +412,14 @@ function DigitalRightsStep({
 /* ------------------------------------------------------------------
    Step 3: Final pool creation (Name, Description, Supplies, On-Chain)
 ------------------------------------------------------------------ */
+interface PoolCreationStepProps extends StepProps {
+  appendSelected: boolean;
+  wComputeSelected: boolean;
+  pyComputeSelected: boolean;
+  setPoolCreated: (value: React.SetStateAction<boolean>) => void;
+  schemaDefinition: any;
+}
+
 function PoolCreationStep({
   isActive,
   onNext,
@@ -404,13 +427,9 @@ function PoolCreationStep({
   appendSelected,
   wComputeSelected,
   pyComputeSelected,
-  setPoolCreated
-}: StepProps & {
-  appendSelected: boolean;
-  wComputeSelected: boolean;
-  pyComputeSelected: boolean;
-  setPoolCreated: (value: React.SetStateAction<boolean>) => void;
-}) {
+  setPoolCreated,
+  schemaDefinition
+}: PoolCreationStepProps) {
   const program = useDrtProgram();
   const { publicKey } = useWallet();
 
@@ -732,14 +751,8 @@ function PoolCreationStep({
         vaultAddress: result.vault.toBase58(),
         feeVaultAddress: result.feeVault.toBase58(),
         ownershipMintAddress: result.ownershipMint.toBase58(),
-        schemaDefinition: {
-          poolId,
-          ownershipSupply,
-          appendSupply: appendSelected ? appendSupply : 0,
-          wComputeSupply: wComputeSelected ? wComputeSupply : 0,
-          pyComputeSupply: pyComputeSelected ? pyComputeSupply : 0,
-          allowedDrts
-        },
+        schemaDefinition: schemaDefinition,
+        allowedDrts
       };
 
       const res = await fetch("/api/pools-dashboard", {
@@ -1018,6 +1031,7 @@ function PoolCreationStep({
 ------------------------------------------------------------------ */
 export default function Pools() {
   const [currentStep, setCurrentStep] = useState(1)
+  const [schemaDefinition, setSchemaDefinition] = useState<any>(null);
 
   // Step 2 booleans for known DRTs
   const [appendSelected, setAppendSelected] = useState(false)
@@ -1064,6 +1078,7 @@ export default function Pools() {
         <FileSelectionStep 
           isActive={currentStep === 1}
           onNext={() => setCurrentStep(2)}
+          setSchemaDefinition={setSchemaDefinition}
         />
 
         {/* Step 2: Digital Rights */}
@@ -1092,6 +1107,7 @@ export default function Pools() {
           wComputeSelected={wComputeSelected}
           pyComputeSelected={pyComputeSelected}
           setPoolCreated={setPoolCreated}
+          schemaDefinition={schemaDefinition}
         />
       </Card>
 

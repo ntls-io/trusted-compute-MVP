@@ -43,22 +43,22 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: "Invalid JSON payload" }, { status: 400 });
     }
     
-    const { name, description, poolSequenceId, chainAddress, vaultAddress, feeVaultAddress, ownershipMintAddress, schemaDefinition } = body;
+    const { name, description, poolSequenceId, chainAddress, vaultAddress, feeVaultAddress, ownershipMintAddress, schemaDefinition, allowedDrts } = body;
     
     // Validate that all required fields are present
-    if (!name || !description || !chainAddress || !vaultAddress || !feeVaultAddress || !ownershipMintAddress || !schemaDefinition) {
+    if (!name || !description || !chainAddress || !vaultAddress || !feeVaultAddress || !ownershipMintAddress || !schemaDefinition || !allowedDrts) {
       console.error("Missing required fields");
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
 
     // Map and validate DRT IDs with type checking
-    const mappedDrtIds = schemaDefinition.allowedDrts.map((drt: string) => {
+    const mappedDrtIds = allowedDrts.map((drt: string) => {
       return DRT_MAPPING[drt as FrontendDrtType];
     });
     
     // Check for any undefined mappings
     if (mappedDrtIds.some((id: DatabaseDrtType | undefined): id is undefined => id === undefined)) {
-      const invalidDrts = schemaDefinition.allowedDrts.filter(
+      const invalidDrts = allowedDrts.filter(
         (drt: string) => !DRT_MAPPING[drt as FrontendDrtType]
       );
       console.error("Invalid DRT types:", invalidDrts);
