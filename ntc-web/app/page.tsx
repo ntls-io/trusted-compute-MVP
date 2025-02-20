@@ -213,6 +213,37 @@ const DRTTableSkeleton = () => (
   </TableBody>
 );
 
+// Color schema for different DRT types
+const DrtTypeColors: Record<string, string> = {
+  // Blue schema for append operations
+  APPEND_DATA_POOL: "bg-blue-100 text-blue-800",
+  
+  // Yellow schema for Python computations
+  EXECUTE_MEDIAN_PYTHON: "bg-yellow-100 text-yellow-800",
+  
+  // Green schema for WASM computations
+  EXECUTE_MEDIAN_WASM: "bg-green-100 text-green-800",
+};
+
+// Helper function to determine DRT color based on name
+const getDrtTypeColor = (name: string): string => {
+  // Direct match in color mapping
+  if (DrtTypeColors[name]) return DrtTypeColors[name];
+  
+  // Pattern matching for partial names
+  if (name.includes('Append')) 
+    return "bg-blue-100 text-blue-800";
+    
+  if (name.includes('Python')) 
+    return "bg-yellow-100 text-yellow-800";
+    
+  if (name.includes('WASM')) 
+    return "bg-green-100 text-green-800";
+    
+  // Default fallback
+  return "bg-gray-100 text-gray-800";
+};
+
 export default function Home() {
   // Connect to loading context
   const [isLoadingPools, setIsLoadingPools] = useState(true);
@@ -427,7 +458,7 @@ export default function Home() {
                     {getPoolSortIcon('description')}
                   </div>
                 </TableHead>
-                <TableHead className="w-[20%] text-white">Digital Rights Tokens (DRT)</TableHead>
+                <TableHead className="w-[25%] text-white">Digital Rights Tokens (DRT)</TableHead>
                 <TableHead className="w-[35%] text-white">Sources</TableHead>
               </TableRow>
             </TableHeader>
@@ -451,12 +482,15 @@ export default function Home() {
                             <TooltipProvider key={drt.id}>
                               <Tooltip>
                                 <TooltipTrigger>
-                                  <Badge variant="secondary" className="cursor-help">
+                                  <Badge 
+                                    className={`cursor-help ${getDrtTypeColor(drt.name)}`}
+                                  >
                                     {drt.name}
                                   </Badge>
                                 </TooltipTrigger>
-                                <TooltipContent>
-                                  <p>{drt.description}</p>
+                                <TooltipContent className="p-3 max-w-xs bg-gray-900 text-white">
+                                  <h3 className="font-semibold mb-1">{drt.name}</h3>
+                                  <p className="text-sm text-gray-200">{drt.description}</p>
                                 </TooltipContent>
                               </Tooltip>
                             </TooltipProvider>
@@ -729,12 +763,15 @@ export default function Home() {
                           <TooltipProvider>
                             <Tooltip>
                               <TooltipTrigger>
-                                <Badge variant="secondary" className="cursor-help">
+                                <Badge 
+                                  className={`cursor-help ${getDrtTypeColor(item.drt.name)}`}
+                                >
                                   {item.drt.name}
                                 </Badge>
                               </TooltipTrigger>
-                              <TooltipContent>
-                                <p>{item.drt.description}</p>
+                              <TooltipContent className="p-3 max-w-xs bg-gray-900 text-white">
+                                <h3 className="font-semibold mb-1">{item.drt.name}</h3>
+                                <p className="text-sm text-gray-200">{item.drt.description}</p>
                               </TooltipContent>
                             </Tooltip>
                           </TooltipProvider>
