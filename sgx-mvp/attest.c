@@ -142,6 +142,15 @@ int main(int argc, char** argv) {
     const char* pers = "ssl_client1";
     bool in_sgx = getenv_client_inside_sgx();
 
+    char* port = getenv("APPLICATION_PORT");
+    char* host = getenv("APPLICATION_HOST");
+    if(!port) port = SERVER_PORT;
+    if(!host) host = SERVER_NAME;
+    char request[1024];
+    if (getenv("APPLICATION_PORT") && getenv("APPLICATION_HOST")) {
+        snprintf(request, sizeof(request), "GET /health HTTP/1.1\r\nHost: %s:%s\r\n\r\n", host, port);
+    }
+
     char* error;
     void* ra_tls_verify_lib = NULL;
     ra_tls_verify_callback_extended_der_f = NULL;
@@ -173,7 +182,7 @@ int main(int argc, char** argv) {
 
     if (argc < 2 ||
             (strcmp(argv[1], "native") && strcmp(argv[1], "epid") && strcmp(argv[1], "dcap"))) {
-        mbedtls_printf("USAGE: %s native|epid|dcap [SGX measurements]\n", argv[0]);
+        mbedtls_printf("USAGE: [APPLICATION_PORT=... APPLICATION_HOST=...] %s native|epid|dcap [SGX measurements]\n", argv[0]);
         return 1;
     }
 
@@ -235,7 +244,7 @@ int main(int argc, char** argv) {
 
     if (argc > 2 && ra_tls_verify_lib) {
         if (argc != 6) {
-            mbedtls_printf("USAGE: %s %s <expected mrenclave> <expected mrsigner>"
+            mbedtls_printf("USAGE: [APPLICATION_PORT=... APPLICATION_HOST=...] %s %s <expected mrenclave> <expected mrsigner>"
                            " <expected isv_prod_id> <expected isv_svn>\n"
                            "       (first two in hex, last two as decimal; set to 0 to ignore)\n",
                            argv[0], argv[1]);
@@ -313,10 +322,10 @@ int main(int argc, char** argv) {
 
     mbedtls_printf(" ok\n");
 
-    mbedtls_printf("  . Connecting to tcp/%s/%s...", SERVER_NAME, SERVER_PORT);
+    mbedtls_printf("  . Connecting to tcp/%s/%s...", host, port);
     fflush(stdout);
 
-    ret = mbedtls_net_connect(&server_fd, SERVER_NAME, SERVER_PORT, MBEDTLS_NET_PROTO_TCP);
+    ret = mbedtls_net_connect(&server_fd, host, port, MBEDTLS_NET_PROTO_TCP);
     if (ret != 0) {
         mbedtls_printf(" failed\n  ! mbedtls_net_connect returned %d\n\n", ret);
         goto exit;
@@ -367,7 +376,7 @@ int main(int argc, char** argv) {
         goto exit;
     }
 
-    ret = mbedtls_ssl_set_hostname(&ssl, SERVER_NAME);
+    ret = mbedtls_ssl_set_hostname(&ssl, host);
     if (ret != 0) {
         mbedtls_printf(" failed\n  ! mbedtls_ssl_set_hostname returned %d\n\n", ret);
         goto exit;
@@ -425,7 +434,12 @@ int main(int argc, char** argv) {
     mbedtls_printf("  > Write to server:");
     fflush(stdout);
 
-    len = sprintf((char*)buf, GET_REQUEST);
+    //len = snprintf((char*)buf, sizeof(buf), "%s", request);
+    if (getenv("APPLICATION_PORT") && getenv("APPLICATION_HOST")) {
+        len = snprintf((char*)buf, sizeof(buf), "%s", request);
+    } else {
+        len = sprintf((char*)buf, GET_REQUEST);
+    }
 
     while ((ret = mbedtls_ssl_write(&ssl, buf, len)) <= 0) {
         if (ret != MBEDTLS_ERR_SSL_WANT_READ && ret != MBEDTLS_ERR_SSL_WANT_WRITE) {

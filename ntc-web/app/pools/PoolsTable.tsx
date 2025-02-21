@@ -199,16 +199,21 @@ const JoinPoolDialog = ({ pool }: { pool: Pool }) => {
 
     setIsValidating(true);
     try {
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      setValidation({
-        success: true,
-        error: null,
-      });
-      alert('Successfully joined pool!');
+      // Create a blob from the schema definition
+      const schemaBlob = new Blob([JSON.stringify(pool.schemaDefinition)], { type: 'application/json' });
+      const schemaFile = new File([schemaBlob], 'schema.json', { type: 'application/json' });
+      
+      // Use the existing validation utility
+      const result = await validateJsonSchema(schemaFile, dataFile);
+      setValidation(result);
+      
+      if (result.success) {
+        alert('Successfully joined pool!');
+      }
     } catch (error) {
       setValidation({
         success: false,
-        error: 'Failed to validate data file against pool schema',
+        error: 'Failed to validate data file against pool schema: ' + (error instanceof Error ? error.message : String(error))
       });
     } finally {
       setIsValidating(false);

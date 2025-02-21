@@ -29,7 +29,7 @@ This guide covers the setup and configuration of the attestation client for veri
     export AZDCAP_COLLATERAL_VERSION=v4
 
     # Set log level
-    export AZDCAP_DEBUG_LOG_LEVEL=INFO
+    export AZDCAP_DEBUG_LOG_LEVEL=ERROR
 
     # Development flags, see Gramine documentation for more information
     export RA_TLS_ALLOW_DEBUG_ENCLAVE_INSECURE=1
@@ -66,13 +66,13 @@ make attest
 2. **Measurement Verification**
     ```sh
     # Check specific measurements
-    ./attest dcap <mrenclave> <mrsigner> <isv_prod_id> <isv_svn>
+    [APPLICATION_PORT=... APPLICATION_HOST=...] ./attest dcap <mrenclave> <mrsigner> <isv_prod_id> <isv_svn>
     ```
 
 3. **Example Verification**
 
     ```sh
-    ./attest dcap c5e34826d42766363286055750373441545bc601df37fab07231bca4324db319 eb33db710373cbf7c6bfa26e6e9d40e261cfd1f5adc38db6599bfe764e9180cc 0 0
+    APPLICATION_HOST=127.0.0.1 APPLICATION_PORT=8080 ./attest dcap b6b4ed529d21daad3180cde2759bf7f6b0533b4b78f02ffdf48158e80b48c421 0d75a9bcadf105daec4c45f7cde9ebbf6af1aea9436d5ca259fb84efd51460ac 0 0
     ```
 
     Expected Output:
