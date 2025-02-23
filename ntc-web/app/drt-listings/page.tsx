@@ -624,7 +624,7 @@ export default function DrtListings() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {myDRTs.map((drt) => {
+                      {myDRTs.filter((drt) => drt.drtId !== 'OWNERSHIP_TOKEN').map((drt) => {
                         const pool = pools.find(p => p.id === drt.poolId);
                         return (
                           <TableRow key={drt.id} className="hover:bg-gray-50">

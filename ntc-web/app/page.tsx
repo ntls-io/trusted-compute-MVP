@@ -1116,8 +1116,8 @@ export default function Home() {
                     {getPoolSortIcon('description')}
                   </div>
                 </TableHead>
-                <TableHead className="w-[25%] text-white">Digital Rights Tokens (DRT)</TableHead>
-                <TableHead className="w-[35%] text-white">Sources</TableHead>
+                <TableHead className="w-[25%] text-white text-center">Digital Rights Tokens (DRT)</TableHead>
+                <TableHead className="w-[35%] text-white text-center">Sources</TableHead>
               </TableRow>
             </TableHeader>
             {isLoadingPools ? (
@@ -1135,7 +1135,7 @@ export default function Home() {
                       <TableCell className="font-medium">{pool.name}</TableCell>
                       <TableCell>{pool.description}</TableCell>
                       <TableCell>
-                        <div className="flex flex-wrap gap-2">
+                       <div className="flex flex-col gap-2">
                           {pool.allowedDRTs.map(({ drt }) => (
                             <TooltipProvider key={drt.id}>
                               <Tooltip>
@@ -1387,7 +1387,7 @@ export default function Home() {
                       {getDrtSortIcon('price')}
                     </div>
                   </TableHead>
-                  <TableHead className="text-white w-[200px]">Actions</TableHead>
+                    <TableHead className="text-white w-[200px] text-center">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               {isLoadingDRTs ? (
@@ -1448,60 +1448,67 @@ export default function Home() {
                           </TableCell>
                           <TableCell>{item.price ? `${item.price.toFixed(2)} SOL` : '-'}</TableCell>
                           <TableCell>
-                            <div className="flex justify-around gap-2">
-                              <Button 
-                                variant="outline" 
-                                size="sm"
-                                disabled={item.isListed || item.state === 'pending' || item.state === 'completed'}
-                              >
-                                Sell
-                              </Button>
-                              {item.drt.name.toLowerCase().includes('python') ? (
-                                <Dialog>
-                                  <DialogTrigger asChild>
-                                    <Button 
-                                      size="sm" 
-                                      className={`${buttonClass} w-28`}
-                                      disabled={isRedeemed || !item.pool.enclaveMeasurement?.publicIp || item.state !== 'active' || !wallet.connected}
-                                    >
-                                      <Shield className="w-4 h-4 mr-2" />
-                                      {buttonText}
-                                    </Button>
-                                  </DialogTrigger>
-                                  <PythonExecutionDialog 
-                                    drtInstance={item}
-                                    onRedeem={() => handlePythonRedeem(item)}
-                                    onStateUpdate={(newState) => handleStateUpdate(item.id, newState)}
-                                    program={program}
-                                    wallet={wallet}
-                                  />
-                                </Dialog>
-                              ) : item.drt.name.toLowerCase().includes('wasm') ? (
-                                <Dialog>
-                                  <DialogTrigger asChild>
-                                    <Button 
-                                      size="sm" 
-                                      className={`${buttonClass} w-28`}
-                                      disabled={isRedeemed || !item.pool.enclaveMeasurement?.publicIp || item.state !== 'active' || !wallet.connected}
-                                    >
-                                      <Shield className="w-4 h-4 mr-2" />
-                                      {buttonText}
-                                    </Button>
-                                  </DialogTrigger>
-                                  <WasmExecutionDialog 
-                                    drtInstance={item}
-                                    onRedeem={() => handleWasmRedeem(item)}
-                                    onStateUpdate={(newState) => handleStateUpdate(item.id, newState)}
-                                    program={program}
-                                    wallet={wallet}
-                                  />
-                                </Dialog>
-                              ) : (
-                                <Button variant="outline" size="sm">
-                                  View Results
+                            {item.drt.name.toLowerCase() !== "ownership token" && (
+                              <div className="flex justify-around gap-2">
+                                <Button 
+                                  variant="outline" 
+                                  size="sm"
+                                  disabled={item.isListed || item.state === 'pending' || item.state === 'completed'}
+                                >
+                                  Sell
                                 </Button>
-                              )}
-                            </div>
+                                {item.drt.name.toLowerCase().includes('python') ? (
+                                  <Dialog>
+                                    <DialogTrigger asChild>
+                                      <Button 
+                                        size="sm" 
+                                        className={`${buttonClass} w-32`}
+                                        disabled={isRedeemed || !item.pool.enclaveMeasurement?.publicIp || item.state !== 'active' || !wallet.connected}
+                                      >
+                                        <Shield className="w-4 h-4 mr-1 flex-shrink-0" />
+                                        <span className="flex-grow">{buttonText}</span>
+                                      </Button>
+                                    </DialogTrigger>
+                                    <PythonExecutionDialog 
+                                      drtInstance={item}
+                                      onRedeem={() => handlePythonRedeem(item)}
+                                      onStateUpdate={(newState) => handleStateUpdate(item.id, newState)}
+                                      program={program}
+                                      wallet={wallet}
+                                    />
+                                  </Dialog>
+                                ) : item.drt.name.toLowerCase().includes('wasm') ? (
+                                  <Dialog>
+                                    <DialogTrigger asChild>
+                                      <Button 
+                                        size="sm" 
+                                        className={`${buttonClass} w-32`}
+                                        disabled={isRedeemed || !item.pool.enclaveMeasurement?.publicIp || item.state !== 'active' || !wallet.connected}
+                                      >
+                                        <Shield className="w-4 h-4 mr-1 flex-shrink-0" />
+                                        <span className="flex-grow">{buttonText}</span>
+                                      </Button>
+                                    </DialogTrigger>
+                                    <WasmExecutionDialog 
+                                      drtInstance={item}
+                                      onRedeem={() => handleWasmRedeem(item)}
+                                      onStateUpdate={(newState) => handleStateUpdate(item.id, newState)}
+                                      program={program}
+                                      wallet={wallet}
+                                    />
+                                  </Dialog>
+                                ) : (
+                                  <Button 
+                                    size="sm"
+                                    className="bg-gray-200 text-black cursor-not-allowed w-32"
+                                    disabled 
+                                  >
+                                    <Shield className="w-4 h-4 mr-1 flex-shrink-0" />
+                                    <span className="flex-grow">Pools Page</span>
+                                  </Button>
+                                )}
+                              </div>
+                            )}
                           </TableCell>
                         </TableRow>
                       );

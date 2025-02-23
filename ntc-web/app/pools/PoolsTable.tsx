@@ -415,7 +415,8 @@ const JoinPoolDialog = ({ pool, drtInstances, fetchUserData }: { pool: Pool; drt
         userOwnershipTokenAccount,
         "append",
         wallet,
-        (status) => updateProgress(1, status, "loading")
+        (status) => updateProgress(1, status, "loading"),
+        pool.id
       );
 
       if (!ownershipTokenReceived) throw new Error("Ownership token not received");

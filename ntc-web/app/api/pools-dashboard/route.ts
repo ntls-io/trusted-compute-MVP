@@ -23,7 +23,7 @@ import { prisma } from "@/lib/prisma";
 
 // Define valid DRT types
 type FrontendDrtType = 'append' | 'w_compute_median' | 'py_compute_median';
-type DatabaseDrtType = 'APPEND_DATA_POOL' | 'EXECUTE_MEDIAN_WASM' | 'EXECUTE_MEDIAN_PYTHON';
+type DatabaseDrtType = 'APPEND_DATA_POOL' | 'EXECUTE_MEDIAN_WASM' | 'EXECUTE_MEDIAN_PYTHON' | 'OWNERSHIP_TOKEN';
 
 // Map frontend DRT names to database IDs with type safety
 const DRT_MAPPING: Record<FrontendDrtType, DatabaseDrtType> = {
@@ -88,6 +88,9 @@ export async function POST(request: NextRequest) {
         },
       });
     }
+
+    // Include OWNERSHIP_TOKEN along with other DRTs
+    const allDrtIds = ['OWNERSHIP_TOKEN' as DatabaseDrtType, ...mappedDrtIds];
     
     // Create the new pool with properly typed DRT IDs
     const newPool = await prisma.pool.create({
@@ -102,7 +105,7 @@ export async function POST(request: NextRequest) {
         schemaDefinition,
         ownerId: user.id,
         allowedDRTs: {
-          create: mappedDrtIds.map((drtId: DatabaseDrtType) => ({
+          create: allDrtIds.map((drtId: DatabaseDrtType) => ({
             drtId
           })),
         },

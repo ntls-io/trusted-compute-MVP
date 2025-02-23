@@ -222,7 +222,8 @@ export async function redeemDrt(
   userOwnershipTokenAccount: PublicKey,
   drtType: string,
   wallet: any,
-  updateStatus?: (status: string) => void
+  updateStatus?: (status: string) => void,
+  databasePoolId?: string
 ): Promise<{ tx: string; ownershipTokenReceived: boolean }> {
   const provider = program.provider as AnchorProvider;
   const user = wallet.publicKey;
@@ -287,7 +288,7 @@ export async function redeemDrt(
         body: JSON.stringify({
           mintAddress: userOwnershipTokenAccount.toBase58(), // Use ATA as unique identifier
           drtId: 'OWNERSHIP_TOKEN',
-          poolId: pool.toBase58(),
+          poolId: databasePoolId,
           ownerId: user.toBase58(),
           state: 'active',
           isListed: false,
