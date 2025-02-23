@@ -672,6 +672,7 @@ function PoolCreationStep({
   // Calculate total steps based on selections
   useEffect(() => {
     const stepsList = [
+      { name: "Create New VM", walletSignatureRequired: false }, // New step 1
       { name: "Create Ownership Mint", walletSignatureRequired: true },
       { name: "Initialize Pool", walletSignatureRequired: true },
       { name: "Initialize Fee Vault", walletSignatureRequired: true },
@@ -696,6 +697,7 @@ function PoolCreationStep({
     }
     // Save off-chain
     stepsList.push(
+      { name: "Wait for Enclave", walletSignatureRequired: false }, // New step before metadata
       { name: "Save Pool Metadata", walletSignatureRequired: false }
     );
     setSteps(stepsList);
@@ -756,12 +758,18 @@ function PoolCreationStep({
       // Local variable of enclave measurements
       let measurements = null;
 
-      updateProgress(1, "Deploying TEE environment", "loading");
-      const deploymentId = await deployTEE(poolName);
-      setTeeDeploymentId(deploymentId);
-
-      // We track the step # in code
-      let currentStep = 1;
+      // Step 0: Create New VM (simulate 5 seconds delay)
+      updateProgress(0, "Creating New VM", "loading", "Deploying VM, please wait...");
+      await new Promise(resolve => setTimeout(resolve, 5000));
+      const vmDeploymentPromise = deployTEE(poolName)
+         .then(deploymentId => {
+             setTeeDeploymentId(deploymentId);
+             return deploymentId;
+         })
+         .catch(err => {
+             console.error("VM deployment error:", err);
+             throw err;
+         });
 
       // Allowed DRT list
       const allowedDrts: string[] = [];
@@ -770,21 +778,7 @@ function PoolCreationStep({
       if (pyComputeSelected) allowedDrts.push("py_compute_median");
 
       // Start the creation steps
-      updateProgress(
-        0,
-        "Starting on-chain creation...",
-        "loading",
-        "Please confirm your wallet is connected"
-      );
-
       // 1) Create pool + ownership mint + fee vault
-      updateProgress(
-        currentStep,
-        "Creating ownership token mint",
-        "loading",
-        "Please sign with your wallet"
-      );
-
       const result = await createPool(
         program,
         program.provider as any,
@@ -794,7 +788,7 @@ function PoolCreationStep({
         new BN(appendSelected ? appendSupply : 0),
         allowedDrts,
         (status) => {
-          // We can parse your existing status callback
+          // Adjusted progress callback with steps 1,2,3
           if (status.includes("1/3")) {
             updateProgress(1, "Creating ownership token mint", 'loading', "Please sign with your wallet");
           } else if (status.includes("2/3")) {
@@ -810,17 +804,15 @@ function PoolCreationStep({
 
       // 2) Initialize each selected DRT
       const provider = program.provider as anchor.AnchorProvider;
-      currentStep = 4;
+      let currentStep = 4; // next step after fee vault is step 4
 
       if (appendSelected) {
-        updateProgress(currentStep, "Creating mint for Append DRT", 'loading', 
-          "Please sign with your wallet");
+        updateProgress(currentStep, "Creating mint for Append DRT", 'loading', "Please sign with your wallet");
         const appendMint = await createNewMint(provider, result.vault);
         updateProgress(currentStep, "Mint for Append DRT created", 'success');
 
         currentStep++;
-        updateProgress(currentStep, "Initializing Append DRT on-chain", 'loading',
-          "Please sign with your wallet");
+        updateProgress(currentStep, "Initializing Append DRT on-chain", 'loading', "Please sign with your wallet");
         await initializeDRT(
           program,
           result.pool,
@@ -835,14 +827,12 @@ function PoolCreationStep({
       }
 
       if (wComputeSelected) {
-        updateProgress(currentStep, "Creating mint for W Compute Median DRT", 'loading',
-          "Please sign with your wallet");
+        updateProgress(currentStep, "Creating mint for W Compute Median DRT", 'loading', "Please sign with your wallet");
         const wComputeMint = await createNewMint(provider, result.vault);
         updateProgress(currentStep, "Mint for W Compute Median created", 'success');
 
         currentStep++;
-        updateProgress(currentStep, "Initializing W Compute Median DRT on-chain", 'loading',
-          "Please sign with your wallet");
+        updateProgress(currentStep, "Initializing W Compute Median DRT on-chain", 'loading', "Please sign with your wallet");
         await initializeDRT(
           program,
           result.pool,
@@ -857,14 +847,12 @@ function PoolCreationStep({
       }
 
       if (pyComputeSelected) {
-        updateProgress(currentStep, "Creating mint for Py Compute Median DRT", 'loading',
-          "Please sign with your wallet");
+        updateProgress(currentStep, "Creating mint for Py Compute Median DRT", 'loading', "Please sign with your wallet");
         const pyComputeMint = await createNewMint(provider, result.vault);
         updateProgress(currentStep, "Mint for Py Compute Median created", 'success');
 
         currentStep++;
-        updateProgress(currentStep, "Initializing Py Compute Median DRT on-chain", 'loading',
-          "Please sign with your wallet");
+        updateProgress(currentStep, "Initializing Py Compute Median DRT on-chain", 'loading', "Please sign with your wallet");
         await initializeDRT(
           program,
           result.pool,
@@ -878,9 +866,14 @@ function PoolCreationStep({
         currentStep++;
       }
 
+      // 3) Wait for Enclave (new step in stepsList)
+      updateProgress(currentStep, "Waiting for Enclave", "loading", "Deploying enclave, please wait...");
+      const deploymentId = await vmDeploymentPromise;
       let teeDeploymentComplete = false;
       while (!teeDeploymentComplete) {
         const status = await checkTEEStatus(deploymentId);
+        setTeeStatus(status.status);
+        
         if (status.status === 'completed') {
           teeDeploymentComplete = true;
           if (status.details?.sigstruct) {
@@ -891,10 +884,6 @@ function PoolCreationStep({
               isvSvn: status.details.sigstruct.isv_svn,
             };
             console.log('TEE deployment successful, measurements:', measurements);
-
-            // Optionally set the measurements in state
-            // setEnclaveMeasurement(measurements);
-            // console.log("Enclave measurements set state:", enclaveMeasurement);
           } else {
             console.warn('TEE deployment completed but missing sigstruct details');
           }
@@ -906,8 +895,10 @@ function PoolCreationStep({
           await new Promise(resolve => setTimeout(resolve, 30000));
         }
       }
+      // Increment step after enclave is complete
+      currentStep++;
 
-      // 3) Off-chain save
+      // 4) Off-chain save
       updateProgress(currentStep, "Saving pool data off-chain", 'loading');
       const payload = {
         name: poolName,
@@ -945,6 +936,8 @@ function PoolCreationStep({
         } else {
           console.warn("No enclave measurement available to save");
         }
+        // Increment step so the final step reflects total steps
+        currentStep++;
         updateProgress(currentStep, "Pool successfully created and saved!", 'success',
           `Chain address: ${chainAddress}`);
         setPoolCreated(prev => !prev);
