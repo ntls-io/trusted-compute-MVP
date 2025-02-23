@@ -47,6 +47,8 @@ interface EnclaveMeasurement {
   mrsigner: string;
   isvProdId: string;
   isvSvn: string;
+  publicIp?: string;  // Added for attestation
+  actualName?: string; // Added for attestation (VM name)
 }
 
 interface DRT {
@@ -73,22 +75,35 @@ interface Pool {
 interface AttestationResult {
   success: boolean;
   error?: string;
+  stdout?: string; // Added to display FastAPI logs
   measurements?: EnclaveMeasurement;
 }
 
-const EnclaveDialog = ({ pool, onAttest }: { pool: Pool; onAttest: () => void }) => {
+const EnclaveDialog = ({ pool, onAttest }: { pool: Pool; onAttest: () => Promise<AttestationResult> }) => {
   const [isAttesting, setIsAttesting] = useState(false);
+  const [attestationResult, setAttestationResult] = useState<AttestationResult | null>(null);
+  const [showOutput, setShowOutput] = useState(false); // New state to toggle output visibility
   
   const handleAttest = async () => {
     setIsAttesting(true);
-    await onAttest();
-    setIsAttesting(false);
+    setAttestationResult(null); // Reset previous result
+    try {
+      const result = await onAttest();
+      setAttestationResult(result);
+    } catch (error) {
+      setAttestationResult({
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error during attestation',
+      });
+    } finally {
+      setIsAttesting(false);
+    }
   };
 
   // Early return if no enclave measurement
   if (!pool.enclaveMeasurement) {
     return (
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto"> {/* Added scrollable max height */}
         <DialogHeader>
           <DialogTitle>Enclave Verification - {pool.name}</DialogTitle>
           <DialogDescription>
@@ -104,8 +119,47 @@ const EnclaveDialog = ({ pool, onAttest }: { pool: Pool; onAttest: () => void })
     );
   }
 
+  // Construct the command as executed by AttestationClient
+  const command = `[APPLICATION_PORT=443 APPLICATION_HOST=${pool.enclaveMeasurement.publicIp || 'unknown'}] ./attest dcap ${pool.enclaveMeasurement.mrenclave} ${pool.enclaveMeasurement.mrsigner} ${pool.enclaveMeasurement.isvProdId} ${pool.enclaveMeasurement.isvSvn}`;
+
+  // Determine button properties based on attestation status
+  const getButtonProps = () => {
+    if (isAttesting) {
+      return {
+        text: 'Running Attestation...',
+        className: 'bg-gray-200 text-gray-700 cursor-not-allowed',
+        disabled: true,
+        icon: <Loader2 className="w-4 h-4 mr-2 animate-spin" />,
+      };
+    }
+    if (attestationResult?.success) {
+      return {
+        text: 'Verified',
+        className: 'bg-green-100 text-green-700 cursor-not-allowed',
+        disabled: true,
+        icon: <Shield className="w-4 h-4 mr-2" />,
+      };
+    }
+    if (attestationResult && !attestationResult.success) {
+      return {
+        text: 'Retry Attestation',
+        className: 'border-red-500 text-red-500 hover:bg-red-50',
+        disabled: false,
+        icon: <Shield className="w-4 h-4 mr-2" />,
+      };
+    }
+    return {
+      text: 'Attest Enclave',
+      className: '',
+      disabled: !pool.enclaveMeasurement || !pool.enclaveMeasurement.publicIp || !pool.enclaveMeasurement.actualName,
+      icon: <Shield className="w-4 h-4 mr-2" />,
+    };
+  };
+
+  const buttonProps = getButtonProps();
+
   return (
-    <DialogContent className="max-w-2xl">
+    <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto"> {/* Added scrollable max height */}
       <DialogHeader>
         <DialogTitle>Enclave Verification - {pool.name}</DialogTitle>
         <DialogDescription>
@@ -147,6 +201,20 @@ const EnclaveDialog = ({ pool, onAttest }: { pool: Pool; onAttest: () => void })
                 </div>
               </div>
             </div>
+
+            <div>
+              <Label className="text-sm">Public IP</Label>
+              <div className="font-mono text-sm bg-gray-100 p-2 rounded">
+                {pool.enclaveMeasurement.publicIp || 'Not available'}
+              </div>
+            </div>
+
+            {/* <div>
+              <Label className="text-sm">VM Name</Label>
+              <div className="font-mono text-sm bg-gray-100 p-2 rounded">
+                {pool.enclaveMeasurement.actualName || 'Not available'}
+              </div>
+            </div> */}
           </div>
         </div>
 
@@ -162,18 +230,59 @@ const EnclaveDialog = ({ pool, onAttest }: { pool: Pool; onAttest: () => void })
               View Attestation Source Code
             </a>
             
-            <Button onClick={handleAttest} disabled={isAttesting}>
-              <Shield className="w-4 h-4 mr-2" />
-              {isAttesting ? 'Running Attestation...' : 'Attest Enclave'}
+            <Button 
+              onClick={handleAttest} 
+              disabled={buttonProps.disabled}
+              className={buttonProps.className}
+            >
+              {buttonProps.icon}
+              {buttonProps.text}
             </Button>
           </div>
 
           <div className="text-sm text-gray-500">
             Command that will be executed:<br />
-            <code className="font-mono bg-gray-100 p-1 text-xs">
-              ./attest dcap {pool.enclaveMeasurement.mrenclave} {pool.enclaveMeasurement.mrsigner} {pool.enclaveMeasurement.isvProdId} {pool.enclaveMeasurement.isvSvn}
+            <code className="font-mono bg-gray-100 p-1 text-xs break-all">
+              {command}
             </code>
           </div>
+
+          {attestationResult && (
+            <div className="space-y-2">
+              <h3 className="text-lg font-semibold">Attestation Result</h3>
+              {attestationResult.success ? (
+                <Alert className="bg-green-50 border-green-200">
+                  <AlertDescription>Attestation successful!</AlertDescription>
+                </Alert>
+              ) : (
+                <Alert variant="destructive">
+                  <AlertDescription>
+                    Attestation failed: {attestationResult.error}
+                  </AlertDescription>
+                </Alert>
+              )}
+              {attestationResult.stdout && (
+                <div className="space-y-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowOutput(!showOutput)}
+                    className="w-full"
+                  >
+                    {showOutput ? 'Hide Output' : 'Show Output'}
+                  </Button>
+                  {showOutput && (
+                    <div>
+                      <Label className="text-sm">Attestation Output</Label>
+                      <pre className="font-mono text-sm bg-gray-100 p-2 rounded max-h-40 overflow-y-auto whitespace-pre-wrap"> {/* Changed break-all to whitespace-pre-wrap */}
+                        {attestationResult.stdout}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </DialogContent>
@@ -378,26 +487,63 @@ export function PoolsTable({ poolCreated }: { poolCreated?: boolean })  {
     }
   };
 
-  const handleAttestation = async (pool: Pool) => {
-    if (!pool.enclaveMeasurement) {
-      setAttestationResults({
-        ...attestationResults,
-        [pool.id]: {
-          success: false,
-          error: 'No enclave measurements available'
-        }
-      });
-      return;
+  const handleAttestation = async (pool: Pool): Promise<AttestationResult> => {
+    if (!pool.enclaveMeasurement || !pool.enclaveMeasurement.publicIp || !pool.enclaveMeasurement.actualName) {
+      return {
+        success: false,
+        error: 'Missing enclave measurements, public IP, or VM name',
+      };
     }
 
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    setAttestationResults({
-      ...attestationResults,
-      [pool.id]: {
-        success: true,
-        measurements: pool.enclaveMeasurement
+    try {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/attestation`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          vm_name: pool.enclaveMeasurement.actualName,
+          mrenclave: pool.enclaveMeasurement.mrenclave,
+          mrsigner: pool.enclaveMeasurement.mrsigner,
+          isvprodid: pool.enclaveMeasurement.isvProdId,
+          isvsvn: pool.enclaveMeasurement.isvSvn,
+          port: 443, // Matches the command in EnclaveDialog
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || `Attestation failed with status ${response.status}`);
       }
-    });
+
+      const data = await response.json();
+      setAttestationResults((prev) => ({
+        ...prev,
+        [pool.id]: {
+          success: data.success,
+          stdout: data.details.stdout,
+          measurements: pool.enclaveMeasurement,
+        },
+      }));
+      return {
+        success: data.success,
+        stdout: data.details.stdout,
+        measurements: pool.enclaveMeasurement,
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      setAttestationResults((prev) => ({
+        ...prev,
+        [pool.id]: {
+          success: false,
+          error: errorMessage,
+        },
+      }));
+      return {
+        success: false,
+        error: errorMessage,
+      };
+    }
   };
 
   const filteredPools = [...pools]

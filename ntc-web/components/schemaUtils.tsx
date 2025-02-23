@@ -16,9 +16,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-
 import React, { useState } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -157,50 +156,63 @@ export const SchemaPreview = ({ schema, schemaFile }: SchemaPreviewProps) => {
       </Button>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-3xl max-h-[80vh] overflow-hidden flex flex-col">
+        <DialogContent className="max-w-3xl h-[80vh]">
           <DialogHeader>
-            <DialogTitle className="text-xl font-semibold">Schema Preview</DialogTitle>
+            <DialogTitle>Schema Preview</DialogTitle>
+            <DialogDescription>
+              Preview of the uploaded JSON schema structure in table and tree formats.
+            </DialogDescription>
           </DialogHeader>
 
           {error ? (
-            <div className="text-red-500 p-4">{error}</div>
+            <div className="text-red-500 p-4" role="alert">{error}</div>
           ) : (
-            <Tabs defaultValue="table" className="flex-1 flex flex-col">
-              <TabsList>
-                <TabsTrigger value="table">Table</TabsTrigger>
-                <TabsTrigger value="tree">Tree</TabsTrigger>
-              </TabsList>
+            <Tabs defaultValue="table" className="w-full">
+              <div className="flex justify-center mb-4">
+                <TabsList>
+                  <TabsTrigger value="table">Table</TabsTrigger>
+                  <TabsTrigger value="tree">Tree</TabsTrigger>
+                </TabsList>
+              </div>
 
-              <TabsContent value="table">
-                <ScrollArea>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Name</TableHead>
-                        <TableHead>Type</TableHead>
-                        <TableHead>Required</TableHead>
-                        <TableHead>Items</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {columns.map((col) => (
-                        <TableRow key={col.name}>
-                          <TableCell>{col.name}</TableCell>
-                          <TableCell>{col.type}</TableCell>
-                          <TableCell>{col.required ? 'Yes' : 'No'}</TableCell>
-                          <TableCell>{col.items?.type || '-'}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </ScrollArea>
-              </TabsContent>
+              <div className="h-[calc(80vh-180px)]">
+                <TabsContent value="table" className="m-0 h-full">
+                  <ScrollArea className="h-full border rounded-md">
+                    <div className="p-4">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Name</TableHead>
+                            <TableHead>Type</TableHead>
+                            <TableHead>Required</TableHead>
+                            <TableHead>Items</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {columns.map((col) => (
+                            <TableRow key={col.name}>
+                              <TableCell>{col.name}</TableCell>
+                              <TableCell>{col.type}</TableCell>
+                              <TableCell>{col.required ? 'Yes' : 'No'}</TableCell>
+                              <TableCell>{col.items?.type || '-'}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </ScrollArea>
+                </TabsContent>
 
-              <TabsContent value="tree">
-                <ScrollArea>
-                  <pre className="p-4 bg-gray-50">{JSON.stringify(parsedSchema, null, 2)}</pre>
-                </ScrollArea>
-              </TabsContent>
+                <TabsContent value="tree" className="m-0 h-full">
+                  <ScrollArea className="h-full border rounded-md">
+                    <div className="p-4">
+                      <pre className="bg-gray-50 p-4 rounded-lg whitespace-pre-wrap">
+                        {JSON.stringify(parsedSchema, null, 2)}
+                      </pre>
+                    </div>
+                  </ScrollArea>
+                </TabsContent>
+              </div>
             </Tabs>
           )}
         </DialogContent>
