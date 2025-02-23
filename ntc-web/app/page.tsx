@@ -58,7 +58,7 @@ interface Pool {
   vaultAddress: string;
   feeVaultAddress: string;
   ownershipMintAddress: string;
-  schemaDefinition: any;
+  schemaDefinition: JSON;
   enclaveMeasurement?: {
     mrenclave: string;
     mrsigner: string;
@@ -93,6 +93,7 @@ interface DRTInstance {
     description: string;
     chainAddress: string;
     ownershipMintAddress: string;
+    schemaDefinition: JSON;
     enclaveMeasurement?: {
       publicIp?: string;
     };
@@ -116,7 +117,7 @@ interface AttestationResult {
   };
 }
 
-interface PythonExecutionResult {
+interface ExecutionResult {
   success: boolean;
   result?: any;
   error?: string;
@@ -323,7 +324,7 @@ const EnclaveDialog = ({ pool, onAttest }: { pool: Pool; onAttest: () => Promise
   );
 };
 
-// Python Execution Dialog Component (Updated with Solana Redemption)
+// Python Execution Dialog Component
 const PythonExecutionDialog = ({ 
   drtInstance, 
   onRedeem, 
@@ -332,20 +333,19 @@ const PythonExecutionDialog = ({
   wallet
 }: { 
   drtInstance: DRTInstance; 
-  onRedeem: () => Promise<PythonExecutionResult>; 
+  onRedeem: () => Promise<ExecutionResult>; 
   onStateUpdate: (newState: string) => void; 
-  program: any; // Anchor program from useDrtProgram
-  wallet: any; // Wallet from useWallet
+  program: any;
+  wallet: any;
 }) => {
   const [isRedeeming, setIsRedeeming] = useState(false);
-  const [executionResult, setExecutionResult] = useState<PythonExecutionResult | null>(null);
+  const [executionResult, setExecutionResult] = useState<ExecutionResult | null>(null);
 
   const handleRedeem = async () => {
     setIsRedeeming(true);
     setExecutionResult(null);
 
     try {
-      // Step 1: Solana redeem_drt transaction
       if (!program || !wallet.connected) {
         throw new Error("Wallet not connected or program not initialized");
       }
@@ -355,9 +355,9 @@ const PythonExecutionDialog = ({
       const ownershipMint = new PublicKey(drtInstance.pool.ownershipMintAddress);
       const userDrtTokenAccount = await getAssociatedTokenAddress(drtMint, wallet.publicKey);
       const userOwnershipTokenAccount = await getAssociatedTokenAddress(ownershipMint, wallet.publicKey);
-      const drtType = drtInstance.drt.name.toLowerCase().includes('python') ? "py_compute_median" : "unknown";
+      const drtType = "py_compute_median";
 
-      console.log("Redeeming DRT on Solana...");
+      console.log("Redeeming Python DRT on Solana...");
       await redeemDrt(
         program,
         poolPubkey,
@@ -368,14 +368,12 @@ const PythonExecutionDialog = ({
         drtType,
         wallet
       );
-      console.log("Solana DRT redemption successful");
+      console.log("Solana Python DRT redemption successful");
 
-      // Step 2: Execute Python script
       const pythonResult = await onRedeem();
       setExecutionResult(pythonResult);
 
       if (pythonResult.success) {
-        // Step 3: Update database state
         await fetch('/api/update-drt-state', {
           method: 'POST',
           headers: {
@@ -386,8 +384,6 @@ const PythonExecutionDialog = ({
             state: 'completed',
           }),
         });
-
-        // Step 4: Update local state
         onStateUpdate('completed');
       }
     } catch (error) {
@@ -476,6 +472,174 @@ const PythonExecutionDialog = ({
                 <Alert className="bg-green-50 border-green-200">
                   <AlertDescription>
                     Script executed successfully!
+                    <pre className="mt-2 font-mono text-sm bg-gray-100 p-2 rounded max-h-40 overflow-y-auto">
+                      {JSON.stringify(executionResult.result, null, 2)}
+                    </pre>
+                  </AlertDescription>
+                </Alert>
+              ) : (
+                <Alert variant="destructive">
+                  <AlertDescription>
+                    Execution failed: {executionResult.error}
+                  </AlertDescription>
+                </Alert>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </DialogContent>
+  );
+};
+
+// WASM Execution Dialog Component
+const WasmExecutionDialog = ({ 
+  drtInstance, 
+  onRedeem, 
+  onStateUpdate,
+  program,
+  wallet
+}: { 
+  drtInstance: DRTInstance; 
+  onRedeem: () => Promise<ExecutionResult>; 
+  onStateUpdate: (newState: string) => void; 
+  program: any;
+  wallet: any;
+}) => {
+  const [isRedeeming, setIsRedeeming] = useState(false);
+  const [executionResult, setExecutionResult] = useState<ExecutionResult | null>(null);
+
+  const handleRedeem = async () => {
+    setIsRedeeming(true);
+    setExecutionResult(null);
+
+    try {
+      if (!program || !wallet.connected) {
+        throw new Error("Wallet not connected or program not initialized");
+      }
+
+      const poolPubkey = new PublicKey(drtInstance.pool.chainAddress);
+      const drtMint = new PublicKey(drtInstance.mintAddress);
+      const ownershipMint = new PublicKey(drtInstance.pool.ownershipMintAddress);
+      const userDrtTokenAccount = await getAssociatedTokenAddress(drtMint, wallet.publicKey);
+      const userOwnershipTokenAccount = await getAssociatedTokenAddress(ownershipMint, wallet.publicKey);
+      const drtType = "w_compute_median";
+
+      console.log("Redeeming WASM DRT on Solana...");
+      await redeemDrt(
+        program,
+        poolPubkey,
+        drtMint,
+        ownershipMint,
+        userDrtTokenAccount,
+        userOwnershipTokenAccount,
+        drtType,
+        wallet
+      );
+      console.log("Solana WASM DRT redemption successful");
+
+      const wasmResult = await onRedeem();
+      setExecutionResult(wasmResult);
+
+      if (wasmResult.success) {
+        await fetch('/api/update-drt-state', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            drtInstanceId: drtInstance.id,
+            state: 'completed',
+          }),
+        });
+        onStateUpdate('completed');
+      }
+    } catch (error) {
+      setExecutionResult({
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error during redemption',
+      });
+    } finally {
+      setIsRedeeming(false);
+    }
+  };
+
+  const buttonProps = {
+    text: isRedeeming ? 'Redeeming...' : executionResult?.success ? 'Redeemed' : 'Redeem DRT',
+    disabled: isRedeeming || executionResult?.success || !drtInstance.pool.enclaveMeasurement?.publicIp || drtInstance.state !== 'active' || !wallet.connected,
+    className: isRedeeming 
+      ? 'bg-gray-200 text-gray-700 cursor-not-allowed' 
+      : executionResult?.success 
+        ? 'bg-green-600 text-white cursor-not-allowed'
+        : 'bg-emerald-600 text-white hover:bg-emerald-700',
+    icon: isRedeeming ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Shield className="w-4 h-4 mr-2" />,
+  };
+
+  return (
+    <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+      <DialogHeader>
+        <DialogTitle>Redeem WASM DRT - {drtInstance.drt.name}</DialogTitle>
+        <DialogDescription>
+          Redeem your DRT on Solana and execute the associated WASM binary on the pool's data
+        </DialogDescription>
+      </DialogHeader>
+
+      <div className="space-y-6">
+        <div className="space-y-4">
+          <h3 className="text-lg font-semibold">Execution Details</h3>
+          
+          <div className="grid gap-4">
+            <div>
+              <Label className="text-sm">Pool</Label>
+              <div className="font-mono text-sm bg-gray-100 p-2 rounded">
+                {drtInstance.pool.name}
+              </div>
+            </div>
+            <div>
+              <Label className="text-sm">GitHub URL</Label>
+              <div className="font-mono text-sm bg-gray-100 p-2 rounded break-all">
+                {drtInstance.drt.githubUrl || 'Not specified'}
+              </div>
+            </div>
+            <div>
+              <Label className="text-sm">Expected SHA256 Hash</Label>
+              <div className="font-mono text-sm bg-gray-100 p-2 rounded break-all">
+                {drtInstance.drt.hash || 'Not specified'}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-4">
+          <div className="flex items-center justify-between">
+            {drtInstance.drt.githubUrl && (
+              <a
+                href={drtInstance.drt.githubUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-2 text-blue-500 hover:text-blue-700"
+              >
+                <Code2 className="w-4 h-4" />
+                View WASM Binary
+              </a>
+            )}
+            <Button 
+              onClick={handleRedeem} 
+              disabled={buttonProps.disabled}
+              className={buttonProps.className}
+            >
+              {buttonProps.icon}
+              {buttonProps.text}
+            </Button>
+          </div>
+
+          {executionResult && (
+            <div className="space-y-2">
+              <h3 className="text-lg font-semibold">Execution Result</h3>
+              {executionResult.success ? (
+                <Alert className="bg-green-50 border-green-200">
+                  <AlertDescription>
+                    WASM executed successfully!
                     <pre className="mt-2 font-mono text-sm bg-gray-100 p-2 rounded max-h-40 overflow-y-auto">
                       {JSON.stringify(executionResult.result, null, 2)}
                     </pre>
@@ -712,7 +876,7 @@ export default function Home() {
     }
   };
 
-  const handlePythonRedeem = async (drtInstance: DRTInstance): Promise<PythonExecutionResult> => {
+  const handlePythonRedeem = async (drtInstance: DRTInstance): Promise<ExecutionResult> => {
     if (!drtInstance.pool.enclaveMeasurement?.publicIp || !drtInstance.drt.githubUrl || !drtInstance.drt.hash) {
       return {
         success: false,
@@ -730,6 +894,46 @@ export default function Home() {
           publicIp: drtInstance.pool.enclaveMeasurement.publicIp,
           github_url: drtInstance.drt.githubUrl,
           expected_hash: drtInstance.drt.hash,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `Execution failed with status ${response.status}`);
+      }
+
+      const data = await response.json();
+      return {
+        success: true,
+        result: data.result,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
+  };
+
+  const handleWasmRedeem = async (drtInstance: DRTInstance): Promise<ExecutionResult> => {
+    if (!drtInstance.pool.enclaveMeasurement?.publicIp || !drtInstance.drt.githubUrl || !drtInstance.drt.hash || !drtInstance.pool.schemaDefinition) {
+      return {
+        success: false,
+        error: 'Missing public IP, GitHub URL, expected hash, or JSON schema',
+      };
+    }
+
+    try {
+      const response = await fetch('/api/execute-wasm', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          publicIp: drtInstance.pool.enclaveMeasurement.publicIp,
+          github_url: drtInstance.drt.githubUrl,
+          expected_hash: drtInstance.drt.hash,
+          json_schema: drtInstance.pool.schemaDefinition,
         }),
       });
 
@@ -1267,6 +1471,26 @@ export default function Home() {
                                   <PythonExecutionDialog 
                                     drtInstance={item}
                                     onRedeem={() => handlePythonRedeem(item)}
+                                    onStateUpdate={(newState) => handleStateUpdate(item.id, newState)}
+                                    program={program}
+                                    wallet={wallet}
+                                  />
+                                </Dialog>
+                              ) : item.drt.name.toLowerCase().includes('wasm') ? (
+                                <Dialog>
+                                  <DialogTrigger asChild>
+                                    <Button 
+                                      size="sm" 
+                                      className={`${buttonClass} w-28`}
+                                      disabled={isRedeemed || !item.pool.enclaveMeasurement?.publicIp || item.state !== 'active' || !wallet.connected}
+                                    >
+                                      <Shield className="w-4 h-4 mr-2" />
+                                      {buttonText}
+                                    </Button>
+                                  </DialogTrigger>
+                                  <WasmExecutionDialog 
+                                    drtInstance={item}
+                                    onRedeem={() => handleWasmRedeem(item)}
                                     onStateUpdate={(newState) => handleStateUpdate(item.id, newState)}
                                     program={program}
                                     wallet={wallet}
