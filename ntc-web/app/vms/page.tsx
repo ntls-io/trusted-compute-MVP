@@ -19,14 +19,12 @@
 "use client"
 
 import { VMList } from '@/components/VMList'
-import { DeployVM } from '@/components/DeployVM'
 
 export default function VMsPage() {
   return (
     <div className="container mx-auto py-10">
       <h1 className="text-4xl font-bold mb-8">Azure TEE VMs</h1>
       <div className="space-y-8">
-        <DeployVM />
         <VMList />
       </div>
     </div>

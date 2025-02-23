@@ -177,7 +177,7 @@ export function VMList() {
                             <DialogHeader>
                                 <DialogTitle className="flex items-center justify-between">
                                     <span>{selectedVM.name}</span>
-                                    {selectedVM.public_ip && (
+                                    {/* {selectedVM.public_ip && (
                                         <Button variant="outline" size="sm" asChild>
                                             <a 
                                                 href={`https://${selectedVM.public_ip}`} 
@@ -189,7 +189,7 @@ export function VMList() {
                                                 Open
                                             </a>
                                         </Button>
-                                    )}
+                                    )} */}
                                 </DialogTitle>
                             </DialogHeader>
                             
