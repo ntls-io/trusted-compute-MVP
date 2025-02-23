@@ -16,11 +16,12 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// app/api/update-drt-state/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { currentUser } from '@clerk/nextjs/server';
 import { prisma } from "@/lib/prisma";
 
-export async function GET(request: NextRequest) {
+export async function POST(req: NextRequest) {
   try {
     const user = await currentUser();
 
@@ -29,44 +30,35 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    console.log(`✅ Fetching data for user: ${user.id}`);
+    const { drtInstanceId, state } = await req.json();
 
-    const userData = await prisma.user.findFirst({
-      where: { clerkId: user.id },
-      include: {
-        pools: {
-          include: {
-            enclaveMeasurement: true,
-            allowedDRTs: { include: { drt: true } }
-          }
-        },
-        drtInstances: {
-          include: {
-            drt: true,
-            pool: {
-              include: {
-                enclaveMeasurement: true // Add this nested include
-              }
-            }
-          }
-        }
-      }
-    });
-
-    if (!userData) {
-      console.warn(`⚠️ No user data found for Clerk ID: ${user.id}`);
-      return NextResponse.json({ pools: [], drtInstances: [] }, { status: 200 });
+    if (!drtInstanceId || !state) {
+      return NextResponse.json({ error: "Missing drtInstanceId or state" }, { status: 400 });
     }
 
-    // console.log('Fetched user data:', JSON.stringify(userData, null, 2)); // Debug log
-
-    return NextResponse.json({
-      pools: userData.pools ?? [],
-      drtInstances: userData.drtInstances ?? []
+    // Verify the DRTInstance belongs to the user
+    const drtInstance = await prisma.dRTInstance.findFirst({
+      where: {
+        id: drtInstanceId,
+        ownerId: user.id,
+      },
     });
 
+    if (!drtInstance) {
+      return NextResponse.json({ error: "DRTInstance not found or not owned by user" }, { status: 404 });
+    }
+
+    // Update the state
+    const updatedDrtInstance = await prisma.dRTInstance.update({
+      where: { id: drtInstanceId },
+      data: { state },
+    });
+
+    console.log(`✅ Updated DRTInstance ${drtInstanceId} state to ${state}`);
+
+    return NextResponse.json({ success: true, drtInstance: updatedDrtInstance });
   } catch (error) {
-    console.error("❌ Internal server error:", error);
+    console.error("❌ Error updating DRT state:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   } finally {
     await prisma.$disconnect();

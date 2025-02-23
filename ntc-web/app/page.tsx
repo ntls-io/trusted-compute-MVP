@@ -33,7 +33,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Input } from "@/components/ui/input";
-import { ExternalLink, ChevronDown, ChevronUp, ChevronsUpDown, Shield, Code2, Loader2 } from 'lucide-react';
+import { ExternalLink, ChevronDown, ChevronUp, ChevronsUpDown, Shield, Code2, Loader2, CheckCircle2, Check, LoaderCircle } from 'lucide-react';
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   Dialog,
@@ -44,7 +44,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 
-// Interfaces remain the same
+// Interfaces
 interface Pool {
   id: string;
   name: string;
@@ -58,14 +58,16 @@ interface Pool {
     mrsigner: string;
     isvProdId: string;
     isvSvn: string;
-    publicIp?: string;  // Added for attestation
-    actualName?: string; // Added for attestation (VM name)
+    publicIp?: string;
+    actualName?: string;
   };
   allowedDRTs: {
     drt: {
       id: string;
       name: string;
       description: string;
+      githubUrl?: string;
+      hash?: string;
     };
   }[];
 }
@@ -77,10 +79,15 @@ interface DRTInstance {
     id: string;
     name: string;
     description: string;
+    githubUrl?: string;
+    hash?: string;
   };
   pool: {
     name: string;
     description: string;
+    enclaveMeasurement?: {
+      publicIp?: string;
+    };
   };
   state: string;
   isListed: boolean;
@@ -90,7 +97,7 @@ interface DRTInstance {
 interface AttestationResult {
   success: boolean;
   error?: string;
-  stdout?: string; // Added to display FastAPI logs
+  stdout?: string;
   measurements?: {
     mrenclave: string;
     mrsigner: string;
@@ -101,15 +108,21 @@ interface AttestationResult {
   };
 }
 
-// Updated Enclave Dialog Component
+interface PythonExecutionResult {
+  success: boolean;
+  result?: any;
+  error?: string;
+}
+
+// Enclave Dialog Component (unchanged)
 const EnclaveDialog = ({ pool, onAttest }: { pool: Pool; onAttest: () => Promise<AttestationResult> }) => {
   const [isAttesting, setIsAttesting] = useState(false);
   const [attestationResult, setAttestationResult] = useState<AttestationResult | null>(null);
-  const [showOutput, setShowOutput] = useState(false); // New state to toggle output visibility
+  const [showOutput, setShowOutput] = useState(false);
 
   const handleAttest = async () => {
     setIsAttesting(true);
-    setAttestationResult(null); // Reset previous result
+    setAttestationResult(null);
     try {
       const result = await onAttest();
       setAttestationResult(result);
@@ -123,10 +136,9 @@ const EnclaveDialog = ({ pool, onAttest }: { pool: Pool; onAttest: () => Promise
     }
   };
 
-  // Early return if no enclave measurement
   if (!pool.enclaveMeasurement) {
     return (
-      <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto"> {/* Added scrollable max height */}
+      <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Enclave Verification - {pool.name}</DialogTitle>
           <DialogDescription>
@@ -142,10 +154,8 @@ const EnclaveDialog = ({ pool, onAttest }: { pool: Pool; onAttest: () => Promise
     );
   }
 
-  // Construct the command as executed by AttestationClient
   const command = `[APPLICATION_PORT=443 APPLICATION_HOST=${pool.enclaveMeasurement.publicIp || 'unknown'}] ./attest dcap ${pool.enclaveMeasurement.mrenclave} ${pool.enclaveMeasurement.mrsigner} ${pool.enclaveMeasurement.isvProdId} ${pool.enclaveMeasurement.isvSvn}`;
 
-  // Determine button properties based on attestation status
   const getButtonProps = () => {
     if (isAttesting) {
       return {
@@ -182,7 +192,7 @@ const EnclaveDialog = ({ pool, onAttest }: { pool: Pool; onAttest: () => Promise
   const buttonProps = getButtonProps();
 
   return (
-    <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto"> {/* Added scrollable max height */}
+    <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
       <DialogHeader>
         <DialogTitle>Enclave Verification - {pool.name}</DialogTitle>
         <DialogDescription>
@@ -231,13 +241,6 @@ const EnclaveDialog = ({ pool, onAttest }: { pool: Pool; onAttest: () => Promise
                 {pool.enclaveMeasurement.publicIp || 'Not available'}
               </div>
             </div>
-
-            {/* <div>
-              <Label className="text-sm">VM Name</Label>
-              <div className="font-mono text-sm bg-gray-100 p-2 rounded">
-                {pool.enclaveMeasurement.actualName || 'Not available'}
-              </div>
-            </div> */}
           </div>
         </div>
 
@@ -297,12 +300,150 @@ const EnclaveDialog = ({ pool, onAttest }: { pool: Pool; onAttest: () => Promise
                   {showOutput && (
                     <div>
                       <Label className="text-sm">Attestation Output</Label>
-                      <pre className="font-mono text-sm bg-gray-100 p-2 rounded max-h-40 overflow-y-auto whitespace-pre-wrap"> {/* Changed break-all to whitespace-pre-wrap */}
+                      <pre className="font-mono text-sm bg-gray-100 p-2 rounded max-h-40 overflow-y-auto whitespace-pre-wrap">
                         {attestationResult.stdout}
                       </pre>
                     </div>
                   )}
                 </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </DialogContent>
+  );
+};
+
+// Python Execution Dialog Component (unchanged)
+const PythonExecutionDialog = ({ 
+  drtInstance, 
+  onRedeem, 
+  onStateUpdate 
+}: { 
+  drtInstance: DRTInstance; 
+  onRedeem: () => Promise<PythonExecutionResult>; 
+  onStateUpdate: (newState: string) => void; 
+}) => {
+  const [isRedeeming, setIsRedeeming] = useState(false);
+  const [executionResult, setExecutionResult] = useState<PythonExecutionResult | null>(null);
+
+  const handleRedeem = async () => {
+    setIsRedeeming(true);
+    setExecutionResult(null);
+    try {
+      const result = await onRedeem();
+      setExecutionResult(result);
+      if (result.success) {
+        await fetch('/api/update-drt-state', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            drtInstanceId: drtInstance.id,
+            state: 'completed',
+          }),
+        });
+        onStateUpdate('completed');
+      }
+    } catch (error) {
+      setExecutionResult({
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error during Python execution',
+      });
+    } finally {
+      setIsRedeeming(false);
+    }
+  };
+
+  const buttonProps = {
+    text: isRedeeming ? 'Redeeming...' : executionResult?.success ? 'Redeemed' : 'Redeem DRT',
+    disabled: isRedeeming || executionResult?.success || !drtInstance.pool.enclaveMeasurement?.publicIp || drtInstance.state !== 'active',
+    className: isRedeeming 
+      ? 'bg-gray-200 text-gray-700 cursor-not-allowed' 
+      : executionResult?.success 
+        ? 'bg-green-600 text-white cursor-not-allowed'
+        : 'bg-blue-600 text-white hover:bg-blue-700',
+    icon: isRedeeming ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Shield className="w-4 h-4 mr-2" />,
+  };
+
+  return (
+    <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+      <DialogHeader>
+        <DialogTitle>Redeem Python DRT - {drtInstance.drt.name}</DialogTitle>
+        <DialogDescription>
+          Execute the Python script associated with this Digital Right Token on the pool's data
+        </DialogDescription>
+      </DialogHeader>
+
+      <div className="space-y-6">
+        <div className="space-y-4">
+          <h3 className="text-lg font-semibold">Execution Details</h3>
+          
+          <div className="grid gap-4">
+            <div>
+              <Label className="text-sm">Pool</Label>
+              <div className="font-mono text-sm bg-gray-100 p-2 rounded">
+                {drtInstance.pool.name}
+              </div>
+            </div>
+            <div>
+              <Label className="text-sm">GitHub URL</Label>
+              <div className="font-mono text-sm bg-gray-100 p-2 rounded break-all">
+                {drtInstance.drt.githubUrl || 'Not specified'}
+              </div>
+            </div>
+            <div>
+              <Label className="text-sm">Expected SHA256 Hash</Label>
+              <div className="font-mono text-sm bg-gray-100 p-2 rounded break-all">
+                {drtInstance.drt.hash || 'Not specified'}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-4">
+          <div className="flex items-center justify-between">
+            {drtInstance.drt.githubUrl && (
+              <a
+                href={drtInstance.drt.githubUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-2 text-blue-500 hover:text-blue-700"
+              >
+                <Code2 className="w-4 h-4" />
+                View Python Script
+              </a>
+            )}
+            <Button 
+              onClick={handleRedeem} 
+              disabled={buttonProps.disabled}
+              className={buttonProps.className}
+            >
+              {buttonProps.icon}
+              {buttonProps.text}
+            </Button>
+          </div>
+
+          {executionResult && (
+            <div className="space-y-2">
+              <h3 className="text-lg font-semibold">Execution Result</h3>
+              {executionResult.success ? (
+                <Alert className="bg-green-50 border-green-200">
+                  <AlertDescription>
+                    Script executed successfully!
+                    <pre className="mt-2 font-mono text-sm bg-gray-100 p-2 rounded max-h-40 overflow-y-auto">
+                      {JSON.stringify(executionResult.result, null, 2)}
+                    </pre>
+                  </AlertDescription>
+                </Alert>
+              ) : (
+                <Alert variant="destructive">
+                  <AlertDescription>
+                    Execution failed: {executionResult.error}
+                  </AlertDescription>
+                </Alert>
               )}
             </div>
           )}
@@ -344,43 +485,46 @@ const DRTTableSkeleton = () => (
   </TableBody>
 );
 
-// Color schema for different DRT types
+// Color schema for different DRT types (from drt-listings)
 const DrtTypeColors: Record<string, string> = {
-  // Blue schema for append operations
-  APPEND_DATA_POOL: "bg-blue-100 text-blue-800",
-  
-  // Yellow schema for Python computations
-  EXECUTE_MEDIAN_PYTHON: "bg-yellow-100 text-yellow-800",
-  
-  // Green schema for WASM computations
-  EXECUTE_MEDIAN_WASM: "bg-green-100 text-green-800",
+  APPEND_DATA_POOL: "bg-indigo-100 text-indigo-800 hover:bg-indigo-200",
+  EXECUTE_MEDIAN_PYTHON: "bg-amber-100 text-amber-800 hover:bg-amber-200",
+  EXECUTE_MEDIAN_WASM: "bg-emerald-100 text-emerald-800 hover:bg-emerald-200",
 };
 
-// Helper function to determine DRT color based on name
+// Color schema for DRT status (from drt-listings)
+const DrtStatusColors: Record<string, string> = {
+  active: "bg-green-100 text-green-800",
+  pending: "bg-amber-100 text-amber-800",
+  completed: "bg-blue-100 text-blue-800",
+};
+
+// Updated DRT Status Badge
+const DrtStatusBadge = ({ state }: { state: string }) => {
+  return (
+    <Badge
+      className={`${DrtStatusColors[state] || 'bg-gray-100 text-gray-800'} font-medium py-1 px-2 inline-flex items-center`}
+      style={{ pointerEvents: "none" }}
+    >
+      {state === 'active' && <Check className="w-3.5 h-3.5 mr-1" />}
+      {state === 'pending' && <LoaderCircle className="w-3.5 h-3.5 mr-1" />}
+      {state === 'completed' && <CheckCircle2 className="w-3.5 h-3.5 mr-1" />}
+      {state}
+    </Badge>
+  );
+};
+
 const getDrtTypeColor = (name: string): string => {
-  // Direct match in color mapping
   if (DrtTypeColors[name]) return DrtTypeColors[name];
-  
-  // Pattern matching for partial names
-  if (name.includes('Append')) 
-    return "bg-blue-100 text-blue-800";
-    
-  if (name.includes('Python')) 
-    return "bg-yellow-100 text-yellow-800";
-    
-  if (name.includes('WASM')) 
-    return "bg-green-100 text-green-800";
-    
-  // Default fallback
+  if (name.toLowerCase().includes('append')) return "bg-indigo-100 text-indigo-800 hover:bg-indigo-200";
+  if (name.toLowerCase().includes('python')) return "bg-amber-100 text-amber-800 hover:bg-amber-200";
+  if (name.toLowerCase().includes('wasm')) return "bg-emerald-100 text-emerald-800 hover:bg-emerald-200";
   return "bg-gray-100 text-gray-800";
 };
 
 export default function Home() {
-  // Connect to loading context
   const [isLoadingPools, setIsLoadingPools] = useState(true);
   const [isLoadingDRTs, setIsLoadingDRTs] = useState(true);
-  
-  // State declarations - remove local loading state
   const [pools, setPools] = useState<Pool[]>([]);
   const [drtInstances, setDrtInstances] = useState<DRTInstance[]>([]);
   const [poolSearch, setPoolSearch] = useState('');
@@ -388,11 +532,10 @@ export default function Home() {
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc' | null>(null);
   const [attestationResults, setAttestationResults] = useState<{[key: string]: AttestationResult}>({});
   const [apiError, setApiError] = useState<string | null>(null);
+  const [redeemedStates, setRedeemedStates] = useState<{ [key: string]: boolean }>({}); // Track redemption state per DRT
 
-  // Data fetching - updated to use global loading state
   useEffect(() => {
     async function fetchData() {
-      // Keep the global loading state active while fetching
       setIsLoadingPools(true);
       setIsLoadingDRTs(true);
       
@@ -410,7 +553,7 @@ export default function Home() {
             console.error(`❌ API Error ${response.status}: ${response.statusText}`);
             setApiError(`API Error ${response.status}: ${response.statusText}`);
           }
-          setPools([]); // Ensures no undefined errors
+          setPools([]);
           setDrtInstances([]);
           return;
         }
@@ -419,23 +562,27 @@ export default function Home() {
   
         setPools(Array.isArray(data.pools) ? data.pools : []);
         setDrtInstances(Array.isArray(data.drtInstances) ? data.drtInstances : []);
-        setApiError(null); // Reset errors when API works fine
+        // Initialize redeemed states based on initial "completed" status
+        const initialRedeemedStates = data.drtInstances.reduce((acc: { [key: string]: boolean }, item: DRTInstance) => {
+          acc[item.id] = item.state === 'completed';
+          return acc;
+        }, {});
+        setRedeemedStates(initialRedeemedStates);
+        setApiError(null);
   
       } catch (error) {
         console.error("❌ Network error or API unavailable:", error);
         setApiError("Network error. Please check your connection or backend.");
-        setPools([]); 
+        setPools([]);
         setDrtInstances([]);
       } finally {
-        // Release the global loading state when data is ready
         setIsLoadingPools(false);
         setIsLoadingDRTs(false);
       }
     }
   
     fetchData();
-  }, []);  
-
+  }, []);
 
   const handlePoolSort = (field: typeof sortField) => {
     if (sortField === field) {
@@ -482,7 +629,7 @@ export default function Home() {
           mrsigner: pool.enclaveMeasurement.mrsigner,
           isvprodid: pool.enclaveMeasurement.isvProdId,
           isvsvn: pool.enclaveMeasurement.isvSvn,
-          port: 443, // Matches the command in EnclaveDialog
+          port: 443,
         }),
       });
 
@@ -521,7 +668,59 @@ export default function Home() {
     }
   };
 
-  // Calculate stats from real data
+  const handlePythonRedeem = async (drtInstance: DRTInstance): Promise<PythonExecutionResult> => {
+    if (!drtInstance.pool.enclaveMeasurement?.publicIp || !drtInstance.drt.githubUrl || !drtInstance.drt.hash) {
+      return {
+        success: false,
+        error: 'Missing public IP, GitHub URL, or expected hash',
+      };
+    }
+
+    try {
+      const response = await fetch('/api/execute-python', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          publicIp: drtInstance.pool.enclaveMeasurement.publicIp,
+          github_url: drtInstance.drt.githubUrl,
+          expected_hash: drtInstance.drt.hash,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `Execution failed with status ${response.status}`);
+      }
+
+      const data = await response.json();
+      return {
+        success: true,
+        result: data.result,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
+  };
+
+  const handleStateUpdate = (drtInstanceId: string, newState: string) => {
+    setDrtInstances(prev =>
+      prev.map(item =>
+        item.id === drtInstanceId ? { ...item, state: newState } : item
+      )
+    );
+    if (newState === 'completed') {
+      setRedeemedStates(prev => ({
+        ...prev,
+        [drtInstanceId]: true,
+      }));
+    }
+  };
+
   const statsItems = [
     {
       label: "My Data Pool(s)",
@@ -539,7 +738,6 @@ export default function Home() {
     }
   ];
 
-  // DRT states
   const [drtSearch, setDrtSearch] = useState('');
   const [stateFilters, setStateFilters] = useState<string[]>([]);
   const [marketplaceFilter, setMarketplaceFilter] = useState<string[]>([]);
@@ -581,6 +779,39 @@ export default function Home() {
         : [...prev, value]
     );
   };
+
+  const sortedPools = [...pools].sort((a, b) => {
+    if (!sortField || !sortDirection) return 0;
+    const aValue = a[sortField] || '';
+    const bValue = b[sortField] || '';
+    return sortDirection === 'asc'
+      ? aValue.localeCompare(bValue)
+      : bValue.localeCompare(aValue);
+  });
+
+  const sortedDrtInstances = [...drtInstances].sort((a, b) => {
+    if (!sortConfig.key || !sortConfig.direction) return 0;
+    let aValue: any = a[sortConfig.key];
+    let bValue: any = b[sortConfig.key];
+    
+    if (sortConfig.key === 'pool') {
+      aValue = a.pool.name || '';
+      bValue = b.pool.name || '';
+    } else if (sortConfig.key === 'drt') {
+      aValue = a.drt.name || '';
+      bValue = b.drt.name || '';
+    }
+    
+    if (typeof aValue === 'string' && typeof bValue === 'string') {
+      return sortConfig.direction === 'asc'
+        ? aValue.localeCompare(bValue)
+        : bValue.localeCompare(aValue);
+    }
+    
+    return sortConfig.direction === 'asc'
+      ? (aValue || 0) - (bValue || 0)
+      : (bValue || 0) - (aValue || 0);
+  });
 
   return (
     <div className="container mx-auto p-4">
@@ -645,7 +876,7 @@ export default function Home() {
               <PoolTableSkeleton />
             ) : (
               <TableBody>
-                {pools
+                {sortedPools
                   .filter(pool =>
                     pool.name.toLowerCase().includes(poolSearch.toLowerCase()) ||
                     pool.description.toLowerCase().includes(poolSearch.toLowerCase()) ||
@@ -678,7 +909,6 @@ export default function Home() {
                       </TableCell>
                       <TableCell>
                         <div className="space-y-2">
-                          {/* Pool PDA */}
                           <div className="flex items-center gap-2">
                             <span className="font-medium whitespace-nowrap">Pool PDA:</span>
                             <TooltipProvider>
@@ -701,7 +931,6 @@ export default function Home() {
                             </TooltipProvider>
                           </div>
 
-                          {/* Vault PDA */}
                           <div className="flex items-center gap-2">
                             <span className="font-medium whitespace-nowrap">Vault PDA:</span>
                             <TooltipProvider>
@@ -724,7 +953,6 @@ export default function Home() {
                             </TooltipProvider>
                           </div>
 
-                          {/* Fee Vault PDA */}
                           <div className="flex items-center gap-2">
                             <span className="font-medium whitespace-nowrap">Fee Vault PDA:</span>
                             <TooltipProvider>
@@ -747,7 +975,6 @@ export default function Home() {
                             </TooltipProvider>
                           </div>
 
-                          {/* Enclave Verification */}
                           <div className="flex items-center gap-2">
                             <span className="font-medium whitespace-nowrap">Enclave:</span>
                             <Dialog>
@@ -774,7 +1001,6 @@ export default function Home() {
                           </div>
                         </div>
                       </TableCell>
-
                     </TableRow>
                   ))}
                 {pools.length === 0 && (
@@ -913,14 +1139,14 @@ export default function Home() {
                       {getDrtSortIcon('price')}
                     </div>
                   </TableHead>
-                  <TableHead className="text-white w-[200px]">Actions</TableHead>
+                    <TableHead className="text-white w-[200px] text-center">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               {isLoadingDRTs ? (
                 <DRTTableSkeleton />
               ) : (
                 <TableBody>
-                  {drtInstances
+                  {sortedDrtInstances
                     .filter(item => {
                       const searchTerm = drtSearch.toLowerCase();
                       const matchesSearch = 
@@ -935,59 +1161,81 @@ export default function Home() {
 
                       return matchesSearch && matchesState && matchesMarketplace;
                     })
-                    .map((item) => (
-                      <TableRow key={item.id}>
-                        <TableCell className="font-medium">{item.pool.name}</TableCell>
-                        <TableCell>
-                          <TooltipProvider>
-                            <Tooltip>
-                              <TooltipTrigger>
-                                <Badge 
-                                  className={`cursor-help ${getDrtTypeColor(item.drt.name)}`}
-                                >
-                                  {item.drt.name}
-                                </Badge>
-                              </TooltipTrigger>
-                              <TooltipContent className="p-3 max-w-xs bg-gray-900 text-white">
-                                <h3 className="font-semibold mb-1">{item.drt.name}</h3>
-                                <p className="text-sm text-gray-200">{item.drt.description}</p>
-                              </TooltipContent>
-                            </Tooltip>
-                          </TooltipProvider>
-                        </TableCell>
-                        <TableCell>
-                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                            item.state === 'active' ? 'bg-green-100 text-green-700' :
-                            item.state === 'pending' ? 'bg-yellow-100 text-yellow-700' :
-                            'bg-gray-100 text-gray-700'
-                          }`}>
-                            {item.state}
-                          </span>
-                        </TableCell>
-                        <TableCell>
-                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                            item.isListed ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'
-                          }`}>
-                            {item.isListed ? 'Yes' : 'No'}
-                          </span>
-                        </TableCell>
-                        <TableCell>{item.price ? `${item.price.toFixed(2)} SOL` : '-'}</TableCell>
-                        <TableCell>
-                          <div className="flex justify-around gap-2">
-                            <Button 
-                              variant="outline" 
-                              size="sm"
-                              disabled={item.isListed || item.state === 'pending' || item.state === 'completed'}
-                            >
-                              Sell
-                            </Button>
-                            <Button variant="outline" size="sm">
-                              View results
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                    .map((item) => {
+                      const isRedeemed = redeemedStates[item.id] || item.state === 'completed';
+                      const buttonText = isRedeemed ? 'Redeemed' : 'Redeem DRT';
+                      const buttonClass = isRedeemed 
+                        ? 'bg-green-600 text-white cursor-not-allowed' 
+                        : 'bg-blue-600 text-white hover:bg-blue-700';
+
+                      return (
+                        <TableRow key={item.id}>
+                          <TableCell className="font-medium">{item.pool.name}</TableCell>
+                          <TableCell>
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger>
+                                  <Badge 
+                                    className={`cursor-help ${getDrtTypeColor(item.drt.name)}`}
+                                  >
+                                    {item.drt.name}
+                                  </Badge>
+                                </TooltipTrigger>
+                                <TooltipContent className="p-3 max-w-xs bg-gray-900 text-white">
+                                  <h3 className="font-semibold mb-1">{item.drt.name}</h3>
+                                  <p className="text-sm text-gray-200">{item.drt.description}</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          </TableCell>
+                          <TableCell>
+                            <DrtStatusBadge state={item.state} />
+                          </TableCell>
+                          <TableCell>
+                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                              item.isListed ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'
+                            }`}>
+                              {item.isListed ? 'Yes' : 'No'}
+                            </span>
+                          </TableCell>
+                          <TableCell>{item.price ? `${item.price.toFixed(2)} SOL` : '-'}</TableCell>
+                          <TableCell>
+                            <div className="flex justify-around gap-2">
+                              <Button 
+                                variant="outline" 
+                                size="sm"
+                                disabled={item.isListed || item.state === 'pending' || item.state === 'completed'}
+                              >
+                                Sell
+                              </Button>
+                              {item.drt.name.toLowerCase().includes('python') ? (
+                                <Dialog>
+                                  <DialogTrigger asChild>
+                                    <Button 
+                                      size="sm" 
+                                      className={`${buttonClass} w-36`} // Fixed width with w-36
+                                      disabled={isRedeemed || !item.pool.enclaveMeasurement?.publicIp || item.state !== 'active'}
+                                    >
+                                      <Shield className="w-4 h-4 mr-2" />
+                                      {buttonText}
+                                    </Button>
+                                  </DialogTrigger>
+                                  <PythonExecutionDialog 
+                                    drtInstance={item}
+                                    onRedeem={() => handlePythonRedeem(item)}
+                                    onStateUpdate={(newState) => handleStateUpdate(item.id, newState)}
+                                  />
+                                </Dialog>
+                              ) : (
+                                <Button variant="outline" size="sm">
+                                  View Results
+                                </Button>
+                              )}
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
                   {drtInstances.length === 0 && (
                     <TableRow>
                       <TableCell colSpan={6} className="h-24 text-center text-xl font-semibold">

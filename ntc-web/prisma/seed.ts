@@ -90,7 +90,7 @@ async function main() {
       githubUrl:
         'https://github.com/ntls-io/WASM-Binaries-MVP/blob/master/bin/get_median_wasm.wasm',
       isActive: true,
-      hash: 'c5e34826d42766363286055750373441545bc601df37fab07231bca4324db319',
+      hash: '728445d425153350b3e353cc96d29c16d5d81978ea3d7bad21f3d2b2dd76d813',
     },
   });
 
@@ -103,7 +103,7 @@ async function main() {
       githubUrl:
         'https://github.com/ntls-io/Python-Scripts-MVP/blob/main/calculate_median.py',
       isActive: true,
-      hash: 'fa22db710373cbf7c6bfa26e6e9d40e261cfd1f5adc38db6599bfe764e9180dd',
+      hash: 'bcda34f2af83a2dac745a5d86f18f4c4cd6cb4e61c76e0dec005a5fc9bc124f5',
     },
   });
 
