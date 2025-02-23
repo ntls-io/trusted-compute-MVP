@@ -843,7 +843,7 @@ export function PoolsTable({ poolCreated }: { poolCreated?: boolean }) {
                 </div>
               </TableHead>
               <TableHead className="w-[20%] text-white">Digital Rights Tokens</TableHead>
-              <TableHead className="w-[35%] text-white">Sources</TableHead>
+                <TableHead className="w-[35%] text-white text-center">Sources</TableHead>
               <TableHead className="w-[10%] text-white">Actions</TableHead>
             </TableRow>
           </TableHeader>

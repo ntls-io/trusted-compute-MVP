@@ -1108,7 +1108,7 @@ export default function Home() {
                   </div>
                 </TableHead>
                 <TableHead 
-                  className="w-[20%] text-white cursor-pointer"
+                  className="w-[25%] text-white cursor-pointer"
                   onClick={() => handlePoolSort('description')}
                 >
                   <div className="flex items-center gap-2">
@@ -1117,7 +1117,7 @@ export default function Home() {
                   </div>
                 </TableHead>
                 <TableHead className="w-[25%] text-white text-center">Digital Rights Tokens (DRT)</TableHead>
-                <TableHead className="w-[35%] text-white text-center">Sources</TableHead>
+                <TableHead className="w-[30%] text-white text-center">Sources</TableHead>
               </TableRow>
             </TableHeader>
             {isLoadingPools ? (
@@ -1355,7 +1355,7 @@ export default function Home() {
                     className="text-white cursor-pointer"
                     onClick={() => handleDrtSort('drt' as keyof DRTInstance)}
                   >
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center justify-center gap-2">
                       Digital Rights Token
                       {getDrtSortIcon('drt' as keyof DRTInstance)}
                     </div>
@@ -1364,7 +1364,7 @@ export default function Home() {
                     className="text-white cursor-pointer"
                     onClick={() => handleDrtSort('state')}
                   >
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center justify-center gap-2">
                       State
                       {getDrtSortIcon('state')}
                     </div>
@@ -1373,7 +1373,7 @@ export default function Home() {
                     className="text-white cursor-pointer"
                     onClick={() => handleDrtSort('isListed')}
                   >
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center justify-center gap-2">
                       Listed on Marketplace
                       {getDrtSortIcon('isListed')}
                     </div>
@@ -1382,7 +1382,7 @@ export default function Home() {
                     className="text-white cursor-pointer"
                     onClick={() => handleDrtSort('price')}
                   >
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center justify-center gap-2">
                       Price
                       {getDrtSortIcon('price')}
                     </div>
@@ -1418,97 +1418,97 @@ export default function Home() {
 
                       return (
                         <TableRow key={item.id}>
-                          <TableCell className="font-medium">{item.pool.name}</TableCell>
-                          <TableCell>
-                            <TooltipProvider>
-                              <Tooltip>
-                                <TooltipTrigger>
-                                  <Badge 
-                                    className={`cursor-help ${getDrtTypeColor(item.drt.name)}`}
-                                  >
-                                    {item.drt.name}
-                                  </Badge>
-                                </TooltipTrigger>
-                                <TooltipContent className="p-3 max-w-xs bg-gray-900 text-white">
-                                  <h3 className="font-semibold mb-1">{item.drt.name}</h3>
-                                  <p className="text-sm text-gray-200">{item.drt.description}</p>
-                                </TooltipContent>
-                              </Tooltip>
-                            </TooltipProvider>
+                          <TableCell className="font-medium text-center">{item.pool.name}</TableCell>
+                          <TableCell className="text-center">
+                          <TooltipProvider>
+                            <Tooltip>
+                            <TooltipTrigger>
+                              <Badge 
+                              className={`cursor-help ${getDrtTypeColor(item.drt.name)}`}
+                              >
+                              {item.drt.name}
+                              </Badge>
+                            </TooltipTrigger>
+                            <TooltipContent className="p-3 max-w-xs bg-gray-900 text-white">
+                              <h3 className="font-semibold mb-1">{item.drt.name}</h3>
+                              <p className="text-sm text-gray-200">{item.drt.description}</p>
+                            </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
                           </TableCell>
-                          <TableCell>
-                            <DrtStatusBadge state={item.state} />
+                          <TableCell className="text-center">
+                          <DrtStatusBadge state={item.state} />
                           </TableCell>
-                          <TableCell>
-                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                              item.isListed ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'
-                            }`}>
-                              {item.isListed ? 'Yes' : 'No'}
-                            </span>
+                          <TableCell className="text-center">
+                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                            item.isListed ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'
+                          }`}>
+                            {item.isListed ? 'Yes' : 'No'}
+                          </span>
                           </TableCell>
-                          <TableCell>{item.price ? `${item.price.toFixed(2)} SOL` : '-'}</TableCell>
-                          <TableCell>
-                            {item.drt.name.toLowerCase() !== "ownership token" && (
-                              <div className="flex justify-around gap-2">
+                          <TableCell className="text-center">{item.price ? `${item.price.toFixed(2)} SOL` : '-'}</TableCell>
+                          <TableCell className="text-center">
+                          {item.drt.name.toLowerCase() !== "ownership token" && (
+                            <div className="flex justify-around gap-2">
+                            <Button 
+                              variant="outline" 
+                              size="sm"
+                              disabled={item.isListed || item.state === 'pending' || item.state === 'completed'}
+                            >
+                              Sell
+                            </Button>
+                            {item.drt.name.toLowerCase().includes('python') ? (
+                              <Dialog>
+                              <DialogTrigger asChild>
                                 <Button 
-                                  variant="outline" 
-                                  size="sm"
-                                  disabled={item.isListed || item.state === 'pending' || item.state === 'completed'}
+                                size="sm" 
+                                className={`${buttonClass} w-32`}
+                                disabled={isRedeemed || !item.pool.enclaveMeasurement?.publicIp || item.state !== 'active' || !wallet.connected}
                                 >
-                                  Sell
+                                <Shield className="w-4 h-4 mr-1 flex-shrink-0" />
+                                <span className="flex-grow">{buttonText}</span>
                                 </Button>
-                                {item.drt.name.toLowerCase().includes('python') ? (
-                                  <Dialog>
-                                    <DialogTrigger asChild>
-                                      <Button 
-                                        size="sm" 
-                                        className={`${buttonClass} w-32`}
-                                        disabled={isRedeemed || !item.pool.enclaveMeasurement?.publicIp || item.state !== 'active' || !wallet.connected}
-                                      >
-                                        <Shield className="w-4 h-4 mr-1 flex-shrink-0" />
-                                        <span className="flex-grow">{buttonText}</span>
-                                      </Button>
-                                    </DialogTrigger>
-                                    <PythonExecutionDialog 
-                                      drtInstance={item}
-                                      onRedeem={() => handlePythonRedeem(item)}
-                                      onStateUpdate={(newState) => handleStateUpdate(item.id, newState)}
-                                      program={program}
-                                      wallet={wallet}
-                                    />
-                                  </Dialog>
-                                ) : item.drt.name.toLowerCase().includes('wasm') ? (
-                                  <Dialog>
-                                    <DialogTrigger asChild>
-                                      <Button 
-                                        size="sm" 
-                                        className={`${buttonClass} w-32`}
-                                        disabled={isRedeemed || !item.pool.enclaveMeasurement?.publicIp || item.state !== 'active' || !wallet.connected}
-                                      >
-                                        <Shield className="w-4 h-4 mr-1 flex-shrink-0" />
-                                        <span className="flex-grow">{buttonText}</span>
-                                      </Button>
-                                    </DialogTrigger>
-                                    <WasmExecutionDialog 
-                                      drtInstance={item}
-                                      onRedeem={() => handleWasmRedeem(item)}
-                                      onStateUpdate={(newState) => handleStateUpdate(item.id, newState)}
-                                      program={program}
-                                      wallet={wallet}
-                                    />
-                                  </Dialog>
-                                ) : (
-                                  <Button 
-                                    size="sm"
-                                    className="bg-gray-200 text-black cursor-not-allowed w-32"
-                                    disabled 
-                                  >
-                                    <Shield className="w-4 h-4 mr-1 flex-shrink-0" />
-                                    <span className="flex-grow">Pools Page</span>
-                                  </Button>
-                                )}
-                              </div>
+                              </DialogTrigger>
+                              <PythonExecutionDialog 
+                                drtInstance={item}
+                                onRedeem={() => handlePythonRedeem(item)}
+                                onStateUpdate={(newState) => handleStateUpdate(item.id, newState)}
+                                program={program}
+                                wallet={wallet}
+                              />
+                              </Dialog>
+                            ) : item.drt.name.toLowerCase().includes('wasm') ? (
+                              <Dialog>
+                              <DialogTrigger asChild>
+                                <Button 
+                                size="sm" 
+                                className={`${buttonClass} w-32`}
+                                disabled={isRedeemed || !item.pool.enclaveMeasurement?.publicIp || item.state !== 'active' || !wallet.connected}
+                                >
+                                <Shield className="w-4 h-4 mr-1 flex-shrink-0" />
+                                <span className="flex-grow">{buttonText}</span>
+                                </Button>
+                              </DialogTrigger>
+                              <WasmExecutionDialog 
+                                drtInstance={item}
+                                onRedeem={() => handleWasmRedeem(item)}
+                                onStateUpdate={(newState) => handleStateUpdate(item.id, newState)}
+                                program={program}
+                                wallet={wallet}
+                              />
+                              </Dialog>
+                            ) : (
+                              <Button 
+                              size="sm"
+                              className="bg-gray-200 text-black cursor-not-allowed w-32"
+                              disabled 
+                              >
+                              <Shield className="w-4 h-4 mr-1 flex-shrink-0" />
+                              <span className="flex-grow">Pools Page</span>
+                              </Button>
                             )}
+                            </div>
+                          )}
                           </TableCell>
                         </TableRow>
                       );

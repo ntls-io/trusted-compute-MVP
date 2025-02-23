@@ -490,97 +490,97 @@ export default function DrtListings() {
                 <TableHeader className="bg-gray-100">
                   <TableRow>
                     <TableHead className="py-2">DRT Type</TableHead>
-                    <TableHead className="py-2">Status</TableHead>
-                    <TableHead className="text-right py-2">Available/Supply</TableHead>
-                    <TableHead className="text-right py-2">Cost (SOL)</TableHead>
+                    <TableHead className="text-center py-2">Status</TableHead>
+                    <TableHead className="text-center py-2">Available/Supply</TableHead>
+                    <TableHead className="text-center py-2">Cost (SOL)</TableHead>
                     <TableHead className="text-center py-2">Quantity</TableHead>
-                    <TableHead className="text-right py-2">Total (SOL)</TableHead>
+                    <TableHead className="text-center py-2">Total (SOL)</TableHead>
                     <TableHead className="text-center py-2">Action</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {availableDRTs.map((drt) => {
-                    const quantity = drt.quantity || 1;
-                    const totalCost = 0.01 * quantity; // Fixed 0.01 SOL cost
-                    const drtDisplayName = formatDrtName(drt.name);
-                    
-                    return (
-                      <TableRow key={drt.name} className="hover:bg-gray-50">
-                        <TableCell className="py-2">
-                          <TooltipProvider>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Badge className={`${getDrtTypeColor(drt.name)} py-1 px-2 font-medium text-xs cursor-help`}>
-                                  {drtDisplayName}
-                                </Badge>
-                              </TooltipTrigger>
-                              <TooltipContent className="p-3 max-w-xs bg-gray-900 text-white">
-                                <h3 className="font-semibold mb-1">{drtDisplayName}</h3>
-                                <p className="text-sm text-gray-200">
-                                  {drt.name === 'append' && 
-                                    "Allows adding new data to the pool while maintaining schema integrity."}
-                                  {drt.name === 'w_compute_median' && 
-                                    "Executes WASM-based median computation within secure SGX enclaves."}
-                                  {drt.name === 'py_compute_median' && 
-                                    "Runs Python-based median algorithms on pool data in trusted execution environments."}
-                                </p>
-                              </TooltipContent>
-                            </Tooltip>
-                          </TooltipProvider>
-                        </TableCell>
-                        <TableCell className="py-2">
-                          <DrtStatusBadge available={drt.available} />
-                        </TableCell>
-                        <TableCell className="text-right font-mono py-2 text-sm">
-                          {drt.available}/{drt.initialSupply}
-                        </TableCell>
-                        <TableCell className="text-right font-mono py-2 text-sm">
-                          0.01
-                        </TableCell>
-                        <TableCell className="py-2">
-                          <div className="flex justify-center">
-                            <Input
-                              type="number"
-                              min={1}
-                              max={drt.available}
-                              value={quantity}
-                              onChange={(e) => handleQuantityChange(drt.name, parseInt(e.target.value))}
-                              className="w-16 text-center h-8 text-sm"
-                              disabled={purchaseLoading !== null || drt.available <= 0}
-                            />
-                          </div>
-                        </TableCell>
-                        <TableCell className="font-medium text-right font-mono py-2 text-sm">
-                          {totalCost.toFixed(2)}
-                        </TableCell>
-                        <TableCell className="py-2">
-                          <div className="flex justify-center">
-                            <Button 
-                              onClick={() => handleBuy(drt)} 
-                              disabled={
-                                purchaseLoading !== null || 
-                                drt.available <= 0 || 
-                                !wallet.connected
-                              }
-                              className="relative h-8 px-3 bg-gray-800 text-white hover:bg-gray-700 text-sm"
-                              size="sm"
-                            >
-                              {purchaseLoading === drt.name ? (
-                                <div className="flex items-center">
-                                  <LoaderCircle className="animate-spin h-3 w-3 mr-1" />
-                                  <span>Buying...</span>
-                                </div>
-                              ) : (
-                                <div className="flex items-center">
-                                  <ShoppingCart className="h-3 w-3 mr-1" />
-                                  <span>Buy</span>
-                                </div>
-                              )}
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    );
+                  const quantity = drt.quantity || 1;
+                  const totalCost = 0.01 * quantity; // Fixed 0.01 SOL cost
+                  const drtDisplayName = formatDrtName(drt.name);
+                  
+                  return (
+                    <TableRow key={drt.name} className="hover:bg-gray-50">
+                    <TableCell className="py-2">
+                      <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                        <Badge className={`${getDrtTypeColor(drt.name)} py-1 px-2 font-medium text-xs cursor-help`}>
+                          {drtDisplayName}
+                        </Badge>
+                        </TooltipTrigger>
+                        <TooltipContent className="p-3 max-w-xs bg-gray-900 text-white">
+                        <h3 className="font-semibold mb-1">{drtDisplayName}</h3>
+                        <p className="text-sm text-gray-200">
+                          {drt.name === 'append' && 
+                          "Allows adding new data to the pool while maintaining schema integrity."}
+                          {drt.name === 'w_compute_median' && 
+                          "Executes WASM-based median computation within secure SGX enclaves."}
+                          {drt.name === 'py_compute_median' && 
+                          "Runs Python-based median algorithms on pool data in trusted execution environments."}
+                        </p>
+                        </TooltipContent>
+                      </Tooltip>
+                      </TooltipProvider>
+                    </TableCell>
+                    <TableCell className="py-2 text-center">
+                      <DrtStatusBadge available={drt.available} />
+                    </TableCell>
+                    <TableCell className="text-center font-mono py-2 text-sm">
+                      {drt.available}/{drt.initialSupply}
+                    </TableCell>
+                    <TableCell className="text-center font-mono py-2 text-sm">
+                      0.01
+                    </TableCell>
+                    <TableCell className="py-2 text-center">
+                      <div className="flex justify-center">
+                      <Input
+                        type="number"
+                        min={1}
+                        max={drt.available}
+                        value={quantity}
+                        onChange={(e) => handleQuantityChange(drt.name, parseInt(e.target.value))}
+                        className="w-16 text-center h-8 text-sm"
+                        disabled={purchaseLoading !== null || drt.available <= 0}
+                      />
+                      </div>
+                    </TableCell>
+                    <TableCell className="font-medium text-center font-mono py-2 text-sm">
+                      {totalCost.toFixed(2)}
+                    </TableCell>
+                    <TableCell className="py-2 text-center">
+                      <div className="flex justify-center">
+                      <Button 
+                        onClick={() => handleBuy(drt)} 
+                        disabled={
+                        purchaseLoading !== null || 
+                        drt.available <= 0 || 
+                        !wallet.connected
+                        }
+                        className="relative h-8 px-3 bg-gray-800 text-white hover:bg-gray-700 text-sm"
+                        size="sm"
+                      >
+                        {purchaseLoading === drt.name ? (
+                        <div className="flex items-center">
+                          <LoaderCircle className="animate-spin h-3 w-3 mr-1" />
+                          <span>Buying...</span>
+                        </div>
+                        ) : (
+                        <div className="flex items-center">
+                          <ShoppingCart className="h-3 w-3 mr-1" />
+                          <span>Buy</span>
+                        </div>
+                        )}
+                      </Button>
+                      </div>
+                    </TableCell>
+                    </TableRow>
+                  );
                   })}
                 </TableBody>
               </Table>
@@ -616,72 +616,72 @@ export default function DrtListings() {
                   <Table>
                     <TableHeader className="bg-gray-100">
                       <TableRow>
-                        <TableHead className="py-2">DRT Type</TableHead>
-                        <TableHead className="py-2">Pool</TableHead>
-                        <TableHead className="py-2">Mint Address</TableHead>
-                        <TableHead className="text-right py-2">Price</TableHead>
-                        <TableHead className="py-2">Status</TableHead>
+                        <TableHead className="py-2 text-left">DRT Type</TableHead>
+                        <TableHead className="py-2 text-center">Pool</TableHead>
+                        <TableHead className="py-2 text-center">Mint Address</TableHead>
+                        <TableHead className="py-2 text-center">Price</TableHead>
+                        <TableHead className="py-2 text-center">Status</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {myDRTs.filter((drt) => drt.drtId !== 'OWNERSHIP_TOKEN').map((drt) => {
-                        const pool = pools.find(p => p.id === drt.poolId);
-                        return (
-                          <TableRow key={drt.id} className="hover:bg-gray-50">
-                            <TableCell className="py-2">
-                              <TooltipProvider>
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <Badge className={`${getDrtTypeColor(drt.drtId)} py-1 px-2 font-medium text-xs cursor-help`}>
-                                      {formatDrtName(drt.drtId)}
-                                    </Badge>
-                                  </TooltipTrigger>
-                                  <TooltipContent className="p-3 max-w-xs bg-gray-900 text-white">
-                                    <h3 className="font-semibold mb-1">{formatDrtName(drt.drtId)}</h3>
-                                    <p className="text-sm text-gray-200">
-                                      {drt.drtId === 'APPEND_DATA_POOL' && 
-                                        "Allows adding new data to the pool while maintaining schema integrity."}
-                                      {drt.drtId === 'EXECUTE_MEDIAN_WASM' && 
-                                        "Executes WASM-based median computation within secure SGX enclaves."}
-                                      {drt.drtId === 'EXECUTE_MEDIAN_PYTHON' && 
-                                        "Runs Python-based median algorithms on pool data in trusted execution environments."}
-                                    </p>
-                                  </TooltipContent>
-                                </Tooltip>
-                              </TooltipProvider>
-                            </TableCell>
-                            <TableCell className="py-2 text-sm">
-                              {pool?.name || 'Unknown Pool'}
-                            </TableCell>
-                            <TableCell className="py-2">
-                              <a 
-                                href={`https://explorer.solana.com/address/${drt.mintAddress}?cluster=devnet`}
-                                target="_blank"
-                                rel="noopener noreferrer" 
-                                className="font-mono text-xs text-blue-600 hover:text-blue-800 hover:underline flex items-center"
-                              >
-                                {`${drt.mintAddress.slice(0, 6)}...${drt.mintAddress.slice(-4)}`}
-                                <ExternalLink className="h-3 w-3 ml-1" />
-                              </a>
-                            </TableCell>
-                            <TableCell className="text-right font-mono py-2 text-sm">
-                              {drt.price?.toFixed(2) || "0.01"} SOL
-                            </TableCell>
-                            <TableCell className="py-2">
-                              <span className={`
-                                px-2 py-1 rounded-full text-xs inline-flex items-center
-                                ${drt.state === 'active' ? 'bg-green-100 text-green-800' : 
-                                  drt.state === 'pending' ? 'bg-amber-100 text-amber-800' : 
-                                  'bg-blue-100 text-blue-800'}
-                              `}>
-                                {drt.state === 'active' && <Check className="h-3 w-3 mr-1" />}
-                                {drt.state === 'pending' && <LoaderCircle className="h-3 w-3 mr-1 animate-spin" />}
-                                {drt.state === 'completed' && <CheckCircle2 className="h-3 w-3 mr-1" />}
-                                {drt.state}
-                              </span>
-                            </TableCell>
-                          </TableRow>
-                        );
+                      const pool = pools.find(p => p.id === drt.poolId);
+                      return (
+                      <TableRow key={drt.id} className="hover:bg-gray-50">
+                      <TableCell className="py-2">
+                        <TooltipProvider>
+                        <Tooltip>
+                        <TooltipTrigger asChild>
+                        <Badge className={`${getDrtTypeColor(drt.drtId)} py-1 px-2 font-medium text-xs cursor-help`}>
+                          {formatDrtName(drt.drtId)}
+                        </Badge>
+                        </TooltipTrigger>
+                        <TooltipContent className="p-3 max-w-xs bg-gray-900 text-white">
+                        <h3 className="font-semibold mb-1">{formatDrtName(drt.drtId)}</h3>
+                        <p className="text-sm text-gray-200">
+                          {drt.drtId === 'APPEND_DATA_POOL' && 
+                          "Allows adding new data to the pool while maintaining schema integrity."}
+                          {drt.drtId === 'EXECUTE_MEDIAN_WASM' && 
+                          "Executes WASM-based median computation within secure SGX enclaves."}
+                          {drt.drtId === 'EXECUTE_MEDIAN_PYTHON' && 
+                          "Runs Python-based median algorithms on pool data in trusted execution environments."}
+                        </p>
+                        </TooltipContent>
+                        </Tooltip>
+                        </TooltipProvider>
+                      </TableCell>
+                      <TableCell className="py-2 text-center text-sm">
+                        {pool?.name || 'Unknown Pool'}
+                      </TableCell>
+                      <TableCell className="py-2 text-center">
+                        <a 
+                        href={`https://explorer.solana.com/address/${drt.mintAddress}?cluster=devnet`}
+                        target="_blank"
+                        rel="noopener noreferrer" 
+                        className="font-mono text-xs text-blue-600 hover:text-blue-800 hover:underline flex items-center justify-center"
+                        >
+                        {`${drt.mintAddress.slice(0, 6)}...${drt.mintAddress.slice(-4)}`}
+                        <ExternalLink className="h-3 w-3 ml-1" />
+                        </a>
+                      </TableCell>
+                      <TableCell className="text-right font-mono py-2 text-center text-sm">
+                        {drt.price?.toFixed(2) || "0.01"} SOL
+                      </TableCell>
+                      <TableCell className="py-2 text-center">
+                        <span className={`
+                        px-2 py-1 rounded-full text-xs inline-flex items-center
+                        ${drt.state === 'active' ? 'bg-green-100 text-green-800' : 
+                        drt.state === 'pending' ? 'bg-amber-100 text-amber-800' : 
+                        'bg-blue-100 text-blue-800'}
+                        `}>
+                        {drt.state === 'active' && <Check className="h-3 w-3 mr-1" />}
+                        {drt.state === 'pending' && <LoaderCircle className="h-3 w-3 mr-1 animate-spin" />}
+                        {drt.state === 'completed' && <CheckCircle2 className="h-3 w-3 mr-1" />}
+                        {drt.state}
+                        </span>
+                      </TableCell>
+                      </TableRow>
+                      );
                       })}
                     </TableBody>
                   </Table>
