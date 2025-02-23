@@ -25,7 +25,7 @@ use anchor_spl::{
 };
 use mpl_token_metadata::ID as METADATA_PROGRAM_ID;
 
-declare_id!("C1meQCYX6KokZ2bJN7GPRmJyvPy2nZHTMxEFyKyJTLQr");
+declare_id!("HQKbqH1RnoChiVkdbgoJZJ8T6P2jmLHTqvdjaE7q8NDq");
 
 /// The vault account holds tokens and is a PDA.
 #[account]
@@ -596,8 +596,6 @@ pub struct RedeemDrt<'info> {
         bump,
     )]
     pub vault: Box<Account<'info, Vault>>,
-    #[account(mut)]
-    pub owner: Signer<'info>,
     #[account(mut)]
     pub user: Signer<'info>,
     pub token_program: Program<'info, Token>,

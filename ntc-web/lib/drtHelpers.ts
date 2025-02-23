@@ -221,49 +221,42 @@ export async function redeemDrt(
   userDrtTokenAccount: PublicKey,
   userOwnershipTokenAccount: PublicKey,
   drtType: string,
-  wallet: any // Wallet from useWallet
+  wallet: any
 ): Promise<string> {
   const provider = program.provider as AnchorProvider;
-  const user = provider.wallet.publicKey;
+  const user = wallet.publicKey;
   const connection = provider.connection;
 
-  // Compute vault PDA
   const [vaultPda] = await PublicKey.findProgramAddress(
     [Buffer.from("vault"), pool.toBuffer()],
     program.programId
   );
 
-  // Check if userDrtTokenAccount exists
   const userDrtAccountInfo = await connection.getAccountInfo(userDrtTokenAccount);
   const userOwnershipAccountInfo = await connection.getAccountInfo(userOwnershipTokenAccount);
 
   const instructions: anchor.web3.TransactionInstruction[] = [];
-
-  // Create userDrtTokenAccount if it doesn’t exist
   if (!userDrtAccountInfo) {
     console.log("Creating user DRT token account...");
     const createDrtTokenAccountIx = createAssociatedTokenAccountInstruction(
-      wallet.publicKey,           // payer
-      userDrtTokenAccount,        // associated token account address
-      wallet.publicKey,           // owner
-      drtMint                     // mint
+      wallet.publicKey,
+      userDrtTokenAccount,
+      wallet.publicKey,
+      drtMint
     );
     instructions.push(createDrtTokenAccountIx);
   }
-
-  // Create userOwnershipTokenAccount if it doesn’t exist
   if (!userOwnershipAccountInfo) {
     console.log("Creating user ownership token account...");
     const createOwnershipTokenAccountIx = createAssociatedTokenAccountInstruction(
-      wallet.publicKey,           // payer
-      userOwnershipTokenAccount,  // associated token account address
-      wallet.publicKey,           // owner
-      ownershipMint               // mint
+      wallet.publicKey,
+      userOwnershipTokenAccount,
+      wallet.publicKey,
+      ownershipMint
     );
     instructions.push(createOwnershipTokenAccountIx);
   }
 
-  // Execute the redeem_drt instruction with pre-instructions if needed
   const tx = await program.methods
     .redeemDrt(drtType)
     .accounts({
@@ -273,8 +266,7 @@ export async function redeemDrt(
       userDrtTokenAccount,
       userOwnershipTokenAccount,
       vault: vaultPda,
-      owner: user, // Assuming user is the owner for simplicity; adjust if pool owner differs
-      user,
+      user, // Only user signs
       tokenProgram: TOKEN_PROGRAM_ID,
     })
     .preInstructions(instructions)

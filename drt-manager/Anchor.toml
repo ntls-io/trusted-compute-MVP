@@ -21,7 +21,7 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-drt_manager = "C1meQCYX6KokZ2bJN7GPRmJyvPy2nZHTMxEFyKyJTLQr"
+drt_manager = "HQKbqH1RnoChiVkdbgoJZJ8T6P2jmLHTqvdjaE7q8NDq"
 
 [registry]
 url = "https://api.apr.dev"
