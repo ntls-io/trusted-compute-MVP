@@ -624,22 +624,30 @@ function PoolCreationStep({
   }, [teeDeploymentId, teeStatus]);
 
   // Save enclave measurement to database
-  const saveEnclaveMeasurement = async (poolId: string, measurements: {
-    mrenclave: string;
-    mrsigner: string;
-    isvProdId: string;
-    isvSvn: string;
-  } | null) => {
+  // In PoolCreationStep component
+  const saveEnclaveMeasurement = async (
+    poolId: string,
+    measurements: {
+      mrenclave: string;
+      mrsigner: string;
+      isvProdId: string;
+      isvSvn: string;
+    } | null,
+    publicIp: string | null,  // Add publicIp parameter
+    actualName: string | null // Add actualName parameter
+  ) => {
     if (!measurements) {
       console.warn("No enclave measurement to save");
       return;
     }
-  
+
     console.log("Attempting to save enclave measurement:", {
       poolId,
-      ...measurements
+      ...measurements,
+      publicIp,
+      actualName,
     });
-  
+
     try {
       const response = await fetch('/api/enclave-measurements', {
         method: 'POST',
@@ -648,10 +656,12 @@ function PoolCreationStep({
         },
         body: JSON.stringify({
           poolId,
-          ...measurements
+          ...measurements,
+          publicIp,    // Include publicIp
+          actualName,  // Include actualName
         }),
       });
-  
+
       if (!response.ok) {
         const errorData = await response.json().catch(() => null);
         throw new Error(
@@ -659,13 +669,12 @@ function PoolCreationStep({
           `Failed to save enclave measurement (Status ${response.status})`
         );
       }
-  
+
       const result = await response.json();
       console.log("Successfully saved enclave measurement:", result);
     } catch (error) {
       console.error('Error saving enclave measurement:', error);
-      // We're not throwing here since we don't want to fail pool creation
-      // if enclave measurement save fails
+      // Not throwing here to avoid failing pool creation if this step fails
     }
   };
 
@@ -757,6 +766,8 @@ function PoolCreationStep({
 
       // Local variable of enclave measurements
       let measurements = null;
+      let publicIp: string | null = null;
+      let vmName: string | null = null;
 
       // Step 0: Create New VM (simulate 5 seconds delay)
       updateProgress(0, "Creating New VM", "loading", "Deploying VM, please wait...");
@@ -872,10 +883,12 @@ function PoolCreationStep({
       let teeDeploymentComplete = false;
       while (!teeDeploymentComplete) {
         const status = await checkTEEStatus(deploymentId);
+        console.log("Full TEE status response:", JSON.stringify(status, null, 2)); // Log the full response
         setTeeStatus(status.status);
         
         if (status.status === 'completed') {
           teeDeploymentComplete = true;
+          console.log("Status details:", status.details);
           if (status.details?.sigstruct) {
             measurements = {
               mrenclave: status.details.sigstruct.mr_enclave,
@@ -883,8 +896,13 @@ function PoolCreationStep({
               isvProdId: status.details.sigstruct.isv_prod_id,
               isvSvn: status.details.sigstruct.isv_svn,
             };
-            console.log('TEE deployment successful, measurements:', measurements);
+            publicIp = status.public_ip; // Extract public IP
+            vmName = status.vm_name;    // Extract VM name
+            console.log('TEE deployment successful, measurements:', measurements, 'publicIp:', publicIp, 'vmName:', vmName);
           } else {
+            publicIp = status.public_ip; // Extract even if sigstruct is missing
+            vmName = status.vm_name;
+            console.log('No sigstruct, but extracted publicIp:', publicIp, 'vmName:', vmName);
             console.warn('TEE deployment completed but missing sigstruct details');
           }
         } else if (status.status === 'failed') {
@@ -928,7 +946,7 @@ function PoolCreationStep({
       if (responseData.success && responseData.pool.id) {
         if (measurements) {
           try {
-            await saveEnclaveMeasurement(responseData.pool.id, measurements);
+            await saveEnclaveMeasurement(responseData.pool.id, measurements, publicIp, vmName);
             console.log("Successfully saved enclave measurement for pool:", responseData.pool.id);
           } catch (error) {
             console.error("Failed to save enclave measurement:", error);

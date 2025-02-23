@@ -103,6 +103,8 @@ model EnclaveMeasurement {
     mrsigner   String
     isvProdId  String
     isvSvn     String
+    publicIp    String?
+    actualName  String?
     createdAt  DateTime @default(now())
     updatedAt  DateTime @updatedAt
     

@@ -20,12 +20,12 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 
-// In app/api/enclave-measurements/route.ts
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { poolId, mrenclave, mrsigner, isvProdId, isvSvn } = body;
+    const { poolId, mrenclave, mrsigner, isvProdId, isvSvn, publicIp, actualName } = body;
 
+    // Validate required fields
     if (!poolId || !mrenclave || !mrsigner || !isvProdId || !isvSvn) {
       return NextResponse.json(
         { error: 'Missing required fields' },
@@ -45,19 +45,20 @@ export async function POST(request: Request) {
           mrsigner,
           isvProdId,
           isvSvn,
+          publicIp,    // Add publicIp (optional)
+          actualName,  // Add actualName (optional)
         },
       });
 
       return NextResponse.json(enclaveMeasurement);
     } catch (prismaError: any) {
-      // Handle specific Prisma errors
       if (prismaError.code === 'P2025') {
         return NextResponse.json(
           { error: 'Pool not found' },
           { status: 404 }
         );
       }
-      throw prismaError; // Re-throw other Prisma errors
+      throw prismaError;
     }
   } catch (error: any) {
     console.error('Error saving enclave measurement:', error);
