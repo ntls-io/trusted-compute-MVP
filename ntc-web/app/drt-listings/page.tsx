@@ -124,7 +124,7 @@ export default function DrtListings() {
   const [selectedPool, setSelectedPool] = useState<Pool | null>(null);
   const [availableDRTs, setAvailableDRTs] = useState<DRTInfo[]>([]);
   const [myDRTs, setMyDRTs] = useState<DRTInstance[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(false); // Changed: No initial loading on page load
   const [purchaseLoading, setPurchaseLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -135,7 +135,7 @@ export default function DrtListings() {
   // Load pools and user's purchased DRTs
   useEffect(() => {
     async function loadInitialData() {
-      setLoading(true);
+      // Changed: No setLoading(true) here to avoid showing "Loading available DRTs..." on page load
       try {
         // Fetch pools
         const poolsResponse = await fetch("/api/pools");
@@ -161,9 +161,8 @@ export default function DrtListings() {
       } catch (error) {
         console.error("Error loading initial data:", error);
         setError("Failed to load data. Please try again later.");
-      } finally {
-        setLoading(false);
       }
+      // Changed: No setLoading(false) here since we didn’t set it to true
     }
     
     if (isUserLoaded) {
@@ -250,12 +249,12 @@ export default function DrtListings() {
     
     const pool = pools[parseInt(index)];
     setSelectedPool(pool);
-    setLoading(true);
+    setLoading(true); // Changed: Loading only triggers when fetching DRTs after pool selection
     
     try {
       if (!program) throw new Error("DRT Program not available");
       
-      const drtsOnChain = await fetchAvailableDRTs(program, pool.chainAddress);
+      const drtsOnChain = await fetchAvailableDRTs(program, pool.chainAddress); // Already fetches latest supply, including burned tokens
       
       // Hardcode cost as 0.01 SOL for all tokens
       const drts: DRTInfo[] = drtsOnChain.map((drt: DRTInfo) => {

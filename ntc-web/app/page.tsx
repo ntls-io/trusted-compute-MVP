@@ -43,6 +43,11 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { useDrtProgram } from "@/lib/useDrtProgram";
+import { useWallet } from "@solana/wallet-adapter-react";
+import { PublicKey } from "@solana/web3.js";
+import { getAssociatedTokenAddress } from "@solana/spl-token";
+import { redeemDrt } from "@/lib/drtHelpers";
 
 // Interfaces
 interface Pool {
@@ -52,6 +57,7 @@ interface Pool {
   chainAddress: string;
   vaultAddress: string;
   feeVaultAddress: string;
+  ownershipMintAddress: string;
   schemaDefinition: any;
   enclaveMeasurement?: {
     mrenclave: string;
@@ -85,6 +91,8 @@ interface DRTInstance {
   pool: {
     name: string;
     description: string;
+    chainAddress: string;
+    ownershipMintAddress: string;
     enclaveMeasurement?: {
       publicIp?: string;
     };
@@ -315,15 +323,19 @@ const EnclaveDialog = ({ pool, onAttest }: { pool: Pool; onAttest: () => Promise
   );
 };
 
-// Python Execution Dialog Component (unchanged)
+// Python Execution Dialog Component (Updated with Solana Redemption)
 const PythonExecutionDialog = ({ 
   drtInstance, 
   onRedeem, 
-  onStateUpdate 
+  onStateUpdate,
+  program,
+  wallet
 }: { 
   drtInstance: DRTInstance; 
   onRedeem: () => Promise<PythonExecutionResult>; 
   onStateUpdate: (newState: string) => void; 
+  program: any; // Anchor program from useDrtProgram
+  wallet: any; // Wallet from useWallet
 }) => {
   const [isRedeeming, setIsRedeeming] = useState(false);
   const [executionResult, setExecutionResult] = useState<PythonExecutionResult | null>(null);
@@ -331,10 +343,39 @@ const PythonExecutionDialog = ({
   const handleRedeem = async () => {
     setIsRedeeming(true);
     setExecutionResult(null);
+
     try {
-      const result = await onRedeem();
-      setExecutionResult(result);
-      if (result.success) {
+      // Step 1: Solana redeem_drt transaction
+      if (!program || !wallet.connected) {
+        throw new Error("Wallet not connected or program not initialized");
+      }
+
+      const poolPubkey = new PublicKey(drtInstance.pool.chainAddress);
+      const drtMint = new PublicKey(drtInstance.mintAddress);
+      const ownershipMint = new PublicKey(drtInstance.pool.ownershipMintAddress);
+      const userDrtTokenAccount = await getAssociatedTokenAddress(drtMint, wallet.publicKey);
+      const userOwnershipTokenAccount = await getAssociatedTokenAddress(ownershipMint, wallet.publicKey);
+      const drtType = drtInstance.drt.name.toLowerCase().includes('python') ? "py_compute_median" : "unknown";
+
+      console.log("Redeeming DRT on Solana...");
+      await redeemDrt(
+        program,
+        poolPubkey,
+        drtMint,
+        ownershipMint,
+        userDrtTokenAccount,
+        userOwnershipTokenAccount,
+        drtType,
+        wallet
+      );
+      console.log("Solana DRT redemption successful");
+
+      // Step 2: Execute Python script
+      const pythonResult = await onRedeem();
+      setExecutionResult(pythonResult);
+
+      if (pythonResult.success) {
+        // Step 3: Update database state
         await fetch('/api/update-drt-state', {
           method: 'POST',
           headers: {
@@ -345,12 +386,14 @@ const PythonExecutionDialog = ({
             state: 'completed',
           }),
         });
+
+        // Step 4: Update local state
         onStateUpdate('completed');
       }
     } catch (error) {
       setExecutionResult({
         success: false,
-        error: error instanceof Error ? error.message : 'Unknown error during Python execution',
+        error: error instanceof Error ? error.message : 'Unknown error during redemption',
       });
     } finally {
       setIsRedeeming(false);
@@ -359,7 +402,7 @@ const PythonExecutionDialog = ({
 
   const buttonProps = {
     text: isRedeeming ? 'Redeeming...' : executionResult?.success ? 'Redeemed' : 'Redeem DRT',
-    disabled: isRedeeming || executionResult?.success || !drtInstance.pool.enclaveMeasurement?.publicIp || drtInstance.state !== 'active',
+    disabled: isRedeeming || executionResult?.success || !drtInstance.pool.enclaveMeasurement?.publicIp || drtInstance.state !== 'active' || !wallet.connected,
     className: isRedeeming 
       ? 'bg-gray-200 text-gray-700 cursor-not-allowed' 
       : executionResult?.success 
@@ -373,7 +416,7 @@ const PythonExecutionDialog = ({
       <DialogHeader>
         <DialogTitle>Redeem Python DRT - {drtInstance.drt.name}</DialogTitle>
         <DialogDescription>
-          Execute the Python script associated with this Digital Right Token on the pool's data
+          Redeem your DRT on Solana and execute the associated Python script on the pool's data
         </DialogDescription>
       </DialogHeader>
 
@@ -485,14 +528,14 @@ const DRTTableSkeleton = () => (
   </TableBody>
 );
 
-// Color schema for different DRT types (from drt-listings)
+// Color schema for different DRT types
 const DrtTypeColors: Record<string, string> = {
   APPEND_DATA_POOL: "bg-indigo-100 text-indigo-800 hover:bg-indigo-200",
   EXECUTE_MEDIAN_PYTHON: "bg-amber-100 text-amber-800 hover:bg-amber-200",
   EXECUTE_MEDIAN_WASM: "bg-emerald-100 text-emerald-800 hover:bg-emerald-200",
 };
 
-// Color schema for DRT status (from drt-listings)
+// Color schema for DRT status
 const DrtStatusColors: Record<string, string> = {
   active: "bg-green-100 text-green-800",
   pending: "bg-amber-100 text-amber-800",
@@ -523,6 +566,8 @@ const getDrtTypeColor = (name: string): string => {
 };
 
 export default function Home() {
+  const program = useDrtProgram();
+  const wallet = useWallet();
   const [isLoadingPools, setIsLoadingPools] = useState(true);
   const [isLoadingDRTs, setIsLoadingDRTs] = useState(true);
   const [pools, setPools] = useState<Pool[]>([]);
@@ -562,7 +607,6 @@ export default function Home() {
   
         setPools(Array.isArray(data.pools) ? data.pools : []);
         setDrtInstances(Array.isArray(data.drtInstances) ? data.drtInstances : []);
-        // Initialize redeemed states based on initial "completed" status
         const initialRedeemedStates = data.drtInstances.reduce((acc: { [key: string]: boolean }, item: DRTInstance) => {
           acc[item.id] = item.state === 'completed';
           return acc;
@@ -1139,7 +1183,7 @@ export default function Home() {
                       {getDrtSortIcon('price')}
                     </div>
                   </TableHead>
-                    <TableHead className="text-white w-[200px] text-center">Actions</TableHead>
+                  <TableHead className="text-white w-[200px]">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               {isLoadingDRTs ? (
@@ -1213,8 +1257,8 @@ export default function Home() {
                                   <DialogTrigger asChild>
                                     <Button 
                                       size="sm" 
-                                      className={`${buttonClass} w-36`} // Fixed width with w-36
-                                      disabled={isRedeemed || !item.pool.enclaveMeasurement?.publicIp || item.state !== 'active'}
+                                      className={`${buttonClass} w-28`}
+                                      disabled={isRedeemed || !item.pool.enclaveMeasurement?.publicIp || item.state !== 'active' || !wallet.connected}
                                     >
                                       <Shield className="w-4 h-4 mr-2" />
                                       {buttonText}
@@ -1224,6 +1268,8 @@ export default function Home() {
                                     drtInstance={item}
                                     onRedeem={() => handlePythonRedeem(item)}
                                     onStateUpdate={(newState) => handleStateUpdate(item.id, newState)}
+                                    program={program}
+                                    wallet={wallet}
                                   />
                                 </Dialog>
                               ) : (

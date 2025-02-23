@@ -25,6 +25,7 @@ import {
   getAssociatedTokenAddress,
   createInitializeMintInstruction,
   createAssociatedTokenAccountInstruction,
+  getMint, // Added to fetch mint supply
 } from "@solana/spl-token";
 import { PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
 
@@ -211,32 +212,77 @@ export async function initializeDRT(
   return vaultDRTTokenAccount;
 }
 
-/** Redeem a DRT (again, a simplified version). */
+/** Redeem a DRT on-chain */
 export async function redeemDrt(
   program: anchor.Program,
   pool: PublicKey,
   drtMint: PublicKey,
   ownershipMint: PublicKey,
   userDrtTokenAccount: PublicKey,
-  userOwnershipTokenAccount: PublicKey
-) {
-  const owner = (anchor.getProvider() as AnchorProvider).wallet.publicKey;
-  await program.methods
-    .redeemDrt("append")
+  userOwnershipTokenAccount: PublicKey,
+  drtType: string,
+  wallet: any // Wallet from useWallet
+): Promise<string> {
+  const provider = program.provider as AnchorProvider;
+  const user = provider.wallet.publicKey;
+  const connection = provider.connection;
+
+  // Compute vault PDA
+  const [vaultPda] = await PublicKey.findProgramAddress(
+    [Buffer.from("vault"), pool.toBuffer()],
+    program.programId
+  );
+
+  // Check if userDrtTokenAccount exists
+  const userDrtAccountInfo = await connection.getAccountInfo(userDrtTokenAccount);
+  const userOwnershipAccountInfo = await connection.getAccountInfo(userOwnershipTokenAccount);
+
+  const instructions: anchor.web3.TransactionInstruction[] = [];
+
+  // Create userDrtTokenAccount if it doesn’t exist
+  if (!userDrtAccountInfo) {
+    console.log("Creating user DRT token account...");
+    const createDrtTokenAccountIx = createAssociatedTokenAccountInstruction(
+      wallet.publicKey,           // payer
+      userDrtTokenAccount,        // associated token account address
+      wallet.publicKey,           // owner
+      drtMint                     // mint
+    );
+    instructions.push(createDrtTokenAccountIx);
+  }
+
+  // Create userOwnershipTokenAccount if it doesn’t exist
+  if (!userOwnershipAccountInfo) {
+    console.log("Creating user ownership token account...");
+    const createOwnershipTokenAccountIx = createAssociatedTokenAccountInstruction(
+      wallet.publicKey,           // payer
+      userOwnershipTokenAccount,  // associated token account address
+      wallet.publicKey,           // owner
+      ownershipMint               // mint
+    );
+    instructions.push(createOwnershipTokenAccountIx);
+  }
+
+  // Execute the redeem_drt instruction with pre-instructions if needed
+  const tx = await program.methods
+    .redeemDrt(drtType)
     .accounts({
       pool,
       drtMint,
       ownershipMint,
       userDrtTokenAccount,
       userOwnershipTokenAccount,
-      vault: (await getAssociatedTokenAddress(ownershipMint, owner)),
-      owner,
-      user: owner,
+      vault: vaultPda,
+      owner: user, // Assuming user is the owner for simplicity; adjust if pool owner differs
+      user,
       tokenProgram: TOKEN_PROGRAM_ID,
     })
+    .preInstructions(instructions)
     .rpc();
-}
 
+  console.log(`DRT redeemed successfully, tx signature: ${tx}`);
+  return tx;
+}
 
 /**
  * Fetch live available DRT data for a given pool.
@@ -274,21 +320,34 @@ export async function fetchAvailableDRTs(
   // Loop through allowed DRT types stored on-chain
   for (const drtType of allowedDrtsField) {
     let drtMint: PublicKey | null = null;
-    let initialSupply = 0;
     
     // Handle both camelCase and snake_case field names for compatibility
     if (drtType === "append") {
       drtMint = poolAccount.appendMint || poolAccount.append_mint;
-      initialSupply = poolAccount.appendSupply?.toNumber() || poolAccount.append_supply?.toNumber() || 0;
     } else if (drtType === "w_compute_median") {
       drtMint = poolAccount.wComputeMedianMint || poolAccount.w_compute_median_mint;
-      initialSupply = poolAccount.wComputeSupply?.toNumber() || poolAccount.w_compute_supply?.toNumber() || 0;
     } else if (drtType === "py_compute_median") {
       drtMint = poolAccount.pyComputeMedianMint || poolAccount.py_compute_median_mint;
-      initialSupply = poolAccount.pyComputeSupply?.toNumber() || poolAccount.py_compute_supply?.toNumber() || 0;
     }
     
     if (drtMint) {
+      // Fetch the mint info to get the total supply (accounts for burns)
+      let initialSupply = 0;
+      try {
+        const mintInfo = await getMint(connection, drtMint);
+        initialSupply = Number(mintInfo.supply); // Current total supply from the mint account
+      } catch (error) {
+        console.error(`Error fetching mint info for ${drtType}:`, error);
+        // Fallback to pool data if mint fetch fails (though this should rarely happen)
+        if (drtType === "append") {
+          initialSupply = poolAccount.appendSupply?.toNumber() || poolAccount.append_supply?.toNumber() || 0;
+        } else if (drtType === "w_compute_median") {
+          initialSupply = poolAccount.wComputeSupply?.toNumber() || poolAccount.w_compute_supply?.toNumber() || 0;
+        } else if (drtType === "py_compute_median") {
+          initialSupply = poolAccount.pyComputeSupply?.toNumber() || poolAccount.py_compute_supply?.toNumber() || 0;
+        }
+      }
+
       // Use getAssociatedTokenAddress to calculate the correct vault DRT token account address
       const vaultDrtTokenPda = await getAssociatedTokenAddress(
         drtMint,
@@ -309,7 +368,7 @@ export async function fetchAvailableDRTs(
       availableDRTs.push({
         name: drtType,
         mint: drtMint.toBase58(),
-        initialSupply,
+        initialSupply, // Now reflects the current total supply from the blockchain
         available,
       });
     }
