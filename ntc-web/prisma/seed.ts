@@ -107,6 +107,19 @@ async function main() {
     },
   });
 
+  const ownershipTokenDrt = await prisma.digitalRightToken.upsert({
+    where: { id: 'OWNERSHIP_TOKEN' },
+    update: {},
+    create: {
+      id: 'OWNERSHIP_TOKEN',
+      name: 'Ownership Token',
+      description: 'Represents ownership in a data pool, received upon redeeming an append DRT',
+      githubUrl: null,
+      hash: null,
+      isActive: false,
+    },
+  });
+
   console.log('✅ DRT Types created');
 
   // // 🏦 Create pools with schema definitions and new on-chain addresses

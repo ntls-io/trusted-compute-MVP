@@ -18,7 +18,12 @@
 // app/pools/PoolsTable.tsx
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, JSX } from 'react';
+import { useDrtProgram } from "@/lib/useDrtProgram";
+import { useWallet } from "@solana/wallet-adapter-react";
+import { redeemDrt } from "@/lib/drtHelpers";
+import { PublicKey } from "@solana/web3.js";
+import { getAssociatedTokenAddress } from "@solana/spl-token";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -38,17 +43,16 @@ import {
 } from "@/components/ui/dialog";
 import FilePicker from '@/components/FilePicker';
 import { SchemaPreview, validateJsonSchema } from '@/components/schemaUtils';
-import { ExternalLink, Shield, Upload, Code2, Eye } from 'lucide-react';
+import { ExternalLink, Shield, Upload, Code2, Eye, RefreshCcw, Check, AlertTriangle } from 'lucide-react';
 import { ChevronDown, ChevronUp, ChevronsUpDown, Loader2 } from "lucide-react";
-
 
 interface EnclaveMeasurement {
   mrenclave: string;
   mrsigner: string;
   isvProdId: string;
   isvSvn: string;
-  publicIp?: string;  // Added for attestation
-  actualName?: string; // Added for attestation (VM name)
+  publicIp?: string;
+  actualName?: string;
 }
 
 interface DRT {
@@ -64,29 +68,52 @@ interface Pool {
   chainAddress: string;
   vaultAddress: string;
   feeVaultAddress: string;
+  ownershipMintAddress: string;
   schemaDefinition: JSON; 
   enclaveMeasurement?: EnclaveMeasurement;
   allowedDRTs: {
     drt: DRT;
   }[];
   isOwned: boolean;
+  ownerId: string;
+}
+
+interface DRTInstance {
+  id: string;
+  mintAddress: string;
+  drt: {
+    id: string;
+    name: string;
+  };
+  poolId: string;
+  ownerId: string;
+  state: string;
 }
 
 interface AttestationResult {
   success: boolean;
   error?: string;
-  stdout?: string; // Added to display FastAPI logs
+  stdout?: string;
   measurements?: EnclaveMeasurement;
+}
+
+interface Progress {
+  step: number;
+  total: number;
+  message: string;
+  icon: JSX.Element;
+  status: 'loading' | 'success' | 'error';
+  details?: string;
 }
 
 const EnclaveDialog = ({ pool, onAttest }: { pool: Pool; onAttest: () => Promise<AttestationResult> }) => {
   const [isAttesting, setIsAttesting] = useState(false);
   const [attestationResult, setAttestationResult] = useState<AttestationResult | null>(null);
-  const [showOutput, setShowOutput] = useState(false); // New state to toggle output visibility
+  const [showOutput, setShowOutput] = useState(false);
   
   const handleAttest = async () => {
     setIsAttesting(true);
-    setAttestationResult(null); // Reset previous result
+    setAttestationResult(null);
     try {
       const result = await onAttest();
       setAttestationResult(result);
@@ -100,10 +127,9 @@ const EnclaveDialog = ({ pool, onAttest }: { pool: Pool; onAttest: () => Promise
     }
   };
 
-  // Early return if no enclave measurement
   if (!pool.enclaveMeasurement) {
     return (
-      <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto"> {/* Added scrollable max height */}
+      <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Enclave Verification - {pool.name}</DialogTitle>
           <DialogDescription>
@@ -119,10 +145,8 @@ const EnclaveDialog = ({ pool, onAttest }: { pool: Pool; onAttest: () => Promise
     );
   }
 
-  // Construct the command as executed by AttestationClient
   const command = `[APPLICATION_PORT=443 APPLICATION_HOST=${pool.enclaveMeasurement.publicIp || 'unknown'}] ./attest dcap ${pool.enclaveMeasurement.mrenclave} ${pool.enclaveMeasurement.mrsigner} ${pool.enclaveMeasurement.isvProdId} ${pool.enclaveMeasurement.isvSvn}`;
 
-  // Determine button properties based on attestation status
   const getButtonProps = () => {
     if (isAttesting) {
       return {
@@ -159,7 +183,7 @@ const EnclaveDialog = ({ pool, onAttest }: { pool: Pool; onAttest: () => Promise
   const buttonProps = getButtonProps();
 
   return (
-    <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto"> {/* Added scrollable max height */}
+    <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
       <DialogHeader>
         <DialogTitle>Enclave Verification - {pool.name}</DialogTitle>
         <DialogDescription>
@@ -208,13 +232,6 @@ const EnclaveDialog = ({ pool, onAttest }: { pool: Pool; onAttest: () => Promise
                 {pool.enclaveMeasurement.publicIp || 'Not available'}
               </div>
             </div>
-
-            {/* <div>
-              <Label className="text-sm">VM Name</Label>
-              <div className="font-mono text-sm bg-gray-100 p-2 rounded">
-                {pool.enclaveMeasurement.actualName || 'Not available'}
-              </div>
-            </div> */}
           </div>
         </div>
 
@@ -274,7 +291,7 @@ const EnclaveDialog = ({ pool, onAttest }: { pool: Pool; onAttest: () => Promise
                   {showOutput && (
                     <div>
                       <Label className="text-sm">Attestation Output</Label>
-                      <pre className="font-mono text-sm bg-gray-100 p-2 rounded max-h-40 overflow-y-auto whitespace-pre-wrap"> {/* Changed break-all to whitespace-pre-wrap */}
+                      <pre className="font-mono text-sm bg-gray-100 p-2 rounded max-h-40 overflow-y-auto whitespace-pre-wrap">
                         {attestationResult.stdout}
                       </pre>
                     </div>
@@ -289,7 +306,9 @@ const EnclaveDialog = ({ pool, onAttest }: { pool: Pool; onAttest: () => Promise
   );
 };
 
-const JoinPoolDialog = ({ pool }: { pool: Pool }) => {
+const JoinPoolDialog = ({ pool, drtInstances, fetchUserData }: { pool: Pool; drtInstances: DRTInstance[]; fetchUserData: () => Promise<void> }) => {
+  const program = useDrtProgram();
+  const wallet = useWallet();
   const [dataFile, setDataFile] = useState<File | null>(null);
   const [validation, setValidation] = useState<{
     success: boolean | null;
@@ -299,96 +318,283 @@ const JoinPoolDialog = ({ pool }: { pool: Pool }) => {
     error: null,
   });
   const [isValidating, setIsValidating] = useState(false);
+  const [selectedDrt, setSelectedDrt] = useState<string | null>(null);
+  const [isJoining, setIsJoining] = useState(false);
+  const [progress, setProgress] = useState<Progress>({
+    step: 0,
+    total: 3,
+    message: "Awaiting join pool action",
+    icon: <RefreshCcw size={18} className="animate-spin text-blue-500" />,
+    status: "loading",
+  });
 
-  const handleJoinPool = async () => {
+  const appendDrts = drtInstances.filter(drt => 
+    drt.poolId === pool.id && 
+    drt.drt.name.toLowerCase().includes('append') && 
+    drt.state === 'active'
+  );
+
+  const updateProgress = (
+    step: number,
+    message: string,
+    status: 'loading' | 'success' | 'error' = 'loading',
+    details?: string
+  ) => {
+    const totalSteps = 3; // Validate, Redeem, Append
+    const icon = status === 'loading'
+      ? <RefreshCcw size={18} className="animate-spin text-blue-500" />
+      : status === 'success'
+        ? <Check size={18} className="text-green-500" />
+        : <AlertTriangle size={18} className="text-red-500" />;
+    setProgress({ step, total: totalSteps, message, icon, status, details });
+  };
+
+  const handleValidateData = async () => {
     if (!dataFile) {
       setValidation({ success: false, error: 'Please select a data file' });
       return;
     }
 
     setIsValidating(true);
+    updateProgress(0, "Validating data against schema", "loading");
+
     try {
-      // Create a blob from the schema definition
       const schemaBlob = new Blob([JSON.stringify(pool.schemaDefinition)], { type: 'application/json' });
-      const schemaFile = new File([schemaBlob], 'schema.json', { type: 'application/json' });
-      
-      // Use the existing validation utility
+      const schemaFile = new File([schemaBlob], "schema.json", { type: 'application/json' });
       const result = await validateJsonSchema(schemaFile, dataFile);
       setValidation(result);
-      
+
       if (result.success) {
-        alert('Successfully joined pool!');
+        updateProgress(1, "Data validated successfully", "success");
+      } else {
+        updateProgress(0, "Data validation failed", "error", result.error || "Unknown validation error");
       }
     } catch (error) {
       setValidation({
         success: false,
-        error: 'Failed to validate data file against pool schema: ' + (error instanceof Error ? error.message : String(error))
+        error: 'An error occurred during validation: ' + (error instanceof Error ? error.message : String(error)),
       });
+      updateProgress(0, "Error during validation", "error", error instanceof Error ? error.message : String(error));
     } finally {
       setIsValidating(false);
     }
   };
 
+  const handleJoinPool = async () => {
+    if (!program || !wallet.connected || !wallet.publicKey) {
+      updateProgress(0, "Wallet not connected or program not loaded", "error");
+      return;
+    }
+    if (!selectedDrt) {
+      updateProgress(0, "Please select an Append DRT", "error");
+      return;
+    }
+    if (!validation.success) {
+      updateProgress(0, "Please validate your data first", "error");
+      return;
+    }
+
+    setIsJoining(true);
+    try {
+      const drtInstance = appendDrts.find(drt => drt.id === selectedDrt);
+      if (!drtInstance) throw new Error("Selected DRT not found");
+
+      const poolPubkey = new PublicKey(pool.chainAddress);
+      const drtMint = new PublicKey(drtInstance.mintAddress);
+      const ownershipMint = new PublicKey(pool.ownershipMintAddress);
+      const userDrtTokenAccount = await getAssociatedTokenAddress(drtMint, wallet.publicKey);
+      const userOwnershipTokenAccount = await getAssociatedTokenAddress(ownershipMint, wallet.publicKey);
+
+      updateProgress(1, "Redeeming Append DRT", "loading", "Please sign with your wallet");
+      const { tx, ownershipTokenReceived } = await redeemDrt(
+        program,
+        poolPubkey,
+        drtMint,
+        ownershipMint,
+        userDrtTokenAccount,
+        userOwnershipTokenAccount,
+        "append",
+        wallet,
+        (status) => updateProgress(1, status, "loading")
+      );
+
+      if (!ownershipTokenReceived) throw new Error("Ownership token not received");
+      updateProgress(2, "Append DRT redeemed, ownership token received", "success", `Tx: ${tx}`);
+
+      const dataReader = new FileReader();
+      const dataPromise = new Promise((resolve, reject) => {
+        dataReader.onload = (e) => {
+          try {
+            const data = JSON.parse(e.target?.result as string);
+            resolve(data);
+          } catch (err) {
+            reject(new Error("Invalid JSON in data file"));
+          }
+        };
+        dataReader.onerror = () => reject(new Error("Failed to read data file"));
+        dataReader.readAsText(dataFile!);
+      });
+
+      const dataJson = await dataPromise;
+      const publicIp = pool.enclaveMeasurement?.publicIp;
+      if (!publicIp) throw new Error("Enclave public IP not available");
+
+      updateProgress(2, "Appending data to enclave", "loading");
+      const response = await fetch("/api/append-data", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ publicIp, data: dataJson }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `Enclave error (Status ${response.status})`);
+      }
+
+      const result = await response.json();
+      if (result.result === "Data appended, sealed, and saved successfully") {
+        updateProgress(3, "Data appended successfully", "success", result.result);
+
+        await fetch('/api/update-drt-state', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            drtInstanceId: drtInstance.id,
+            state: 'completed',
+          }),
+        });
+
+        await fetchUserData();
+      } else {
+        throw new Error(`Unexpected enclave response: ${result.result}`);
+      }
+    } catch (error) {
+      console.error("Join pool error:", error);
+      updateProgress(progress.step, `Error: ${error instanceof Error ? error.message : String(error)}`, "error");
+    } finally {
+      setIsJoining(false);
+    }
+  };
+
   return (
-    <DialogContent className="sm:max-w-lg">
+    <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
       <DialogHeader>
         <DialogTitle>Join Pool - {pool.name}</DialogTitle>
-        <DialogDescription>{pool.description}</DialogDescription>
+        <DialogDescription>
+          Redeem an Append DRT to add data to this pool and receive an ownership token.
+        </DialogDescription>
       </DialogHeader>
 
-      <div className="space-y-6 py-4">
-        <div>
-          <h5 className="font-medium mb-2">Available Digital Rights</h5>
-          <div className="flex flex-wrap gap-2">
-            {pool.allowedDRTs.map(({ drt }) => (
-              <TooltipProvider key={drt.id} delayDuration={3}>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Badge 
-                      className={`${getDrtTypeColor(drt.name)} cursor-help`}
-                    >
-                      {drt.name}
-                    </Badge>
-                  </TooltipTrigger>
-                  <TooltipContent className="p-3 max-w-xs bg-gray-900 text-white">
-                    <h3 className="font-semibold mb-1">{drt.name}</h3>
-                    <p className="text-sm text-gray-200">{drt.description}</p>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            ))}
-          </div>
-        </div>
-        <div className="p-4 bg-gray-50 flex justify-center">
-          <SchemaPreview schema={pool.schemaDefinition} />
+      <div className="space-y-6">
+        <div className="space-y-4">
+          <h5 className="text-lg font-semibold">Step 1: Select Append DRT</h5>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Name</TableHead>
+                <TableHead>Mint Address</TableHead>
+                <TableHead>Select</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {appendDrts.map((drt) => (
+                <TableRow key={drt.id}>
+                  <TableCell>{drt.drt.name}</TableCell>
+                  <TableCell>{drt.mintAddress}</TableCell>
+                  <TableCell>
+                    <Input
+                      type="radio"
+                      name="drt"
+                      value={drt.id}
+                      checked={selectedDrt === drt.id}
+                      onChange={() => setSelectedDrt(drt.id)}
+                      disabled={isJoining}
+                    />
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+          {appendDrts.length === 0 && (
+            <Alert variant="destructive">
+              <AlertDescription>No active Append DRTs available for this pool.</AlertDescription>
+            </Alert>
+          )}
         </div>
 
         <div className="space-y-4">
-          <FilePicker
-            label="Select Data File"
-            accept=".json"
-            onChange={(file) => {
+          <h5 className="text-lg font-semibold">Step 2: Upload and Validate Data</h5>
+            <div className="space-y-2 text-center">
+            <SchemaPreview schema={pool.schemaDefinition} />
+            <FilePicker
+              label="Upload Data File"
+              accept=".json"
+              onChange={(file) => {
               setDataFile(file);
-              setValidation({
-                success: null,
-                error: null,
-              });
-            }}
-          />
-          
-          {validation.error && (
-            <Alert variant="destructive">
+              setValidation({ success: null, error: null });
+              }}
+            />
+            <Button
+              onClick={handleValidateData}
+              disabled={!dataFile || isValidating || isJoining}
+              className="w-full bg-gray-900 text-white hover:bg-gray-800"
+            >
+              {isValidating ? 'Validating...' : 'Validate Data'}
+            </Button>
+            {validation.error && (
+              <Alert variant="destructive">
               <AlertDescription>{validation.error}</AlertDescription>
-            </Alert>
-          )}
+              </Alert>
+            )}
+            {validation.success && (
+              <Alert>
+              <AlertDescription>Data matches the pool schema.</AlertDescription>
+              </Alert>
+            )}
+            </div>
+        </div>
 
-          <Button 
+        <div className="space-y-4">
+          <h5 className="text-lg font-semibold">Step 3: Join Pool</h5>
+          <Button
             onClick={handleJoinPool}
-            disabled={!dataFile || isValidating}
-            className="w-full"
+            disabled={!selectedDrt || !validation.success || isJoining || !wallet.connected}
+            className="w-full bg-gray-900 text-white hover:bg-gray-800"
           >
-            {isValidating ? 'Validating...' : 'Join Pool'}
+            {isJoining ? 'Joining...' : 'Join Pool'}
           </Button>
+
+          <div className="pt-2">
+            <div className="mb-2 flex justify-between items-center">
+              <h6 className="font-medium text-gray-700">Progress</h6>
+              <span className="text-sm font-medium text-gray-500">Step {progress.step}/{progress.total}</span>
+            </div>
+            <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all duration-500 ${
+                  progress.status === 'error' ? 'bg-red-500' : 'bg-gradient-to-r from-blue-400 to-blue-600'
+                }`}
+                style={{ width: `${Math.max((progress.step / progress.total) * 100, 5)}%` }}
+              />
+            </div>
+            <div className="mt-3 flex items-center space-x-3">
+              <div className={`p-1.5 rounded-full flex-shrink-0 ${
+                progress.status === 'loading' ? 'bg-blue-100' :
+                progress.status === 'success' ? 'bg-green-100' :
+                'bg-red-100'
+              }`}>
+                {progress.icon}
+              </div>
+              <div className="min-w-0">
+                <div className="font-medium text-gray-800 text-sm">
+                  {progress.message}
+                  {progress.details && (
+                    <span className="text-xs text-gray-600 ml-1">({progress.details})</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </DialogContent>
@@ -432,60 +638,73 @@ const PoolsTableSkeleton = () => (
 
 // Color schema for different DRT types
 const DrtTypeColors: Record<string, string> = {
-  // Blue schema for append operations
   APPEND_DATA_POOL: "bg-blue-100 text-blue-800",
-  
-  // Yellow schema for Python computations
   EXECUTE_MEDIAN_PYTHON: "bg-yellow-100 text-yellow-800",
-  
-  // Green schema for WASM computations
   EXECUTE_MEDIAN_WASM: "bg-green-100 text-green-800",
 };
 
-// Helper function to determine DRT color based on name
 const getDrtTypeColor = (name: string): string => {
-  // Direct match in color mapping
   if (DrtTypeColors[name]) return DrtTypeColors[name];
-  
-  // Pattern matching for partial names
   if (name.includes('Append')) 
     return "bg-blue-100 text-blue-800";
-    
   if (name.includes('Python')) 
     return "bg-yellow-100 text-yellow-800";
-    
   if (name.includes('WASM')) 
     return "bg-green-100 text-green-800";
-    
-  // Default fallback
   return "bg-gray-100 text-gray-800";
 };
 
-export function PoolsTable({ poolCreated }: { poolCreated?: boolean })  {
+export function PoolsTable({ poolCreated }: { poolCreated?: boolean }) {
+  const program = useDrtProgram();
+  const wallet = useWallet();
   const [search, setSearch] = useState('');
   const [showMyPools, setShowMyPools] = useState(false);
   const [pools, setPools] = useState<Pool[]>([]);
+  const [drtInstances, setDrtInstances] = useState<DRTInstance[]>([]);
   const [loading, setLoading] = useState(true);
   const [attestationResults, setAttestationResults] = useState<Record<string, AttestationResult>>({});
   const [sortField, setSortField] = useState<"name" | "description" | null>(null);
   const [sortDirection, setSortDirection] = useState<"asc" | "desc" | null>(null);
+  const [apiError, setApiError] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetchPools();
-  }, [poolCreated]);
-
-  const fetchPools = async () => {
+  const fetchUserData = async () => {
     setLoading(true);
     try {
-      const response = await fetch('/api/pools');
+      const response = await fetch('/api/user-data');
+      if (!response.ok) {
+        if (response.status === 401) {
+          setApiError("Unauthorized access. Please log in.");
+          setPools([]);
+          setDrtInstances([]);
+          return;
+        }
+        const errorData = await response.text();
+        throw new Error(`Failed to fetch user data: ${errorData}`);
+      }
       const data = await response.json();
-      setPools(data);
+      console.log('Fetched User Data:', data);
+
+      const poolsWithOwnership = data.pools.map((pool: Pool) => ({
+        ...pool,
+        isOwned: wallet.publicKey ? pool.ownerId === wallet.publicKey.toBase58() : false,
+      }));
+
+      setPools(poolsWithOwnership);
+      setDrtInstances(data.drtInstances || []);
+      setApiError(null);
     } catch (error) {
-      console.error('Error fetching pools:', error);
+      console.error('Error fetching user data:', error);
+      setApiError("Failed to load pools. Please check your connection or log in.");
+      setPools([]);
+      setDrtInstances([]);
     } finally {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    fetchUserData();
+  }, [poolCreated]); // Removed wallet.publicKey from dependencies
 
   const handleAttestation = async (pool: Pool): Promise<AttestationResult> => {
     if (!pool.enclaveMeasurement || !pool.enclaveMeasurement.publicIp || !pool.enclaveMeasurement.actualName) {
@@ -507,7 +726,7 @@ export function PoolsTable({ poolCreated }: { poolCreated?: boolean })  {
           mrsigner: pool.enclaveMeasurement.mrsigner,
           isvprodid: pool.enclaveMeasurement.isvProdId,
           isvsvn: pool.enclaveMeasurement.isvSvn,
-          port: 443, // Matches the command in EnclaveDialog
+          port: 443,
         }),
       });
 
@@ -558,25 +777,24 @@ export function PoolsTable({ poolCreated }: { poolCreated?: boolean })  {
       const valueB = b[sortField].toLowerCase();
       return sortDirection === "asc" ? valueA.localeCompare(valueB) : valueB.localeCompare(valueA);
     });
-  
-    const handleSort = (field: "name" | "description") => {
-      if (sortField === field) {
-        if (sortDirection === "asc") setSortDirection("desc");
-        else if (sortDirection === "desc") {
-          setSortField(null);
-          setSortDirection(null);
-        } else setSortDirection("asc");
-      } else {
-        setSortField(field);
-        setSortDirection("asc");
-      }
-    };    
-    
-    const getSortIcon = (field: "name" | "description") => 
-      sortField === field 
-        ? sortDirection === "asc" ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />
-        : <ChevronsUpDown className="h-4 w-4" />;    
-    
+
+  const handleSort = (field: "name" | "description") => {
+    if (sortField === field) {
+      if (sortDirection === "asc") setSortDirection("desc");
+      else if (sortDirection === "desc") {
+        setSortField(null);
+        setSortDirection(null);
+      } else setSortDirection("asc");
+    } else {
+      setSortField(field);
+      setSortDirection("asc");
+    }
+  };    
+
+  const getSortIcon = (field: "name" | "description") => 
+    sortField === field 
+      ? sortDirection === "asc" ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />
+      : <ChevronsUpDown className="h-4 w-4" />;    
 
   if (loading) {
     return <PoolsTableSkeleton />;
@@ -584,6 +802,11 @@ export function PoolsTable({ poolCreated }: { poolCreated?: boolean })  {
 
   return (
     <Card className="w-full overflow-hidden">
+      {apiError && (
+        <Alert variant="destructive" className="m-4">
+          <AlertDescription>{apiError}</AlertDescription>
+        </Alert>
+      )}
       <div className="bg-gray-800 p-4 flex justify-between items-center gap-4">
         <Input
           placeholder="Search pools..."
@@ -607,7 +830,7 @@ export function PoolsTable({ poolCreated }: { poolCreated?: boolean })  {
       <div className="overflow-x-auto">
         <Table>
           <TableHeader className="bg-gray-800 [&_tr]:border-0">
-              <TableRow className="hover:bg-gray-800">
+            <TableRow className="hover:bg-gray-800">
               <TableHead className="w-[15%] text-white cursor-pointer" onClick={() => handleSort("name")}>
                 <div className="flex items-center gap-2">
                   Pool Name {getSortIcon("name")}
@@ -741,19 +964,19 @@ export function PoolsTable({ poolCreated }: { poolCreated?: boolean })  {
                   </div>
                 </TableCell>
                 <TableCell>
-                <Dialog>
-                  <DialogTrigger asChild>
-                    <Button
-                      variant="outline"
-                      className="w-full hover:bg-gray-100"
-                      disabled={!pool.allowedDRTs.some(({ drt }) => drt.name === "Append Data Pool")}
-                    >
-                      <Upload className="w-4 h-4 mr-2" />
-                      Join Pool
-                    </Button>
-                  </DialogTrigger>
-                  <JoinPoolDialog pool={pool} />
-                </Dialog>
+                  <Dialog>
+                    <DialogTrigger asChild>
+                      <Button
+                        variant="outline"
+                        className="w-full hover:bg-gray-100"
+                        disabled={!pool.allowedDRTs.some(({ drt }) => drt.name === "Append Data Pool") || !wallet.connected}
+                      >
+                        <Upload className="w-4 h-4 mr-2" />
+                        Join Pool
+                      </Button>
+                    </DialogTrigger>
+                    <JoinPoolDialog pool={pool} drtInstances={drtInstances} fetchUserData={fetchUserData} />
+                  </Dialog>
                 </TableCell>
               </TableRow>
             ))}

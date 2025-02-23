@@ -212,7 +212,7 @@ export async function initializeDRT(
   return vaultDRTTokenAccount;
 }
 
-/** Redeem a DRT on-chain */
+/** Redeem a DRT on-chain and receive an ownership token if "append". */
 export async function redeemDrt(
   program: anchor.Program,
   pool: PublicKey,
@@ -221,8 +221,9 @@ export async function redeemDrt(
   userDrtTokenAccount: PublicKey,
   userOwnershipTokenAccount: PublicKey,
   drtType: string,
-  wallet: any
-): Promise<string> {
+  wallet: any,
+  updateStatus?: (status: string) => void
+): Promise<{ tx: string; ownershipTokenReceived: boolean }> {
   const provider = program.provider as AnchorProvider;
   const user = wallet.publicKey;
   const connection = provider.connection;
@@ -237,7 +238,7 @@ export async function redeemDrt(
 
   const instructions: anchor.web3.TransactionInstruction[] = [];
   if (!userDrtAccountInfo) {
-    console.log("Creating user DRT token account...");
+    updateStatus && updateStatus("Creating user DRT token account...");
     const createDrtTokenAccountIx = createAssociatedTokenAccountInstruction(
       wallet.publicKey,
       userDrtTokenAccount,
@@ -246,8 +247,8 @@ export async function redeemDrt(
     );
     instructions.push(createDrtTokenAccountIx);
   }
-  if (!userOwnershipAccountInfo) {
-    console.log("Creating user ownership token account...");
+  if (!userOwnershipAccountInfo && drtType === "append") {
+    updateStatus && updateStatus("Creating user ownership token account...");
     const createOwnershipTokenAccountIx = createAssociatedTokenAccountInstruction(
       wallet.publicKey,
       userOwnershipTokenAccount,
@@ -257,6 +258,7 @@ export async function redeemDrt(
     instructions.push(createOwnershipTokenAccountIx);
   }
 
+  updateStatus && updateStatus("Redeeming DRT on-chain...");
   const tx = await program.methods
     .redeemDrt(drtType)
     .accounts({
@@ -266,14 +268,43 @@ export async function redeemDrt(
       userDrtTokenAccount,
       userOwnershipTokenAccount,
       vault: vaultPda,
-      user, // Only user signs
+      user,
       tokenProgram: TOKEN_PROGRAM_ID,
     })
     .preInstructions(instructions)
     .rpc();
 
-  console.log(`DRT redeemed successfully, tx signature: ${tx}`);
-  return tx;
+  const ownershipTokenReceived = drtType === "append";
+  updateStatus && updateStatus(`DRT redeemed successfully, tx signature: ${tx}${ownershipTokenReceived ? ", ownership token received" : ""}`);
+
+  // Save ownership token instance to Prisma if "append"
+  if (ownershipTokenReceived) {
+    try {
+      updateStatus && updateStatus("Saving ownership token instance...");
+      const response = await fetch('/api/drt-instances', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mintAddress: userOwnershipTokenAccount.toBase58(), // Use ATA as unique identifier
+          drtId: 'OWNERSHIP_TOKEN',
+          poolId: pool.toBase58(),
+          ownerId: user.toBase58(),
+          state: 'active',
+          isListed: false,
+        }),
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to save ownership token instance');
+      }
+      updateStatus && updateStatus("Ownership token instance saved successfully");
+    } catch (error) {
+      console.error("Error saving ownership token instance:", error);
+      updateStatus && updateStatus(`Error saving ownership token: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  return { tx, ownershipTokenReceived };
 }
 
 /**
