@@ -1,0 +1,116 @@
+/**
+ * Nautilus Trusted Compute
+ * Copyright (C) 2025 Nautilus
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as published
+ * by the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+:root {
+  --md-primary-fg-color: #ff642e;
+  --md-primary-fg-color--light: #ff8661;
+  --md-primary-fg-color--dark: #e54b15;
+  --md-accent-fg-color: #003450;
+  --md-accent-fg-color--transparent: #00345012;
+}
+
+/* Improve contrast for light mode */
+[data-md-color-scheme="default"] {
+  --md-accent-fg-color: #0066cc;  /* Darker blue for better contrast in light mode */
+  --md-accent-fg-color--transparent: #0066cc12;
+}
+
+/* Dark mode colors remain the same for good contrast */
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: #ff642e;
+  --md-primary-fg-color--light: #ff8661;
+  --md-primary-fg-color--dark: #e54b15;
+  --md-accent-fg-color: #0099ff;
+  --md-accent-fg-color--transparent: #0099ff12;
+}
+
+/* Enhanced link styles with better contrast */
+.md-content a:not(.md-button) {
+  color: var(--md-accent-fg-color);
+  text-decoration: underline;  /* Makes links more visible */
+  font-weight: 500;  /* Slightly bolder for better visibility */
+}
+
+.md-content a:not(.md-button):hover {
+  color: var(--md-primary-fg-color);  /* Changes color on hover */
+  text-decoration: none;  /* Removes underline on hover for clean look */
+}
+
+/* Primary button styles */
+.md-button--primary {
+  background-color: var(--md-primary-fg-color) !important;
+  color: white !important;
+}
+
+/* Header styles */
+.md-header {
+  background-color: var(--md-primary-fg-color);
+  color: white;
+}
+
+/* Navigation link styles */
+.md-nav__link:focus,
+.md-nav__link:hover {
+  color: var(--md-accent-fg-color);
+}
+
+/* Footer styles */
+.footer-wrapper {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.footer-container {
+  text-align: center !important;
+  width: 100%;
+  margin: 0 auto;
+  padding: 0;
+}
+
+.md-copyright {
+  width: 100% !important;
+  max-width: 100% !important;
+  text-align: center !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+.md-copyright__highlight {
+  text-align: center !important;
+  margin-bottom: 0.5rem;
+  width: 100%;
+}
+
+.footer-links {
+  margin-top: 0.5rem;
+  text-align: center !important;
+  width: 100%;
+}
+
+.footer-links a {
+  color: var(--md-footer-fg-color--lighter);
+  margin: 0 0.5rem;
+  text-decoration: underline;  /* Makes footer links more visible */
+}
+
+.footer-links a:hover {
+  color: var(--md-primary-fg-color--light);
+  text-decoration: none;
+}
