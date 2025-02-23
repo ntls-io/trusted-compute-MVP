@@ -15,7 +15,7 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-
+// app/pools/page.tsx
 "use client"
 
 import React, { useState, useEffect, JSX } from 'react'
@@ -440,6 +440,16 @@ function PoolCreationStep({
   const [poolNameLocked, setPoolNameLocked] = useState(false);
   const [isCheckingName, setIsCheckingName] = useState(false);
 
+  // TEE deployment state
+  const [teeDeploymentId, setTeeDeploymentId] = useState<string | null>(null);
+  const [teeStatus, setTeeStatus] = useState<string | null>(null);
+  // const [enclaveMeasurement, setEnclaveMeasurement] = useState<{
+  //   mrenclave: string;
+  //   mrsigner: string;
+  //   isvProdId: string;
+  //   isvSvn: string;
+  // } | null>(null);
+
   // Token supplies
   const [ownershipSupply, setOwnershipSupply] = useState(1000000);
   const [appendSupply, setAppendSupply] = useState(5000);
@@ -539,6 +549,126 @@ function PoolCreationStep({
     }
   };
 
+  // Function to deploy TEE
+  const deployTEE = async (vmName: string) => {
+    try {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/deployments?name_prefix=${vmName}`, {
+        method: 'POST',
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to deploy TEE (Status ${response.status})`);
+      }
+
+      const data = await response.json();
+      return data.request_id;
+    } catch (error) {
+      console.error('TEE deployment error:', error);
+      throw error;
+    }
+  };
+
+  // Function to check TEE deployment status
+  const checkTEEStatus = async (requestId: string) => {
+    try {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/deployments/${requestId}`);
+      if (!response.ok) {
+        if (response.status === 404) {
+          return { status: 'pending' };
+        }
+        throw new Error(`Failed to check TEE status (Status ${response.status})`);
+      }
+      return await response.json();
+    } catch (error) {
+      console.error('TEE status check error:', error);
+      throw error;
+    }
+  };
+
+  // useEffect(() => {
+  //   if (enclaveMeasurement) {
+  //     console.log("Updated enclaveMeasurement:", enclaveMeasurement);
+  //   }
+  // }, [enclaveMeasurement]);
+
+  // Poll TEE deployment status
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    
+    if (teeDeploymentId && teeStatus !== 'completed' && teeStatus !== 'failed') {
+      interval = setInterval(async () => {
+        try {
+          const status = await checkTEEStatus(teeDeploymentId);
+          setTeeStatus(status.status);
+          
+          // If completed, extract enclave measurements from status details
+          // if (status.status === 'completed' && status.details?.sigstruct) {
+          //   setEnclaveMeasurement({
+          //     mrenclave: status.details.sigstruct.mr_enclave,
+          //     mrsigner: status.details.sigstruct.mr_signer,
+          //     isvProdId: status.details.sigstruct.isv_prod_id,
+          //     isvSvn: status.details.sigstruct.isv_svn,
+          //   });
+          // }
+        } catch (error) {
+          console.error('Error checking TEE status:', error);
+        }
+      }, 30000); // Poll every 30 seconds
+    }
+
+    return () => {
+      if (interval) {
+        clearInterval(interval);
+      }
+    };
+  }, [teeDeploymentId, teeStatus]);
+
+  // Save enclave measurement to database
+  const saveEnclaveMeasurement = async (poolId: string, measurements: {
+    mrenclave: string;
+    mrsigner: string;
+    isvProdId: string;
+    isvSvn: string;
+  } | null) => {
+    if (!measurements) {
+      console.warn("No enclave measurement to save");
+      return;
+    }
+  
+    console.log("Attempting to save enclave measurement:", {
+      poolId,
+      ...measurements
+    });
+  
+    try {
+      const response = await fetch('/api/enclave-measurements', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          poolId,
+          ...measurements
+        }),
+      });
+  
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        throw new Error(
+          errorData?.error || 
+          `Failed to save enclave measurement (Status ${response.status})`
+        );
+      }
+  
+      const result = await response.json();
+      console.log("Successfully saved enclave measurement:", result);
+    } catch (error) {
+      console.error('Error saving enclave measurement:', error);
+      // We're not throwing here since we don't want to fail pool creation
+      // if enclave measurement save fails
+    }
+  };
+
   // Calculate total steps based on selections
   useEffect(() => {
     const stepsList = [
@@ -622,6 +752,13 @@ function PoolCreationStep({
       if (!poolNameLocked) {
         throw new Error("Please lock the pool name before creating");
       }
+
+      // Local variable of enclave measurements
+      let measurements = null;
+
+      updateProgress(1, "Deploying TEE environment", "loading");
+      const deploymentId = await deployTEE(poolName);
+      setTeeDeploymentId(deploymentId);
 
       // We track the step # in code
       let currentStep = 1;
@@ -741,6 +878,35 @@ function PoolCreationStep({
         currentStep++;
       }
 
+      let teeDeploymentComplete = false;
+      while (!teeDeploymentComplete) {
+        const status = await checkTEEStatus(deploymentId);
+        if (status.status === 'completed') {
+          teeDeploymentComplete = true;
+          if (status.details?.sigstruct) {
+            measurements = {
+              mrenclave: status.details.sigstruct.mr_enclave,
+              mrsigner: status.details.sigstruct.mr_signer,
+              isvProdId: status.details.sigstruct.isv_prod_id,
+              isvSvn: status.details.sigstruct.isv_svn,
+            };
+            console.log('TEE deployment successful, measurements:', measurements);
+
+            // Optionally set the measurements in state
+            // setEnclaveMeasurement(measurements);
+            // console.log("Enclave measurements set state:", enclaveMeasurement);
+          } else {
+            console.warn('TEE deployment completed but missing sigstruct details');
+          }
+        } else if (status.status === 'failed') {
+          throw new Error('TEE deployment failed');
+        }
+        if (!teeDeploymentComplete) {
+          console.log('Waiting for TEE deployment to complete...');
+          await new Promise(resolve => setTimeout(resolve, 30000));
+        }
+      }
+
       // 3) Off-chain save
       updateProgress(currentStep, "Saving pool data off-chain", 'loading');
       const payload = {
@@ -767,13 +933,25 @@ function PoolCreationStep({
       }
       
       const responseData = await res.json();
-      if (responseData.success) {
+      console.log("The response data is:", responseData);
+      if (responseData.success && responseData.pool.id) {
+        if (measurements) {
+          try {
+            await saveEnclaveMeasurement(responseData.pool.id, measurements);
+            console.log("Successfully saved enclave measurement for pool:", responseData.pool.id);
+          } catch (error) {
+            console.error("Failed to save enclave measurement:", error);
+          }
+        } else {
+          console.warn("No enclave measurement available to save");
+        }
         updateProgress(currentStep, "Pool successfully created and saved!", 'success',
           `Chain address: ${chainAddress}`);
         setPoolCreated(prev => !prev);
       } else {
-        throw new Error("Failed to save pool to database");
+        throw new Error("Failed to save pool to database or missing pool ID");
       }
+
     } catch (error: any) {
       console.error("Pool creation error:", error);
       updateProgress(
@@ -789,6 +967,7 @@ function PoolCreationStep({
     }
   };
 
+  // ################################################################
   if (!isActive) return null;
 
   return (
