@@ -103,7 +103,7 @@ async function main() {
       githubUrl:
         'https://github.com/ntls-io/Python-Scripts-MVP/blob/main/calculate_median.py',
       isActive: true,
-      hash: 'bcda34f2af83a2dac745a5d86f18f4c4cd6cb4e61c76e0dec005a5fc9bc124f5',
+      hash: 'c648a5eefbd58c1fe95c48a53ceb7f0957ee1c5842f043710a41b21123e170d7',
     },
   });
 

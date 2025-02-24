@@ -48,6 +48,7 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import { PublicKey } from "@solana/web3.js";
 import { getAssociatedTokenAddress } from "@solana/spl-token";
 import { redeemDrt } from "@/lib/drtHelpers";
+import PoolAccount from "@/components/PoolAccount";
 
 // Interfaces
 interface Pool {
@@ -1135,7 +1136,7 @@ export default function Home() {
                       <TableCell className="font-medium">{pool.name}</TableCell>
                       <TableCell>{pool.description}</TableCell>
                       <TableCell>
-                       <div className="flex flex-col gap-2">
+                        <div className="flex flex-col gap-2">
                           {pool.allowedDRTs.map(({ drt }) => (
                             <TooltipProvider key={drt.id}>
                               <Tooltip>
@@ -1157,26 +1158,31 @@ export default function Home() {
                       </TableCell>
                       <TableCell>
                         <div className="space-y-2">
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium whitespace-nowrap">Pool PDA:</span>
-                            <TooltipProvider>
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <a
-                                    href={`https://explorer.solana.com/address/${pool.chainAddress}?cluster=devnet`}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="flex items-center gap-1 text-blue-500 hover:text-blue-700"
-                                  >
-                                    <span>Link</span>
-                                    <ExternalLink size={16} />
-                                  </a>
-                                </TooltipTrigger>
-                                <TooltipContent>
-                                  <p className="font-mono text-xs">{pool.chainAddress}</p>
-                                </TooltipContent>
-                              </Tooltip>
-                            </TooltipProvider>
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium whitespace-nowrap">Pool PDA:</span>
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <a
+                                      href={`https://explorer.solana.com/address/${pool.chainAddress}?cluster=devnet`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="flex items-center gap-1 text-blue-500 hover:text-blue-700"
+                                    >
+                                      <span>Link</span>
+                                      <ExternalLink size={16} />
+                                    </a>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    <p className="font-mono text-xs">{pool.chainAddress}</p>
+                                  </TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                            </div>
+                            
+                            {/* Add Pool Account component here */}
+                            <PoolAccount chainAddress={pool.chainAddress} />
                           </div>
 
                           <div className="flex items-center gap-2">
@@ -1221,25 +1227,23 @@ export default function Home() {
                                 </TooltipContent>
                               </Tooltip>
                             </TooltipProvider>
-                          </div>
-
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium whitespace-nowrap">Enclave:</span>
                             <Dialog>
                               <DialogTrigger asChild>
-                                <Button
+                                <div className="ml-auto">
+                                  <Button
                                   variant="outline"
                                   size="sm"
                                   className={attestationResults[pool.id]?.success ? 'bg-green-50' : ''}
                                   disabled={!pool.enclaveMeasurement}
-                                >
+                                  >
                                   <Shield className="w-4 h-4 mr-2" />
                                   {!pool.enclaveMeasurement 
                                     ? 'No Enclave Measurements'
                                     : attestationResults[pool.id]?.success 
-                                      ? 'Verified' 
-                                      : 'Verify Enclave'}
-                                </Button>
+                                    ? 'Verified' 
+                                    : 'Verify Enclave'}
+                                  </Button>
+                                </div>
                               </DialogTrigger>
                               <EnclaveDialog 
                                 pool={pool} 

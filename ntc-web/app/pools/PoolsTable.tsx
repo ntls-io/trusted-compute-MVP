@@ -44,6 +44,7 @@ import FilePicker from '@/components/FilePicker';
 import { SchemaPreview, validateJsonSchema } from '@/components/schemaUtils';
 import { ExternalLink, Shield, Upload, Code2, Eye, RefreshCcw, Check, AlertTriangle } from 'lucide-react';
 import { ChevronDown, ChevronUp, ChevronsUpDown, Loader2 } from "lucide-react";
+import PoolAccount from "@/components/PoolAccount";
 
 interface EnclaveMeasurement {
   mrenclave: string;
@@ -870,26 +871,29 @@ export function PoolsTable({ poolCreated }: PoolsTableProps) {
                 </TableCell>
                 <TableCell>
                   <div className="space-y-2">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium whitespace-nowrap">Pool PDA:</span>
-                      <TooltipProvider>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <a
-                              href={`https://explorer.solana.com/address/${pool.chainAddress}?cluster=devnet`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="flex items-center gap-1 text-blue-500 hover:text-blue-700"
-                            >
-                              <span>Link</span>
-                              <ExternalLink size={16} />
-                            </a>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            <p className="font-mono text-xs">{pool.chainAddress}</p>
-                          </TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium whitespace-nowrap">Pool PDA:</span>
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <a
+                                href={`https://explorer.solana.com/address/${pool.chainAddress}?cluster=devnet`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center gap-1 text-blue-500 hover:text-blue-700"
+                              >
+                                <span>Link</span>
+                                <ExternalLink size={16} />
+                              </a>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p className="font-mono text-xs">{pool.chainAddress}</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      </div>
+                      <PoolAccount chainAddress={pool.chainAddress} />
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="font-medium whitespace-nowrap">Vault PDA:</span>
@@ -932,24 +936,23 @@ export function PoolsTable({ poolCreated }: PoolsTableProps) {
                           </TooltipContent>
                         </Tooltip>
                       </TooltipProvider>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium whitespace-nowrap">Enclave:</span>
                       <Dialog>
                         <DialogTrigger asChild>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className={attestationResults[pool.id]?.success ? 'bg-green-50' : ''}
-                            disabled={!pool.enclaveMeasurement}
-                          >
-                            <Shield className="w-4 h-4 mr-2" />
-                            {!pool.enclaveMeasurement 
-                              ? 'No Enclave Measurements'
-                              : attestationResults[pool.id]?.success 
-                                ? 'Verified' 
-                                : 'Verify Enclave'}
-                          </Button>
+                          <div className="ml-auto">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className={attestationResults[pool.id]?.success ? 'bg-green-50' : ''}
+                              disabled={!pool.enclaveMeasurement}
+                            >
+                              <Shield className="w-4 h-4 mr-2" />
+                              {!pool.enclaveMeasurement 
+                                ? 'No Enclave Measurements'
+                                : attestationResults[pool.id]?.success 
+                                  ? 'Verified' 
+                                  : 'Verify Enclave'}
+                            </Button>
+                          </div>
                         </DialogTrigger>
                         <EnclaveDialog 
                           pool={pool} 
