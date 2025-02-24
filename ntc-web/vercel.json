@@ -3,10 +3,5 @@
     "buildCommand": "npm run vercel-build",
     "installCommand": "npm install",
     "framework": "nextjs",
-    "outputDirectory": ".next",
-    "ignoreCommand": "echo 'Skipping lint check'",
-    "env": {
-      "NEXT_TELEMETRY_DISABLED": "1",
-      "SKIP_LINTING": "true"
-    }
+    "outputDirectory": ".next"
 }

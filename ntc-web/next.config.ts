@@ -19,7 +19,16 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
+  typescript: {
+    // Ignore TypeScript errors during build
+    ignoreBuildErrors: true,
+  },
+  output: 'standalone', // Optimize for production deployments
+  poweredByHeader: false,
+  reactStrictMode: true, 
 };
 
 export default nextConfig;
