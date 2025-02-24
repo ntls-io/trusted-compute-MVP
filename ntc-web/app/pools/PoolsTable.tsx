@@ -29,7 +29,6 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Input } from "@/components/ui/input";
-import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -104,6 +103,10 @@ interface Progress {
   icon: JSX.Element;
   status: 'loading' | 'success' | 'error';
   details?: string;
+}
+
+interface PoolsTableProps {
+  poolCreated?: boolean;
 }
 
 const EnclaveDialog = ({ pool, onAttest }: { pool: Pool; onAttest: () => Promise<AttestationResult> }) => {
@@ -606,10 +609,6 @@ const PoolsTableSkeleton = () => (
   <Card className="w-full overflow-hidden">
     <div className="bg-gray-800 p-4 flex justify-between items-center gap-4">
       <div className="h-10 bg-gray-200 w-full max-w-md rounded animate-pulse"></div>
-      <div className="flex items-center space-x-2">
-        <div className="h-6 w-12 bg-gray-200 rounded animate-pulse"></div>
-        <div className="h-6 w-32 bg-gray-200 rounded animate-pulse"></div>
-      </div>
     </div>
 
     <Table>
@@ -655,11 +654,10 @@ const getDrtTypeColor = (name: string): string => {
   return "bg-gray-100 text-gray-800";
 };
 
-export function PoolsTable({ poolCreated }: { poolCreated?: boolean }) {
+export function PoolsTable({ poolCreated }: PoolsTableProps) {
   const program = useDrtProgram();
   const wallet = useWallet();
   const [search, setSearch] = useState('');
-  const [showMyPools, setShowMyPools] = useState(false);
   const [pools, setPools] = useState<Pool[]>([]);
   const [drtInstances, setDrtInstances] = useState<DRTInstance[]>([]);
   const [loading, setLoading] = useState(true);
@@ -671,31 +669,40 @@ export function PoolsTable({ poolCreated }: { poolCreated?: boolean }) {
   const fetchUserData = async () => {
     setLoading(true);
     try {
-      const response = await fetch('/api/user-data');
+      // Always use the all-pools endpoint
+      const apiEndpoint = '/api/all-pools';
+      
+      const response = await fetch(apiEndpoint);
       if (!response.ok) {
-        if (response.status === 401) {
-          setApiError("Unauthorized access. Please log in.");
-          setPools([]);
-          setDrtInstances([]);
-          return;
-        }
         const errorData = await response.text();
-        throw new Error(`Failed to fetch user data: ${errorData}`);
+        throw new Error(`Failed to fetch data: ${errorData}`);
       }
       const data = await response.json();
-      console.log('Fetched User Data:', data);
+      console.log('Fetched All Pools Data:', data);
 
-      const poolsWithOwnership = data.pools.map((pool: Pool) => ({
-        ...pool,
-        isOwned: wallet.publicKey ? pool.ownerId === wallet.publicKey.toBase58() : false,
-      }));
-
-      setPools(poolsWithOwnership);
-      setDrtInstances(data.drtInstances || []);
+      // Get the pools data
+      setPools(data.pools);
+      
+      // Get user-specific DRT instances if user is logged in
+      if (wallet.connected && wallet.publicKey) {
+        try {
+          const drtResponse = await fetch('/api/user-data');
+          if (drtResponse.ok) {
+            const userData = await drtResponse.json();
+            setDrtInstances(userData.drtInstances || []);
+          }
+        } catch (error) {
+          console.error('Error fetching user DRT instances:', error);
+          setDrtInstances([]);
+        }
+      } else {
+        setDrtInstances([]);
+      }
+      
       setApiError(null);
     } catch (error) {
-      console.error('Error fetching user data:', error);
-      setApiError("Failed to load pools. Please check your connection or log in.");
+      console.error('Error fetching pools data:', error);
+      setApiError("Failed to load pools. Please check your connection.");
       setPools([]);
       setDrtInstances([]);
     } finally {
@@ -705,7 +712,7 @@ export function PoolsTable({ poolCreated }: { poolCreated?: boolean }) {
 
   useEffect(() => {
     fetchUserData();
-  }, [poolCreated]); // Removed wallet.publicKey from dependencies
+  }, [poolCreated, wallet.connected, wallet.publicKey]); // Refetch when wallet connection changes
 
   const handleAttestation = async (pool: Pool): Promise<AttestationResult> => {
     if (!pool.enclaveMeasurement || !pool.enclaveMeasurement.publicIp || !pool.enclaveMeasurement.actualName) {
@@ -767,7 +774,6 @@ export function PoolsTable({ poolCreated }: { poolCreated?: boolean }) {
   };
 
   const filteredPools = [...pools]
-    .filter((pool) => !showMyPools || pool.isOwned)
     .filter((pool) =>
       pool.name.toLowerCase().includes(search.toLowerCase()) ||
       pool.description.toLowerCase().includes(search.toLowerCase())
@@ -815,17 +821,6 @@ export function PoolsTable({ poolCreated }: { poolCreated?: boolean }) {
           onChange={(e) => setSearch(e.target.value)}
           className="max-w-md bg-white"
         />
-        <div className="flex items-center space-x-2">
-          <Switch
-            id="show-my-pools"
-            checked={showMyPools}
-            onCheckedChange={setShowMyPools}
-            className="data-[state=checked]:bg-green-600"
-          />
-          <Label htmlFor="show-my-pools" className="cursor-pointer text-white">
-            Show my pools only
-          </Label>
-        </div>
       </div>
 
       <div className="overflow-x-auto">
@@ -843,7 +838,7 @@ export function PoolsTable({ poolCreated }: { poolCreated?: boolean }) {
                 </div>
               </TableHead>
               <TableHead className="w-[20%] text-white">Digital Rights Tokens</TableHead>
-                <TableHead className="w-[35%] text-white text-center">Sources</TableHead>
+              <TableHead className="w-[35%] text-white text-center">Sources</TableHead>
               <TableHead className="w-[10%] text-white">Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -970,7 +965,7 @@ export function PoolsTable({ poolCreated }: { poolCreated?: boolean }) {
                       <Button
                         variant="outline"
                         className="w-full hover:bg-gray-100"
-                        disabled={!pool.allowedDRTs.some(({ drt }) => drt.name === "Append Data Pool") || !wallet.connected}
+                        disabled={!pool.allowedDRTs.some(({ drt }) => drt.name.toLowerCase().includes('append')) || !wallet.connected}
                       >
                         <Upload className="w-4 h-4 mr-2" />
                         Join Pool
