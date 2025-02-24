@@ -1411,8 +1411,9 @@ export default function Home() {
                     })
                     .map((item) => {
                       const isRedeemed = redeemedStates[item.id] || item.state === 'completed';
-                      const buttonText = isRedeemed ? 'Redeemed' : 'Redeem DRT';
-                      const buttonClass = isRedeemed 
+                      const isAppendDataPoolCompleted = item.drt.name.toLowerCase().includes('append') && item.state === 'completed';
+                      const buttonText = isRedeemed || isAppendDataPoolCompleted ? 'Redeemed' : 'Redeem DRT';
+                      const buttonClass = isRedeemed || isAppendDataPoolCompleted 
                         ? 'bg-green-600 text-white cursor-not-allowed' 
                         : 'bg-blue-600 text-white hover:bg-blue-700';
 
@@ -1448,67 +1449,67 @@ export default function Home() {
                           </TableCell>
                           <TableCell className="text-center">{item.price ? `${item.price.toFixed(2)} SOL` : '-'}</TableCell>
                           <TableCell className="text-center">
-                          {item.drt.name.toLowerCase() !== "ownership token" && (
-                            <div className="flex justify-around gap-2">
-                            <Button 
-                              variant="outline" 
-                              size="sm"
-                              disabled={item.isListed || item.state === 'pending' || item.state === 'completed'}
-                            >
-                              Sell
-                            </Button>
-                            {item.drt.name.toLowerCase().includes('python') ? (
-                              <Dialog>
-                              <DialogTrigger asChild>
+                            {item.drt.name.toLowerCase() !== "ownership token" && (
+                              <div className="flex justify-around gap-2">
                                 <Button 
-                                size="sm" 
-                                className={`${buttonClass} w-32`}
-                                disabled={isRedeemed || !item.pool.enclaveMeasurement?.publicIp || item.state !== 'active' || !wallet.connected}
+                                  variant="outline" 
+                                  size="sm"
+                                  disabled={item.isListed || item.state === 'pending' || item.state === 'completed'}
                                 >
-                                <Shield className="w-4 h-4 mr-1 flex-shrink-0" />
-                                <span className="flex-grow">{buttonText}</span>
+                                  Sell
                                 </Button>
-                              </DialogTrigger>
-                              <PythonExecutionDialog 
-                                drtInstance={item}
-                                onRedeem={() => handlePythonRedeem(item)}
-                                onStateUpdate={(newState) => handleStateUpdate(item.id, newState)}
-                                program={program}
-                                wallet={wallet}
-                              />
-                              </Dialog>
-                            ) : item.drt.name.toLowerCase().includes('wasm') ? (
-                              <Dialog>
-                              <DialogTrigger asChild>
-                                <Button 
-                                size="sm" 
-                                className={`${buttonClass} w-32`}
-                                disabled={isRedeemed || !item.pool.enclaveMeasurement?.publicIp || item.state !== 'active' || !wallet.connected}
-                                >
-                                <Shield className="w-4 h-4 mr-1 flex-shrink-0" />
-                                <span className="flex-grow">{buttonText}</span>
-                                </Button>
-                              </DialogTrigger>
-                              <WasmExecutionDialog 
-                                drtInstance={item}
-                                onRedeem={() => handleWasmRedeem(item)}
-                                onStateUpdate={(newState) => handleStateUpdate(item.id, newState)}
-                                program={program}
-                                wallet={wallet}
-                              />
-                              </Dialog>
-                            ) : (
-                              <Button 
-                              size="sm"
-                              className="bg-gray-200 text-black cursor-not-allowed w-32"
-                              disabled 
-                              >
-                              <Shield className="w-4 h-4 mr-1 flex-shrink-0" />
-                              <span className="flex-grow">Pools Page</span>
-                              </Button>
+                                {item.drt.name.toLowerCase().includes('python') ? (
+                                  <Dialog>
+                                    <DialogTrigger asChild>
+                                      <Button 
+                                        size="sm" 
+                                        className={`${buttonClass} w-32 flex items-center justify-center gap-1`}
+                                        disabled={isRedeemed || !item.pool.enclaveMeasurement?.publicIp || item.state !== 'active' || !wallet.connected}
+                                      >
+                                        <Shield className="w-4 h-4 flex-shrink-0" />
+                                        <span className="flex-grow text-center">{buttonText}</span>
+                                      </Button>
+                                    </DialogTrigger>
+                                    <PythonExecutionDialog 
+                                      drtInstance={item}
+                                      onRedeem={() => handlePythonRedeem(item)}
+                                      onStateUpdate={(newState) => handleStateUpdate(item.id, newState)}
+                                      program={program}
+                                      wallet={wallet}
+                                    />
+                                  </Dialog>
+                                ) : item.drt.name.toLowerCase().includes('wasm') ? (
+                                  <Dialog>
+                                    <DialogTrigger asChild>
+                                      <Button 
+                                        size="sm" 
+                                        className={`${buttonClass} w-32 flex items-center justify-center gap-1`}
+                                        disabled={isRedeemed || !item.pool.enclaveMeasurement?.publicIp || item.state !== 'active' || !wallet.connected}
+                                      >
+                                        <Shield className="w-4 h-4 flex-shrink-0" />
+                                        <span className="flex-grow text-center">{buttonText}</span>
+                                      </Button>
+                                    </DialogTrigger>
+                                    <WasmExecutionDialog 
+                                      drtInstance={item}
+                                      onRedeem={() => handleWasmRedeem(item)}
+                                      onStateUpdate={(newState) => handleStateUpdate(item.id, newState)}
+                                      program={program}
+                                      wallet={wallet}
+                                    />
+                                  </Dialog>
+                                ) : (
+                                  <Button 
+                                    size="sm"
+                                    className={`${isAppendDataPoolCompleted ? 'bg-green-600 text-white cursor-not-allowed' : 'bg-gray-200 text-black cursor-not-allowed'} w-32 flex items-center justify-center gap-1`}
+                                    disabled 
+                                  >
+                                    <Shield className="w-4 h-4 flex-shrink-0" />
+                                    <span className="flex-grow text-center">{isAppendDataPoolCompleted ? 'Redeemed' : 'Pools Page'}</span>
+                                  </Button>
+                                )}
+                              </div>
                             )}
-                            </div>
-                          )}
                           </TableCell>
                         </TableRow>
                       );
