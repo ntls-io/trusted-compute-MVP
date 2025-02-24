@@ -312,7 +312,8 @@ if (!userDrtAccountInfo) {
     );
 }
 
-if (!userOwnershipAccountInfo && drtType === "append") {
+// Ensure user has ownership account
+if (!userOwnershipAccountInfo) {
     updateStatus?.("Creating user ownership token account...");
     instructions.push(
         createAssociatedTokenAccountInstruction(

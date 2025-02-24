@@ -25,7 +25,7 @@ import Image from 'next/image';
 export default function SignInPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const redirectUrl = searchParams.get('redirect_url') || '/dashboard';
+  const redirectUrl = searchParams.get('redirect_url') || '/';
   const currentYear = new Date().getFullYear();
 
   return (
