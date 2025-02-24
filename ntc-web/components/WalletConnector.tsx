@@ -24,65 +24,61 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
 import { useUser } from "@clerk/nextjs";
 import { Copy } from "lucide-react";
-import WalletBalance from "@/components/WalletBalance"; 
-import { Connection, clusterApiUrl } from "@solana/web3.js";
+import WalletBalance from "@/components/WalletBalance";
+import { useSolanaConnection } from "@/lib/solanaConnection";
 
 const WalletConnector = () => {
   const { publicKey, connected, disconnect } = useWallet();
   const { user } = useUser();
+  const connection = useSolanaConnection();
   const [isLinked, setIsLinked] = useState<boolean>(false);
   const [loadingLinkStatus, setLoadingLinkStatus] = useState<boolean>(true);
 
-  const connection = new Connection(clusterApiUrl("devnet"));
-
-  // Fetch the current wallet link status from your API
   useEffect(() => {
     async function fetchWalletStatus() {
-      const res = await fetch("/api/wallet");
-      if (res.ok) {
-        const data = await res.json();
-        setIsLinked(!!data.walletAddress);
+      try {
+        const res = await fetch("/api/wallet");
+        if (res.ok) {
+          const data = await res.json();
+          setIsLinked(!!data.walletAddress);
+        }
+      } catch (error) {
+        console.error("Error fetching wallet status:", error);
+      } finally {
+        setLoadingLinkStatus(false);
       }
-      setLoadingLinkStatus(false);
     }
+
     if (user) {
       fetchWalletStatus();
     }
   }, [user]);
 
-  // Add listener for transactions affecting the wallet
-  useEffect(() => {
-    if (!publicKey || !connected) return;
-
-    const listenerId = connection.onAccountChange(publicKey, () => {
-      console.log("🔄 Wallet transaction detected! Refreshing balance...");
-      window.dispatchEvent(new Event("walletTransaction")); // Dispatch event for balance update
-    });
-
-    return () => {
-      connection.removeAccountChangeListener(listenerId);
-    };
-  }, [publicKey, connected]);
-
-  // Call API to link wallet
   const handleLinkWallet = async () => {
     if (!publicKey) return;
-    const res = await fetch("/api/wallet", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ walletAddress: publicKey.toBase58() }),
-    });
-    if (res.ok) {
-      setIsLinked(true);
+    try {
+      const res = await fetch("/api/wallet", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ walletAddress: publicKey.toBase58() }),
+      });
+      if (res.ok) {
+        setIsLinked(true);
+      }
+    } catch (error) {
+      console.error("Error linking wallet:", error);
     }
   };
 
-  // Unlink wallet (and optionally disconnect)
   const handleUnlinkWallet = async () => {
-    const res = await fetch("/api/wallet", { method: "DELETE" });
-    if (res.ok) {
-      setIsLinked(false);
-      disconnect();
+    try {
+      const res = await fetch("/api/wallet", { method: "DELETE" });
+      if (res.ok) {
+        setIsLinked(false);
+        disconnect();
+      }
+    } catch (error) {
+      console.error("Error unlinking wallet:", error);
     }
   };
 
@@ -96,13 +92,11 @@ const WalletConnector = () => {
     <div className="flex items-center space-x-4">
       {connected && publicKey ? (
         <>
-          {/* Display SOL balance using WalletBalance component */}
           <WalletBalance />
-
-          {/* Display wallet address */}
+          
           <div className="flex items-center space-x-2">
             <span className="text-sm font-mono">
-              {publicKey.toBase58().slice(0, 8) + "..." + publicKey.toBase58().slice(-8)}
+              {publicKey.toBase58().slice(0, 8)}...{publicKey.toBase58().slice(-8)}
             </span>
             <button 
               onClick={handleCopyAddress}
@@ -113,16 +107,22 @@ const WalletConnector = () => {
             </button>
           </div>
 
-          {/* Link/Unlink wallet */}
-          {!loadingLinkStatus && !isLinked && (
-            <button onClick={handleLinkWallet} className="px-2 py-1 bg-green-500 text-white rounded">
-              Link Wallet
-            </button>
-          )}
-          {!loadingLinkStatus && isLinked && (
-            <button onClick={handleUnlinkWallet} className="px-2 py-1 bg-red-500 text-white rounded">
-              Unlink Wallet
-            </button>
+          {!loadingLinkStatus && (
+            isLinked ? (
+              <button 
+                onClick={handleUnlinkWallet} 
+                className="px-2 py-1 bg-red-500 text-white rounded hover:bg-red-600 transition-colors"
+              >
+                Unlink Wallet
+              </button>
+            ) : (
+              <button 
+                onClick={handleLinkWallet} 
+                className="px-2 py-1 bg-green-500 text-white rounded hover:bg-green-600 transition-colors"
+              >
+                Link Wallet
+              </button>
+            )
           )}
         </>
       ) : (

@@ -16,51 +16,64 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// components/WalletBalance.tsx
 "use client";
 
 import { useEffect, useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
-import { Connection, clusterApiUrl, LAMPORTS_PER_SOL } from "@solana/web3.js";
+import { LAMPORTS_PER_SOL } from "@solana/web3.js";
+import { useSolanaConnection } from "@/lib/solanaConnection";
 
 const WalletBalance = () => {
   const { publicKey, connected } = useWallet();
+  const connection = useSolanaConnection();
   const [balance, setBalance] = useState<number | null>(null);
-  const connection = new Connection(clusterApiUrl("devnet"));
+  const [isLoading, setIsLoading] = useState(false);
 
-  // Function to fetch wallet balance
   const fetchBalance = async () => {
-    if (!publicKey) return;
+    if (!publicKey || !connection) return;
+    
+    setIsLoading(true);
     try {
       const lamports = await connection.getBalance(publicKey);
       setBalance(lamports / LAMPORTS_PER_SOL);
     } catch (error) {
       console.error("Error fetching balance:", error);
+      setBalance(null);
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  // Fetch balance when the component mounts or wallet connects
   useEffect(() => {
     if (connected && publicKey) {
       fetchBalance();
+
+      // Subscribe to account changes
+      const subscriptionId = connection.onAccountChange(
+        publicKey,
+        () => {
+          console.log("Balance update detected");
+          fetchBalance();
+        },
+        "confirmed"
+      );
+
+      return () => {
+        connection.removeAccountChangeListener(subscriptionId);
+      };
     }
-  }, [connected, publicKey]);
-
-  // Listen for wallet transactions and refresh balance
-  useEffect(() => {
-    const handleWalletTransaction = () => {
-      console.log("Wallet transaction detected, refreshing balance...");
-      fetchBalance();
-    };
-
-    window.addEventListener("walletTransaction", handleWalletTransaction);
-    return () => {
-      window.removeEventListener("walletTransaction", handleWalletTransaction);
-    };
-  }, []);
+  }, [connected, publicKey, connection]);
 
   return (
     <span className="text-sm font-bold">
-      {balance !== null ? `${balance.toFixed(2)} SOL` : "Loading..."}
+      {isLoading ? (
+        "Loading..."
+      ) : balance !== null ? (
+        `${balance.toFixed(2)} SOL`
+      ) : (
+        "Error loading balance"
+      )}
     </span>
   );
 };
