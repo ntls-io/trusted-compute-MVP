@@ -70,7 +70,7 @@ const WalletBalance = () => {
       {isLoading ? (
         "Loading..."
       ) : balance !== null ? (
-        `${balance.toFixed(2)} SOL`
+        `${balance.toFixed(6)} SOL`
       ) : (
         "Error loading balance"
       )}

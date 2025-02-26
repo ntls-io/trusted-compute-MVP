@@ -25,7 +25,7 @@ use anchor_spl::{
 };
 use mpl_token_metadata::ID as METADATA_PROGRAM_ID;
 
-declare_id!("HQKbqH1RnoChiVkdbgoJZJ8T6P2jmLHTqvdjaE7q8NDq");
+declare_id!("6TzyLCNRNgxmEGAxj61uAtPbQt3SQWFMhMBpwMfvdmkQ");
 
 /// The vault account holds tokens and is a PDA.
 #[account]
