@@ -65,6 +65,7 @@ pub struct DrtConfig {
     pub drt_type: String,
     pub mint: Pubkey,
     pub supply: u64,
+    pub cost: u64,
     pub github_url: Option<String>,
     pub code_hash: Option<String>,
     pub is_minted: bool,
@@ -92,6 +93,8 @@ pub enum ErrorCode {
     MaxDrtsReached,
     #[msg("Invalid DRT supply")]
     InvalidSupply,
+    #[msg("Invalid DRT cost")]
+    InvalidCost,
     #[msg("Minting already performed")]
     MintingAlreadyPerformed,
     #[msg("Metadata already set")]
@@ -183,6 +186,7 @@ pub mod drt_manager {
             // Validate DRT config
             require!(!config.drt_type.is_empty(), ErrorCode::InvalidDRTType);
             require!(config.supply > 0, ErrorCode::InvalidSupply);
+            require!(config.cost > 0, ErrorCode::InvalidCost);
 
             // Create DRT config - mint address will be derived from pool and drt_type
             let (drt_mint_address, _) = Pubkey::find_program_address(
@@ -198,6 +202,7 @@ pub mod drt_manager {
                 drt_type: config.drt_type.clone(),
                 mint: drt_mint_address,
                 supply: config.supply,
+                cost: config.cost,
                 github_url: config.github_url.clone(),
                 code_hash: config.code_hash.clone(),
                 is_minted: false, // Initialize as not minted
@@ -209,9 +214,10 @@ pub mod drt_manager {
 
             // Log the DRT creation (tokens will be minted in a separate step)
             msg!(
-                "Added DRT: {} with supply {} to pool",
+                "Added DRT: {} with supply {} and cost {} to pool",
                 config.drt_type.clone(),
-                config.supply.clone()
+                config.supply.clone(),
+                config.cost.clone()
             );
         }
 
@@ -326,7 +332,7 @@ pub mod drt_manager {
         Ok(())
     }
 
-    pub fn buy_drt(ctx: Context<BuyDrt>, drt_type: String, fee: u64) -> Result<()> {
+    pub fn buy_drt(ctx: Context<BuyDrt>, drt_type: String) -> Result<()> {
         // Extract pool data first to avoid borrow conflicts
         let pool_owner = ctx.accounts.pool.owner;
         let pool_name = ctx.accounts.pool.name.clone();
@@ -349,6 +355,9 @@ pub mod drt_manager {
 
         // Ensure the DRT has been minted
         require!(drt_config.is_minted, ErrorCode::InsufficientTokens);
+
+        // Get the cost of this DRT
+        let fee = drt_config.cost;
 
         // Transfer SOL fee from buyer to fee vault
         anchor_lang::system_program::transfer(
@@ -384,7 +393,7 @@ pub mod drt_manager {
             1, // Always mint exactly 1 token
         )?;
 
-        msg!("Bought 1 {} DRT token", drt_type);
+        msg!("Bought 1 {} DRT token for {} lamports", drt_type, fee);
         Ok(())
     }
 
@@ -547,6 +556,7 @@ pub mod drt_manager {
 pub struct DrtInitConfig {
     pub drt_type: String,
     pub supply: u64,
+    pub cost: u64,
     pub github_url: Option<String>,
     pub code_hash: Option<String>,
 }
@@ -573,6 +583,7 @@ pub struct CreatePoolWithDrts<'info> {
                    4 + c.drt_type.len() + // drt_type
                    32 + // mint
                    8 + // supply
+                   8 + // cost
                    1 + (c.github_url.is_some() as usize) * (4 + c.github_url.as_ref().map_or(0, |s| s.len())) + // Optional github_url
                    1 + (c.code_hash.is_some() as usize) * (4 + c.code_hash.as_ref().map_or(0, |s| s.len())) + // Optional code_hash
                    1 // is_minted
@@ -669,7 +680,7 @@ pub struct MintDrtSupply<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(drt_type: String, fee: u64)]
+#[instruction(drt_type: String)]
 pub struct BuyDrt<'info> {
     #[account(mut)]
     pub pool: Account<'info, Pool>,

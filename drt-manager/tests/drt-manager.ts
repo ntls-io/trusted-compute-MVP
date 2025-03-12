@@ -40,7 +40,12 @@ describe("drt_manager", () => {
 
   // Test data
   const POOL_NAME = `New_Pool_${id.slice(0, 10)}`;
-  const DRT_FEE = new BN(10000000); // 0.01 SOL
+  
+  // DRT cost - 0.1 SOL in lamports
+  const DRT_COST = new BN(100000000); // 0.1 SOL
+  
+  // Remove the old fixed fee since it's now part of the DRT config
+  // const DRT_FEE = new BN(10000000); // 0.01 SOL - This is replaced by DRT_COST
 
   // Different DRT supplies
   const APPEND_SUPPLY = new BN(5000);
@@ -161,12 +166,12 @@ describe("drt_manager", () => {
     // Create a user keypair for testing
     userKeypair = web3.Keypair.generate();
 
-    // Fund the test user
+    // Fund the test user - need enough for buying multiple DRTs at 0.1 SOL each
     const fundTx = new web3.Transaction().add(
       web3.SystemProgram.transfer({
         fromPubkey: wallet.publicKey,
         toPubkey: userKeypair.publicKey,
-        lamports: 100000000, // 0.1 SOL
+        lamports: 300000000, // 0.3 SOL - enough for multiple DRT purchases
       })
     );
     await provider.sendAndConfirm(fundTx);
@@ -186,18 +191,21 @@ describe("drt_manager", () => {
         {
           drtType: APPEND_DRT_TYPE,
           supply: APPEND_SUPPLY,
+          cost: DRT_COST,
           githubUrl: APPEND_URL,
           codeHash: null,
         },
         {
           drtType: WASM_DRT_TYPE,
           supply: WASM_COMPUTE_SUPPLY,
+          cost: DRT_COST,
           githubUrl: WASM_URL,
           codeHash: WASM_HASH,
         },
         {
           drtType: PYTHON_DRT_TYPE,
           supply: PYTHON_COMPUTE_SUPPLY,
+          cost: DRT_COST,
           githubUrl: PYTHON_URL,
           codeHash: PYTHON_HASH,
         },
@@ -250,6 +258,7 @@ describe("drt_manager", () => {
             drt.mint.equals(expectedPda)
           );
           console.log(`- Supply:`, drt.supply.toString());
+          console.log(`- Cost:`, drt.cost.toString());
           console.log(`- GitHub URL:`, drt.githubUrl === config.githubUrl);
           console.log(`- Is Minted:`, drt.isMinted); // Should be false initially
           if (config.codeHash) {
@@ -500,7 +509,7 @@ describe("drt_manager", () => {
 
       // Buy the DRT
       const tx = await program.methods
-        .buyDrt(APPEND_DRT_TYPE, DRT_FEE)
+        .buyDrt(APPEND_DRT_TYPE)
         .accounts({
           pool: poolPda,
           drtMint: appendMintPda,
@@ -604,7 +613,7 @@ describe("drt_manager", () => {
 
       // Buy the DRT
       const tx = await program.methods
-        .buyDrt(WASM_DRT_TYPE, DRT_FEE)
+        .buyDrt(WASM_DRT_TYPE)
         .accounts({
           pool: poolPda,
           drtMint: wasmComputeMintPda,
