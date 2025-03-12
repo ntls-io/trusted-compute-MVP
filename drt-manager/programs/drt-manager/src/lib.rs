@@ -44,6 +44,7 @@ pub struct PoolCreated {
     pub ownership_mint: Pubkey,
     pub name: String,
     pub drt_types: Vec<String>,
+    pub ownership_supply: u64,
 }
 
 // --------------------------------
@@ -136,6 +137,7 @@ pub mod drt_manager {
         ctx: Context<CreatePoolWithDrts>,
         name: String,
         drt_configs: Vec<DrtInitConfig>,
+        ownership_supply: u64,
     ) -> Result<()> {
         // Validate inputs
         require!(!name.is_empty(), ErrorCode::InvalidPoolName);
@@ -171,7 +173,7 @@ pub mod drt_manager {
                 },
                 &[pool_seeds],
             ),
-            1000000, // Initial supply of ownership tokens
+            ownership_supply, // Initial supply of ownership tokens
         )?;
 
         // Process each DRT config
@@ -220,6 +222,7 @@ pub mod drt_manager {
             ownership_mint: ctx.accounts.ownership_mint.key(),
             name,
             drt_types,
+            ownership_supply,
         });
 
         Ok(())

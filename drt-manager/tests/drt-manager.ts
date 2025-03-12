@@ -19,12 +19,7 @@
 import * as anchor from "@coral-xyz/anchor";
 import { Program, web3, BN, AnchorProvider } from "@coral-xyz/anchor";
 import { DrtManager } from "../target/types/drt_manager";
-import {
-  TOKEN_PROGRAM_ID,
-  getAssociatedTokenAddress,
-  ASSOCIATED_TOKEN_PROGRAM_ID,
-  getOrCreateAssociatedTokenAccount,
-} from "@solana/spl-token";
+import { getAssociatedTokenAddress, getOrCreateAssociatedTokenAccount} from "@solana/spl-token";
 import { PublicKey } from "@solana/web3.js";
 
 // Increase the Mocha timeout to allow Solana transactions to complete
@@ -220,9 +215,11 @@ describe("drt_manager", () => {
       );
       console.log("Calculated ownership token account:", ownershipTokenAccount.toString());
 
+      const OWNERSHIP_SUPPLY = new BN(1000000);
+
       // Create the pool with all DRTs in one transaction
       const tx = await program.methods
-        .createPoolWithDrts(POOL_NAME, drtConfigs)
+        .createPoolWithDrts(POOL_NAME, drtConfigs, OWNERSHIP_SUPPLY)
         .accounts({
           owner: wallet.publicKey,
         })
