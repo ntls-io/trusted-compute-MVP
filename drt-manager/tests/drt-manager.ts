@@ -21,6 +21,8 @@ import { Program, web3, BN, AnchorProvider } from "@coral-xyz/anchor";
 import { DrtManager } from "../target/types/drt_manager";
 import { getAssociatedTokenAddress, getOrCreateAssociatedTokenAccount} from "@solana/spl-token";
 import { PublicKey } from "@solana/web3.js";
+import ShortUniqueId from 'short-uuid';
+
 
 // Increase the Mocha timeout to allow Solana transactions to complete
 const MOCHA_TIMEOUT = 120000; // 2 minutes
@@ -32,19 +34,12 @@ describe("drt_manager", () => {
   const program = anchor.workspace.DrtManager as Program<DrtManager>;
   const wallet = provider.wallet;
 
-  // Generate a unique pool name with timestamp and random suffix
-  const generateUniqueId = () => {
-    // Convert current timestamp to base36 for compactness
-    const timestamp = Date.now().toString(36);
-
-    // Generate a random component (8 characters of base36)
-    const randomPart = Math.random().toString(36).substring(2, 10);
-
-    return `${timestamp}_${randomPart}`;
-  };
+  // Initialize short UUID generator
+  const translator = ShortUniqueId();
+  const id = translator.new(); // Generates a new unique ID
 
   // Test data
-  const POOL_NAME = `New_Pool_${generateUniqueId()}`;
+  const POOL_NAME = `New_Pool_${id.slice(0, 10)}`;
   const DRT_FEE = new BN(10000000); // 0.01 SOL
 
   // Different DRT supplies

@@ -13,14 +13,14 @@
 //
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
-
+#![allow(unexpected_cfgs)]
 use anchor_lang::prelude::*;
 use anchor_spl::{
     associated_token::AssociatedToken,
     token::{self, Burn, Mint, MintTo, Token, TokenAccount},
 };
 
-declare_id!("6Y2vLKUapZT72uA22j7zDekTW1FVs85CEvvS4SiFu9Ai");
+declare_id!("Fnd7JPGYo6Run9j2ycah4GyT59TFB9rS81TFTkfUtGUD");
 
 // --------------------------------
 // Event Definitions
