@@ -514,6 +514,7 @@ describe("drt_manager", () => {
           pool: poolPda,
           drtMint: appendMintPda,
           buyer: userKeypair.publicKey,
+          vaultDrtTokenAccount: appendTokenAccount,
         })
         .signers([userKeypair])
         .rpc();
@@ -618,6 +619,7 @@ describe("drt_manager", () => {
           pool: poolPda,
           drtMint: wasmComputeMintPda,
           buyer: userKeypair.publicKey,
+          vaultDrtTokenAccount: wasmTokenAccount,
         })
         .signers([userKeypair])
         .rpc();

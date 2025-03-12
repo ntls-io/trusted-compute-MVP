@@ -99,6 +99,8 @@ pub enum ErrorCode {
     MintingAlreadyPerformed,
     #[msg("Metadata already set")]
     MetadataAlreadySet,
+    #[msg("Insufficient tokens in vault")]
+    InsufficientVaultTokens,
 }
 
 // --------------------------------
@@ -333,12 +335,8 @@ pub mod drt_manager {
     }
 
     pub fn buy_drt(ctx: Context<BuyDrt>, drt_type: String) -> Result<()> {
-        // Extract pool data first to avoid borrow conflicts
-        let pool_owner = ctx.accounts.pool.owner;
-        let pool_name = ctx.accounts.pool.name.clone();
-        let pool_bump = ctx.accounts.pool.bump;
-
-        // Find the requested DRT
+    
+        // Find and validate the requested DRT
         let drt_config = ctx
             .accounts
             .pool
@@ -355,10 +353,23 @@ pub mod drt_manager {
 
         // Ensure the DRT has been minted
         require!(drt_config.is_minted, ErrorCode::InsufficientTokens);
-
-        // Get the cost of this DRT
+        
+        // Check vault token balance
+        let vault_token_balance = ctx.accounts.vault_drt_token_account.amount;
+        require!(vault_token_balance >= 1, ErrorCode::InsufficientVaultTokens);
+    
+        // Validate the fee
         let fee = drt_config.cost;
-
+        
+        // Get necessary data for seeds and signing
+        let pool_owner = ctx.accounts.pool.owner;
+        let pool_name = ctx.accounts.pool.name.clone();
+        let pool_bump = ctx.accounts.pool.bump;
+        let pool_info = ctx.accounts.pool.to_account_info();
+        let owner_ref = pool_owner.as_ref();
+        let name_bytes = pool_name.as_bytes();
+        let pool_seeds = &[b"pool", owner_ref, name_bytes, &[pool_bump]];
+        
         // Transfer SOL fee from buyer to fee vault
         anchor_lang::system_program::transfer(
             CpiContext::new(
@@ -370,29 +381,21 @@ pub mod drt_manager {
             ),
             fee,
         )?;
-
-        // Get the account info and create key bindings
-        let pool_info = ctx.accounts.pool.to_account_info();
-        let owner_ref = pool_owner.as_ref();
-        let name_bytes = pool_name.as_bytes();
-
-        // Get the PDA seeds for signing
-        let pool_seeds = &[b"pool", owner_ref, name_bytes, &[pool_bump]];
-
-        // Mint one DRT token to the buyer
-        token::mint_to(
+    
+        // Transfer one DRT token from vault to buyer
+        token::transfer(
             CpiContext::new_with_signer(
                 ctx.accounts.token_program.to_account_info(),
-                MintTo {
-                    mint: ctx.accounts.drt_mint.to_account_info(),
+                token::Transfer {
+                    from: ctx.accounts.vault_drt_token_account.to_account_info(),
                     to: ctx.accounts.buyer_token_account.to_account_info(),
                     authority: pool_info,
                 },
                 &[pool_seeds],
             ),
-            1, // Always mint exactly 1 token
+            1, // Always transfer exactly 1 token
         )?;
-
+    
         msg!("Bought 1 {} DRT token for {} lamports", drt_type, fee);
         Ok(())
     }
@@ -400,11 +403,7 @@ pub mod drt_manager {
     /// Redeem a DRT token to perform an operation
     /// This emits an event that can be monitored by TEEs
     pub fn redeem_drt(ctx: Context<RedeemDrt>, drt_type: String) -> Result<()> {
-        // Extract pool data first to avoid borrow conflicts
-        let pool_owner = ctx.accounts.pool.owner;
-        let pool_name = ctx.accounts.pool.name.clone();
-        let pool_bump = ctx.accounts.pool.bump;
-
+        
         // Find the requested DRT
         let drt_config = ctx
             .accounts
@@ -413,17 +412,28 @@ pub mod drt_manager {
             .iter()
             .find(|d| d.drt_type == drt_type)
             .ok_or(ErrorCode::DRTNotFound)?;
-
-        // Capture any data we need from the DRT config
-        let github_url = drt_config.github_url.clone();
-        let code_hash = drt_config.code_hash.clone();
-
+            
         // Ensure the correct mint is provided
         require!(
             drt_config.mint == ctx.accounts.drt_mint.key(),
             ErrorCode::DRTNotFound
         );
-
+        
+        // Check if user has at least one token
+        require!(ctx.accounts.user_token_account.amount >= 1, ErrorCode::InsufficientTokens);
+        
+        // Extract pool data for later use
+        let pool_owner = ctx.accounts.pool.owner;
+        let pool_name = ctx.accounts.pool.name.clone();
+        let pool_bump = ctx.accounts.pool.bump;
+        
+        // Capture any data we need from the DRT config
+        let github_url = drt_config.github_url.clone();
+        let code_hash = drt_config.code_hash.clone();
+        
+        // Get execution type for the DRT
+        let execution_type = get_execution_type(&drt_type);
+        
         // Burn the token
         token::burn(
             CpiContext::new(
@@ -436,9 +446,6 @@ pub mod drt_manager {
             ),
             1, // Always burn exactly 1 token
         )?;
-
-        // Get execution type for the DRT
-        let execution_type = get_execution_type(&drt_type);
 
         // For append DRTs, mint an ownership token as reward
         if drt_type == "append" {
@@ -690,6 +697,13 @@ pub struct BuyDrt<'info> {
         constraint = pool.drts.iter().any(|d| d.drt_type == drt_type && d.mint == drt_mint.key())
     )]
     pub drt_mint: Account<'info, Mint>,
+
+    #[account(
+        mut,
+        constraint = vault_drt_token_account.mint == drt_mint.key(),
+        constraint = vault_drt_token_account.owner == pool.key(),
+    )]
+    pub vault_drt_token_account: Account<'info, TokenAccount>,
 
     #[account(mut)]
     pub buyer: Signer<'info>,
