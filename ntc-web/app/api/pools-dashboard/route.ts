@@ -43,12 +43,21 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: "Invalid JSON payload" }, { status: 400 });
     }
     
-    const { name, description, poolSequenceId, chainAddress, vaultAddress, feeVaultAddress, ownershipMintAddress, schemaDefinition, allowedDrts } = body;
+    const { name, description, poolSequenceId, chainAddress, feeVaultAddress, ownershipMintAddress, schemaDefinition, allowedDrts } = body;
     
     // Validate that all required fields are present
-    if (!name || !description || !chainAddress || !vaultAddress || !feeVaultAddress || !ownershipMintAddress || !schemaDefinition || !allowedDrts) {
-      console.error("Missing required fields");
-      return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
+    const missingFields = [];
+    if (!name) missingFields.push("name");
+    if (!description) missingFields.push("description");
+    if (!chainAddress) missingFields.push("chainAddress");
+    if (!feeVaultAddress) missingFields.push("feeVaultAddress");
+    if (!ownershipMintAddress) missingFields.push("ownershipMintAddress");
+    if (!schemaDefinition) missingFields.push("schemaDefinition");
+    if (!allowedDrts) missingFields.push("allowedDrts");
+
+    if (missingFields.length > 0) {
+      console.error("Missing required fields:", missingFields);
+      return NextResponse.json({ error: "Missing required fields", missingFields }, { status: 400 });
     }
 
     // Map and validate DRT IDs with type checking
@@ -99,7 +108,6 @@ export async function POST(request: NextRequest) {
         description,
         poolSequenceId,
         chainAddress,
-        vaultAddress,
         feeVaultAddress,
         ownershipMintAddress,
         schemaDefinition,

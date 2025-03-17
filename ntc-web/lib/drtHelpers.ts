@@ -23,14 +23,12 @@ import {
   TOKEN_PROGRAM_ID,
   ASSOCIATED_TOKEN_PROGRAM_ID,
   getAssociatedTokenAddress,
-  createInitializeMintInstruction,
-  createAssociatedTokenAccountInstruction,
-  getMint,
+  createAssociatedTokenAccountInstruction
 } from "@solana/spl-token";
 import { 
   PublicKey, 
   SystemProgram, 
-  Transaction, 
+  SYSVAR_RENT_PUBKEY,
   clusterApiUrl, 
   Connection 
 } from "@solana/web3.js";
@@ -50,536 +48,585 @@ export const getConnection = () => new Connection(DEVNET_URL, {
 export function getPoolPda(
   owner: PublicKey,
   poolName: string,
-  poolId: number,
   programId: PublicKey
 ): [PublicKey, number] {
-  const poolIdBuffer = Buffer.alloc(8);
-  poolIdBuffer.writeUInt32LE(poolId, 0);
-  poolIdBuffer.writeUInt32LE(0, 4);
   return PublicKey.findProgramAddressSync(
-    [Buffer.from("pool"), owner.toBuffer(), Buffer.from(poolName), poolIdBuffer],
+    [Buffer.from("pool"), owner.toBuffer(), Buffer.from(poolName)],
     programId
   );
 }
 
-/** Create a new mint with improved error handling. */
-export async function createNewMint(
-    provider: anchor.AnchorProvider,
-    mintAuthority: PublicKey,
-    decimals: number = 0
-): Promise<PublicKey> {
-    let lastError: Error | null = null;
-    const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
-    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-        try {
-            const mintKeypair = anchor.web3.Keypair.generate();
-            const lamports = await provider.connection.getMinimumBalanceForRentExemption(82);
-
-            const createMintIx = SystemProgram.createAccount({
-                fromPubkey: provider.wallet.publicKey,
-                newAccountPubkey: mintKeypair.publicKey,
-                space: 82,
-                lamports,
-                programId: TOKEN_PROGRAM_ID,
-            });
-
-            const initMintIx = createInitializeMintInstruction(
-                mintKeypair.publicKey,
-                decimals,
-                mintAuthority,
-                mintAuthority
-            );
-
-            const tx = new Transaction().add(createMintIx).add(initMintIx);
-            tx.feePayer = provider.wallet.publicKey;
-
-            const { blockhash, lastValidBlockHeight } = 
-                await provider.connection.getLatestBlockhash(COMMITMENT);
-            tx.recentBlockhash = blockhash;
-
-    tx.partialSign(mintKeypair);
-    tx.partialSign(mintKeypair);
-  
-    // Now, ask the wallet to sign the transaction (it signs for the fee payer).
-            tx.partialSign(mintKeypair);
-  
-    // Now, ask the wallet to sign the transaction (it signs for the fee payer).
-            const signedTx = await provider.wallet.signTransaction(tx);
-
-            const txid = await provider.connection.sendRawTransaction(signedTx.serialize(), {
-                skipPreflight: false,
-                preflightCommitment: COMMITMENT,
-            });
-
-            const confirmation = await provider.connection.confirmTransaction({
-                signature: txid,
-                blockhash: blockhash,
-                lastValidBlockHeight: lastValidBlockHeight
-            }, COMMITMENT);
-
-            if (confirmation.value.err) {
-                throw new Error(`Transaction failed: ${confirmation.value.err}`);
-            }
-
-            return mintKeypair.publicKey;
-        } catch (error) {
-            console.warn(`Mint creation attempt ${attempt + 1} failed:`, error);
-            lastError = error as Error;
-            
-            if (attempt < MAX_RETRIES - 1) {
-                await sleep(RETRY_DELAY * (attempt + 1)); // Exponential backoff
-                continue;
-            }
-        }
-    }
-
-    throw new Error(`Failed to create mint after ${MAX_RETRIES} attempts. Last error: ${lastError?.message}`);
+export function getFeeVaultPda(
+  pool: PublicKey,
+  programId: PublicKey
+): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("fee_vault"), pool.toBuffer()],
+    programId
+  );
 }
 
-export async function createPool(
+export function getOwnershipMintPda(
+  pool: PublicKey,
+  programId: PublicKey
+): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("ownership_mint"), pool.toBuffer()],
+    programId
+  );
+}
+
+export function getDrtMintPda(
+  pool: PublicKey,
+  drtType: string,
+  programId: PublicKey
+): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("drt_mint"), pool.toBuffer(), Buffer.from(drtType)],
+    programId
+  );
+}
+
+/**
+ * Create a pool with DRTs
+ * 
+ * @param program The anchor program instance
+ * @param provider The anchor provider
+ * @param poolName Name of the pool to create
+ * @param drtConfigs Array of DRT configurations
+ * @param ownershipSupply Initial supply of ownership tokens
+ * @param updateStatus Optional callback for status updates
+ */
+export async function createPoolWithDrts(
     program: anchor.Program,
     provider: anchor.AnchorProvider,
     poolName: string,
-    poolId: number,
+    drtConfigs: Array<{
+      drtType: string,
+      supply: BN,
+      cost: BN,
+      githubUrl?: string,
+      codeHash?: string
+    }>,
     ownershipSupply: BN,
-    appendSupply: BN,
-    allowedDrts: string[],
     updateStatus?: (status: string) => void,
-): Promise<{
+  ): Promise<{
     pool: PublicKey;
-    vault: PublicKey;
     feeVault: PublicKey;
     ownershipMint: PublicKey;
-}> {
+    drtMints: Record<string, PublicKey>;
+  }> {
     const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
-    async function executeTransaction<T>(
-        operation: () => Promise<T>,
-        errorMessage: string
-    ): Promise<T> {
-        for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-            try {
-                return await operation();
-            } catch (error) {
-                console.warn(`${errorMessage} - Attempt ${attempt + 1} failed:`, error);
-                if (attempt < MAX_RETRIES - 1) {
-                    await sleep(RETRY_DELAY * (attempt + 1));
-                    continue;
-                }
-                throw error;
-            }
-        }
-        throw new Error(`Failed after ${MAX_RETRIES} attempts: ${errorMessage}`);
-    }
-
     const owner = provider.wallet.publicKey;
-    const [poolPda] = getPoolPda(owner, poolName, poolId, program.programId);
-
-    const [vaultPda] = await PublicKey.findProgramAddress(
-        [Buffer.from("vault"), poolPda.toBuffer()],
-        program.programId
+    
+    // Create PDA for the pool
+    const [poolPda] = getPoolPda(owner, poolName, program.programId);
+    
+    // Check if pool already exists before trying to create it
+    try {
+      updateStatus?.("Checking if pool already exists...");
+      const existingPool = await provider.connection.getAccountInfo(poolPda);
+      if (existingPool !== null) {
+        throw new Error(`Pool with name "${poolName}" already exists. Please use a different name.`);
+      }
+      updateStatus?.("Pool name is available. Proceeding with creation...");
+    } catch (error) {
+      // If the error is not our custom error about existing pool, it means the getAccountInfo failed
+      // which is normal for a non-existent account - we can proceed
+      if (error instanceof Error && !error.message.includes("already exists")) {
+        console.log("Pool doesn't exist, can proceed with creation");
+      } else {
+        throw error;
+      }
+    }
+    
+    // Find fee vault PDA
+    const [feeVaultPda] = getFeeVaultPda(poolPda, program.programId);
+    
+    // Find ownership mint PDA
+    const [ownershipMintPda] = getOwnershipMintPda(poolPda, program.programId);
+    
+    // Get ownership token account
+    const ownershipTokenAccount = await getAssociatedTokenAddress(
+      ownershipMintPda,
+      owner
     );
-
-    const [feeVaultPda] = await PublicKey.findProgramAddress(
-        [Buffer.from("fee_vault"), poolPda.toBuffer()],
-        program.programId
-    );
-
-    updateStatus?.("1/3: Creating ownership mint...");
-    const ownershipMint = await executeTransaction(
-        () => createNewMint(provider, vaultPda),
-        "Failed to create ownership mint"
-    );
-    updateStatus?.("1/3: Ownership mint created.");
-
-    updateStatus?.("2/3: Initializing pool on-chain...");
-    // Get the vault token account address before the transaction
-    const vaultTokenAccount = await getAssociatedTokenAddress(
-        ownershipMint,
-        vaultPda,
-        true
-    );
-
-    await executeTransaction(
-        async () => program.methods
-            .initializePool(poolName, new BN(poolId), ownershipSupply, appendSupply, allowedDrts)
+    
+    // Convert DRT configs to format expected by the contract
+    const formattedDrtConfigs = drtConfigs.map(config => ({
+      drtType: config.drtType,
+      supply: config.supply,
+      cost: config.cost,
+      githubUrl: config.githubUrl || null,
+      codeHash: config.codeHash || null
+    }));
+    
+    updateStatus?.("1/3: Creating pool with DRTs...");
+    
+    // Attempt to create pool with retry logic
+    let tx: string;
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      try {
+        tx = await program.methods
+          .createPoolWithDrts(
+            poolName,
+            formattedDrtConfigs,
+            ownershipSupply
+          )
+          .accounts({
+            pool: poolPda,
+            owner: owner,
+            ownershipMint: ownershipMintPda,
+            ownershipTokenAccount: ownershipTokenAccount,
+            feeVault: feeVaultPda,
+            systemProgram: SystemProgram.programId,
+            tokenProgram: TOKEN_PROGRAM_ID,
+            associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+            rent: SYSVAR_RENT_PUBKEY,
+          })
+          .rpc({ commitment: COMMITMENT });
+          
+        updateStatus?.(`Pool created successfully. Transaction: ${tx}`);
+        break;
+      } catch (error) {
+        console.warn(`Pool creation attempt ${attempt + 1} failed:`, error);
+        
+        // Check if error is due to existing account
+        if (error instanceof Error && 
+            (error.message.includes("already in use") || 
+             error.message.includes("already exists"))) {
+          throw new Error(`Pool with name "${poolName}" or a related account already exists. Please use a different name.`);
+        }
+        
+        if (attempt < MAX_RETRIES - 1) {
+          await sleep(RETRY_DELAY * (attempt + 1)); // Exponential backoff
+        } else {
+          throw new Error(`Failed to create pool after ${MAX_RETRIES} attempts. Last error: ${error}`);
+        }
+      }
+    }
+    
+    // Initialize DRT mints
+    updateStatus?.("2/3: Initializing DRT mints...");
+    const drtMints: Record<string, PublicKey> = {};
+    
+    for (const config of drtConfigs) {
+      const drtType = config.drtType;
+      const [drtMintPda] = getDrtMintPda(poolPda, drtType, program.programId);
+      drtMints[drtType] = drtMintPda;
+      
+      updateStatus?.(`Initializing mint for ${drtType}...`);
+      
+      for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+        try {
+          const tx = await program.methods
+            .initializeDrtMint(drtType)
             .accounts({
-                pool: poolPda,
-                owner: owner,
-                ownershipMint: ownershipMint,
-                vault: vaultPda,
-                vaultTokenAccount: vaultTokenAccount,
-                systemProgram: SystemProgram.programId,
-                tokenProgram: TOKEN_PROGRAM_ID,
-                associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
-                rent: anchor.web3.SYSVAR_RENT_PUBKEY,
+              pool: poolPda,
+              drtMint: drtMintPda,
+              owner: owner,
+              systemProgram: SystemProgram.programId,
+              tokenProgram: TOKEN_PROGRAM_ID,
+              rent: SYSVAR_RENT_PUBKEY,
             })
-            .rpc({ commitment: COMMITMENT }),
-        "Failed to initialize pool"
-    );
-    updateStatus?.("2/3: Pool initialized.");
-
-    updateStatus?.("3/3: Initializing fee vault...");
-    await executeTransaction(
-        () => program.methods
-            .initializeFeeVault()
+            .rpc({ commitment: COMMITMENT });
+            
+          updateStatus?.(`Initialized mint for ${drtType}. Transaction: ${tx}`);
+          break;
+        } catch (error) {
+          console.warn(`DRT mint initialization attempt ${attempt + 1} for ${drtType} failed:`, error);
+          if (attempt < MAX_RETRIES - 1) {
+            await sleep(RETRY_DELAY * (attempt + 1)); // Exponential backoff
+          } else {
+            throw new Error(`Failed to initialize DRT mint for ${drtType} after ${MAX_RETRIES} attempts. Last error: ${error}`);
+          }
+        }
+      }
+    }
+    
+    // Mint initial DRT supplies
+    updateStatus?.("3/3: Minting initial DRT supplies...");
+    for (const config of drtConfigs) {
+      const drtType = config.drtType;
+      const drtMint = drtMints[drtType];
+      
+      updateStatus?.(`Creating vault token account for ${drtType}...`);
+      
+      // Get the address for the vault token account
+      const vaultTokenAccount = await getAssociatedTokenAddress(
+        drtMint,
+        poolPda,
+        true // Allow owner off curve for PDA
+      );
+      
+      // Create the account explicitly with a transaction
+      try {
+        // First check if the account already exists
+        try {
+          await provider.connection.getTokenAccountBalance(vaultTokenAccount);
+          updateStatus?.(`Vault token account already exists for ${drtType}`);
+        } catch (e) {
+          // Account doesn't exist, create it
+          updateStatus?.(`Creating new vault token account for ${drtType}...`);
+          
+          const createAccountIx = createAssociatedTokenAccountInstruction(
+            provider.wallet.publicKey, // Fee payer
+            vaultTokenAccount,         // Associated account address
+            poolPda,                   // Owner of the token account
+            drtMint                    // Mint address
+          );
+          
+          // Send the transaction
+          const tx = await provider.sendAndConfirm(
+            new anchor.web3.Transaction().add(createAccountIx),
+            [],
+            { commitment: COMMITMENT }
+          );
+          
+          updateStatus?.(`Created vault token account for ${drtType}, tx: ${tx}`);
+        }
+      } catch (error) {
+        console.error(`Error creating vault token account for ${drtType}:`, error);
+        throw new Error(`Failed to create vault token account for ${drtType}: ${error}`);
+      }
+      
+      updateStatus?.(`Minting initial supply for ${drtType}...`);
+      
+      for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+        try {
+          const tx = await program.methods
+            .mintDrtSupply(drtType)
             .accounts({
-                feeVault: feeVaultPda,
-                pool: poolPda,
-                owner: owner,
-                systemProgram: SystemProgram.programId,
+              pool: poolPda,
+              drtMint: drtMint,
+              owner: owner,
+              vaultTokenAccount: vaultTokenAccount,
+              tokenProgram: TOKEN_PROGRAM_ID,
             })
-            .rpc({ commitment: COMMITMENT }),
-        "Failed to initialize fee vault"
-    );
-    updateStatus?.("3/3: Fee vault initialized. All on-chain transactions complete.");
-
+            .rpc({ commitment: COMMITMENT });
+            
+          updateStatus?.(`Minted initial supply for ${drtType}. Transaction: ${tx}`);
+          break;
+        } catch (error) {
+          console.warn(`DRT supply minting attempt ${attempt + 1} for ${drtType} failed:`, error);
+          if (attempt < MAX_RETRIES - 1) {
+            await sleep(RETRY_DELAY * (attempt + 1)); // Exponential backoff
+          } else {
+            throw new Error(`Failed to mint DRT supply for ${drtType} after ${MAX_RETRIES} attempts. Last error: ${error}`);
+          }
+        }
+      }
+    }
+    
+    updateStatus?.("Pool creation complete!");
+    
     return {
-        pool: poolPda,
-        vault: vaultPda,
-        feeVault: feeVaultPda,
-        ownershipMint,
+      pool: poolPda,
+      feeVault: feeVaultPda,
+      ownershipMint: ownershipMintPda,
+      drtMints
     };
 }
 
-export async function initializeDRT(
-program: anchor.Program,
-pool: PublicKey,
-vault: PublicKey,
-owner: PublicKey,
-drtMint: PublicKey,
-drtSupply: BN,
-drtType: string
-): Promise<PublicKey> {
-const vaultDRTTokenAccount = await getAssociatedTokenAddress(
-    drtMint,
-    vault,
-    true
-);
-
-await program.methods
-    .initializeDrt(drtType, drtSupply)
-    .accounts({
-        pool: pool,
-        drtMint: drtMint,
-        vault: vault,
-        vaultDrtTokenAccount: vaultDRTTokenAccount,
-        owner: owner,
-        systemProgram: SystemProgram.programId,
-        tokenProgram: TOKEN_PROGRAM_ID,
-        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
-    })
-    .rpc({ commitment: COMMITMENT });
-
-return vaultDRTTokenAccount;
-}
-
-export async function redeemDrt(
-program: anchor.Program,
-pool: PublicKey,
-drtMint: PublicKey,
-ownershipMint: PublicKey,
-userDrtTokenAccount: PublicKey,
-userOwnershipTokenAccount: PublicKey,
-drtType: string,
-wallet: any,
-updateStatus?: (status: string) => void,
-databasePoolId?: string
-): Promise<{ tx: string; ownershipTokenReceived: boolean }> {
-const provider = program.provider as AnchorProvider;
-const user = wallet.publicKey;
-const connection = provider.connection;
-
-const [vaultPda] = await PublicKey.findProgramAddress(
-    [Buffer.from("vault"), pool.toBuffer()],
-    program.programId
-);
-
-const userDrtAccountInfo = await connection.getAccountInfo(userDrtTokenAccount);
-const userOwnershipAccountInfo = await connection.getAccountInfo(userOwnershipTokenAccount);
-
-const instructions: anchor.web3.TransactionInstruction[] = [];
-if (!userDrtAccountInfo) {
-    updateStatus?.("Creating user DRT token account...");
-    instructions.push(
-        createAssociatedTokenAccountInstruction(
-            wallet.publicKey,
-            userDrtTokenAccount,
-            wallet.publicKey,
-            drtMint
-        )
-    );
-}
-
-// Ensure user has ownership account
-if (!userOwnershipAccountInfo) {
-    updateStatus?.("Creating user ownership token account...");
-    instructions.push(
-        createAssociatedTokenAccountInstruction(
-            wallet.publicKey,
-            userOwnershipTokenAccount,
-            wallet.publicKey,
-            ownershipMint
-        )
-    );
-}
-
-updateStatus?.("Redeeming DRT on-chain...");
-const tx = await program.methods
-    .redeemDrt(drtType)
-    .accounts({
-        pool,
-        drtMint,
-        ownershipMint,
-        userDrtTokenAccount,
-        userOwnershipTokenAccount,
-        vault: vaultPda,
-        user,
-        tokenProgram: TOKEN_PROGRAM_ID,
-    })
-    .preInstructions(instructions)
-    .rpc({ commitment: COMMITMENT });
-
-const ownershipTokenReceived = drtType === "append";
-updateStatus?.(`DRT redeemed successfully, tx signature: ${tx}${ownershipTokenReceived ? ", ownership token received" : ""}`);
-
-if (ownershipTokenReceived) {
-    try {
-        updateStatus?.("Saving ownership token instance...");
-        const response = await fetch('/api/drt-instances', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                mintAddress: userOwnershipTokenAccount.toBase58(),
-                drtId: 'OWNERSHIP_TOKEN',
-                poolId: databasePoolId,
-                ownerId: user.toBase58(),
-                state: 'active',
-                isListed: false,
-            }),
-        });
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.error || 'Failed to save ownership token instance');
-        }
-        updateStatus?.("Ownership token instance saved successfully");
-    } catch (error) {
-        console.error("Error saving ownership token instance:", error);
-        updateStatus?.(`Error saving ownership token: ${error instanceof Error ? error.message : String(error)}`);
-    }
-}
-
-return { tx, ownershipTokenReceived };
-}
-
-export async function fetchAvailableDRTs(
-program: anchor.Program,
-poolAddress: string
-) {
-const poolPubkey = new PublicKey(poolAddress);
-const poolAccount = await program.account.pool.fetch(poolPubkey);
-const connection = (program.provider as AnchorProvider).connection;
-const availableDRTs: Array<{
-    name: string;
-    mint: string;
-    initialSupply: number;
-    available: number;
-}> = [];
-
-const allowedDrtsField: string[] =
-    Array.isArray(poolAccount.allowedDrts)
-        ? poolAccount.allowedDrts
-        : Array.isArray(poolAccount.allowed_drts)
-            ? poolAccount.allowed_drts
-            : [];
-
-const [vaultPda] = await PublicKey.findProgramAddress(
-    [Buffer.from("vault"), poolPubkey.toBuffer()],
-    program.programId
-);
-
-for (const drtType of allowedDrtsField) {
-    let drtMint: PublicKey | null = null;
-    
-    if (drtType === "append") {
-        drtMint = poolAccount.appendMint || poolAccount.append_mint;
-    } else if (drtType === "w_compute_median") {
-        drtMint = poolAccount.wComputeMedianMint || poolAccount.w_compute_median_mint;
-    } else if (drtType === "py_compute_median") {
-        drtMint = poolAccount.pyComputeMedianMint || poolAccount.py_compute_median_mint;
-    }
-    
-    if (drtMint) {
-        let initialSupply = 0;
-        try {
-            const mintInfo = await getMint(connection, drtMint);
-            initialSupply = Number(mintInfo.supply);
-        } catch (error) {
-            console.error(`Error fetching mint info for ${drtType}:`, error);
-            if (drtType === "append") {
-                initialSupply = poolAccount.appendSupply?.toNumber() || poolAccount.append_supply?.toNumber() || 0;
-            } else if (drtType === "w_compute_median") {
-                initialSupply = poolAccount.wComputeSupply?.toNumber() || poolAccount.w_compute_supply?.toNumber() || 0;
-            } else if (drtType === "py_compute_median") {
-                initialSupply = poolAccount.pyComputeSupply?.toNumber() || poolAccount.py_compute_supply?.toNumber() || 0;
-            }
-        }
-
-        const vaultDrtTokenPda = await getAssociatedTokenAddress(
-            drtMint,
-            vaultPda,
-            true
-        );
-
-        let available = 0;
-        try {
-            const tokenBalance = await connection.getTokenAccountBalance(vaultDrtTokenPda);
-            available = tokenBalance.value.uiAmount || 0;
-        } catch (error) {
-            console.error(`Error fetching token balance for ${drtType}:`, error);
-        }
-
-        availableDRTs.push({
-            name: drtType,
-            mint: drtMint.toBase58(),
-            initialSupply,
-            available,
-        });
-    }
-}
-return availableDRTs;
-}
-
-export async function buyDRT(
+/**
+ * Buy a DRT token
+ * 
+ * @param program The anchor program instance
+ * @param wallet The wallet to use for the purchase
+ * @param poolAddress The address of the pool
+ * @param drtType The type of DRT to buy
+ * @param updateStatus Optional callback for status updates
+ */
+export async function buyDrt(
   program: anchor.Program,
   wallet: any,
   poolAddress: string,
-  drtMintStr: string,
   drtType: string,
-  fee: number,
-  quantity: number = 1
-): Promise<string[]> {
+  updateStatus?: (status: string) => void
+): Promise<string> {
   const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
   const poolPubkey = new PublicKey(poolAddress);
-  const drtMint = new PublicKey(drtMintStr);
   const connection = (program.provider as AnchorProvider).connection;
-  const feeInLamports = Math.floor(fee * 1_000_000_000);
-
-  console.log(`Fee: ${fee} SOL (${feeInLamports} lamports) × ${quantity} tokens`);
-
-  if (feeInLamports <= 0) {
-      throw new Error("Fee must be greater than zero");
+  
+  // Fetch pool account to get DRT information
+  updateStatus?.("Fetching pool data...");
+  const poolAccount = await program.account.pool.fetch(poolPubkey);
+  
+  // Find the DRT config
+  const drtConfig = poolAccount.drts.find((drt: any) => 
+    drt.drtType === drtType || drt.drt_type === drtType
+  );
+  
+  if (!drtConfig) {
+    throw new Error(`DRT type '${drtType}' not found in pool`);
   }
-
-  if (quantity <= 0 || !Number.isInteger(quantity)) {
-      throw new Error("Quantity must be a positive integer");
+  
+  const drtMint = drtConfig.mint;
+  
+  // Find fee vault
+  const [feeVault] = getFeeVaultPda(poolPubkey, program.programId);
+  
+  // Get vault token account for this DRT
+  const vaultDrtTokenAccount = await getAssociatedTokenAddress(
+    drtMint,
+    poolPubkey,
+    true // Allow owner off curve for PDA
+  );
+  
+  // Get buyer's token account
+  const buyerTokenAccount = await getAssociatedTokenAddress(
+    drtMint,
+    wallet.publicKey
+  );
+  
+  updateStatus?.(`Buying ${drtType} DRT...`);
+  
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    try {
+      const tx = await program.methods
+        .buyDrt(drtType)
+        .accounts({
+          pool: poolPubkey,
+          drtMint: drtMint,
+          vaultDrtTokenAccount: vaultDrtTokenAccount,
+          buyer: wallet.publicKey,
+          buyerTokenAccount: buyerTokenAccount,
+          feeVault: feeVault,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+          rent: SYSVAR_RENT_PUBKEY,
+        })
+        .rpc({ commitment: COMMITMENT });
+        
+      updateStatus?.(`DRT purchased successfully. Transaction: ${tx}`);
+      return tx;
+    } catch (error) {
+      console.warn(`DRT purchase attempt ${attempt + 1} failed:`, error);
+      if (attempt < MAX_RETRIES - 1) {
+        await sleep(RETRY_DELAY * (attempt + 1)); // Exponential backoff
+      } else {
+        throw new Error(`Failed to buy DRT after ${MAX_RETRIES} attempts. Last error: ${error}`);
+      }
+    }
   }
+  
+  throw new Error("Failed to buy DRT token");
+}
 
-  const [vaultPda] = await PublicKey.findProgramAddress(
-      [Buffer.from("vault"), poolPubkey.toBuffer()],
-      program.programId
+/**
+ * Redeem a DRT token
+ * 
+ * @param program The anchor program instance
+ * @param wallet The wallet to use for redemption
+ * @param poolAddress The address of the pool
+ * @param drtType The type of DRT to redeem
+ * @param updateStatus Optional callback for status updates
+ */
+export async function redeemDrt(
+  program: anchor.Program,
+  wallet: any,
+  poolAddress: string,
+  drtType: string,
+  updateStatus?: (status: string) => void
+): Promise<{ tx: string; ownershipTokenReceived: boolean }> {
+  const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+  const poolPubkey = new PublicKey(poolAddress);
+  
+  // Fetch pool account
+  updateStatus?.("Fetching pool data...");
+  const poolAccount = await program.account.pool.fetch(poolPubkey);
+  
+  // Find the DRT config
+  const drtConfig = poolAccount.drts.find((drt: any) => 
+    drt.drtType === drtType || drt.drt_type === drtType
   );
-
-  const [feeVaultPda] = await PublicKey.findProgramAddress(
-      [Buffer.from("fee_vault"), poolPubkey.toBuffer()],
-      program.programId
+  
+  if (!drtConfig) {
+    throw new Error(`DRT type '${drtType}' not found in pool`);
+  }
+  
+  const drtMint = drtConfig.mint;
+  const ownershipMint = poolAccount.ownershipMint;
+  
+  // Get user's token accounts
+  const userTokenAccount = await getAssociatedTokenAddress(
+    drtMint,
+    wallet.publicKey
   );
-
-  const vaultDrtTokenPda = await getAssociatedTokenAddress(
-      drtMint,
-      vaultPda,
-      true
+  
+  const userOwnershipAccount = await getAssociatedTokenAddress(
+    ownershipMint,
+    wallet.publicKey
   );
-
-  const userDrtTokenAccount = await getAssociatedTokenAddress(
-      drtMint,
-      wallet.publicKey
-  );
-
-  try {
-      const userAccountInfo = await connection.getAccountInfo(userDrtTokenAccount);
-      const transactionSignatures: string[] = [];
+  
+  updateStatus?.(`Redeeming ${drtType} DRT...`);
+  
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    try {
+      const tx = await program.methods
+        .redeemDrt(drtType)
+        .accounts({
+          pool: poolPubkey,
+          drtMint: drtMint,
+          ownershipMint: ownershipMint,
+          user: wallet.publicKey,
+          userTokenAccount: userTokenAccount,
+          userOwnershipAccount: userOwnershipAccount,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+          rent: SYSVAR_RENT_PUBKEY,
+        })
+        .rpc({ commitment: COMMITMENT });
+        
+      const ownershipTokenReceived = drtType === "append";
+      updateStatus?.(`DRT redeemed successfully. Transaction: ${tx}${ownershipTokenReceived ? ", ownership token received" : ""}`);
       
-      for (let i = 0; i < quantity; i++) {
-          let transaction: string | undefined;
-          let retryCount = 0;
-          
-          while (retryCount < MAX_RETRIES && !transaction) {
-              try {
-                  if (i === 0 && !userAccountInfo) {
-                      console.log("Creating user token account and buying first DRT token...");
-                      
-                      const createTokenAccountIx = createAssociatedTokenAccountInstruction(
-                          wallet.publicKey,
-                          userDrtTokenAccount,
-                          wallet.publicKey,
-                          drtMint
-                      );
-                      
-                      transaction = await program.methods
-                          .buyDrt(drtType, new BN(feeInLamports))
-                          .accounts({
-                              pool: poolPubkey,
-                              drtMint: drtMint,
-                              vaultDrtTokenAccount: vaultDrtTokenPda,
-                              userDrtTokenAccount: userDrtTokenAccount,
-                              vault: vaultPda,
-                              feeVault: feeVaultPda,
-                              buyerWallet: wallet.publicKey,
-                              tokenProgram: TOKEN_PROGRAM_ID,
-                              systemProgram: SystemProgram.programId,
-                          })
-                          .preInstructions([createTokenAccountIx])
-                          .rpc({ commitment: COMMITMENT });
-                  } else {
-                      console.log(`Buying DRT token ${i + 1} of ${quantity}...`);
-                      
-                      transaction = await program.methods
-                          .buyDrt(drtType, new BN(feeInLamports))
-                          .accounts({
-                              pool: poolPubkey,
-                              drtMint: drtMint,
-                              vaultDrtTokenAccount: vaultDrtTokenPda,
-                              userDrtTokenAccount: userDrtTokenAccount,
-                              vault: vaultPda,
-                              feeVault: feeVaultPda,
-                              buyerWallet: wallet.publicKey,
-                              tokenProgram: TOKEN_PROGRAM_ID,
-                              systemProgram: SystemProgram.programId,
-                          })
-                          .rpc({ commitment: COMMITMENT });
-                  }
-              } catch (error) {
-                  console.warn(`Attempt ${retryCount + 1} failed for token ${i + 1}:`, error);
-                  retryCount++;
-                  if (retryCount < MAX_RETRIES) {
-                      await sleep(RETRY_DELAY * retryCount);
-                      continue;
-                  }
-                  throw error;
-              }
-          }
-
-          if (!transaction) {
-              throw new Error(`Failed to purchase token ${i + 1} after ${MAX_RETRIES} attempts`);
-          }
-
-          console.log(`DRT token ${i + 1} purchase successful, tx signature:`, transaction);
-          transactionSignatures.push(transaction);
-          
-          if (i < quantity - 1) {
-              await sleep(1000);
-          }
+      return { tx, ownershipTokenReceived };
+    } catch (error) {
+      console.warn(`DRT redemption attempt ${attempt + 1} failed:`, error);
+      if (attempt < MAX_RETRIES - 1) {
+        await sleep(RETRY_DELAY * (attempt + 1)); // Exponential backoff
+      } else {
+        throw new Error(`Failed to redeem DRT after ${MAX_RETRIES} attempts. Last error: ${error}`);
       }
-
-      return transactionSignatures;
-
-  } catch (error) {
-      console.error("Error executing buyDRT instruction:", error);
-      if (error instanceof Error && 'logs' in error) {
-          console.error("Transaction logs:", error.logs);
-      }
-      throw error;
+    }
   }
+  
+  throw new Error("Failed to redeem DRT token");
+}
+
+/**
+ * Redeem ownership tokens for fees
+ * 
+ * @param program The anchor program instance
+ * @param wallet The wallet to use for redemption
+ * @param poolAddress The address of the pool
+ * @param amount The amount of ownership tokens to redeem
+ * @param updateStatus Optional callback for status updates
+ */
+export async function redeemFees(
+  program: anchor.Program,
+  wallet: any,
+  poolAddress: string,
+  amount: BN,
+  updateStatus?: (status: string) => void
+): Promise<string> {
+  const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+  const poolPubkey = new PublicKey(poolAddress);
+  
+  // Fetch pool account
+  updateStatus?.("Fetching pool data...");
+  const poolAccount = await program.account.pool.fetch(poolPubkey);
+  const ownershipMint = poolAccount.ownershipMint;
+  
+  // Find fee vault and its bump
+  const [feeVault, feeVaultBump] = getFeeVaultPda(poolPubkey, program.programId);
+  
+  // Get user's ownership token account
+  const userOwnershipAccount = await getAssociatedTokenAddress(
+    ownershipMint,
+    wallet.publicKey
+  );
+  
+  updateStatus?.(`Redeeming ${amount.toString()} ownership tokens for fees...`);
+  
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    try {
+      const tx = await program.methods
+        .redeemFees(amount, feeVaultBump)
+        .accounts({
+          pool: poolPubkey,
+          ownershipMint: ownershipMint,
+          user: wallet.publicKey,
+          userOwnershipAccount: userOwnershipAccount,
+          feeVault: feeVault,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
+        })
+        .rpc({ commitment: COMMITMENT });
+        
+      updateStatus?.(`Fees redeemed successfully. Transaction: ${tx}`);
+      return tx;
+    } catch (error) {
+      console.warn(`Fee redemption attempt ${attempt + 1} failed:`, error);
+      if (attempt < MAX_RETRIES - 1) {
+        await sleep(RETRY_DELAY * (attempt + 1)); // Exponential backoff
+      } else {
+        throw new Error(`Failed to redeem fees after ${MAX_RETRIES} attempts. Last error: ${error}`);
+      }
+    }
+  }
+  
+  throw new Error("Failed to redeem fees");
+}
+
+/**
+ * Fetch available DRTs in a pool
+ * 
+ * @param program The anchor program instance
+ * @param poolAddress The address of the pool
+ * @returns Array of available DRT information
+ */
+export async function fetchAvailableDRTs(
+  program: anchor.Program,
+  poolAddress: string
+): Promise<Array<{
+  name: string;
+  mint: string;
+  supply: number;
+  cost: number;
+  available: number;
+  isMinted: boolean;
+  githubUrl?: string;
+  codeHash?: string;
+}>> {
+  const poolPubkey = new PublicKey(poolAddress);
+  const connection = (program.provider as AnchorProvider).connection;
+  
+  // Fetch pool account
+  const poolAccount = await program.account.pool.fetch(poolPubkey);
+  const availableDRTs = [];
+  
+  // Process each DRT in the pool
+  for (const drt of poolAccount.drts) {
+    const drtType = drt.drtType || drt.drt_type;
+    const drtMint = drt.mint;
+    const supply = Number(drt.supply);
+    const cost = Number(drt.cost) / 1_000_000_000; // Convert lamports to SOL
+    const isMinted = drt.isMinted || drt.is_minted;
+    const githubUrl = drt.githubUrl || drt.github_url;
+    const codeHash = drt.codeHash || drt.code_hash;
+    
+    // Get vault token account for this DRT to check available balance
+    const vaultDrtTokenAccount = await getAssociatedTokenAddress(
+      drtMint,
+      poolPubkey,
+      true
+    );
+    
+    let available = 0;
+    try {
+      if (isMinted) {
+        const tokenBalance = await connection.getTokenAccountBalance(vaultDrtTokenAccount);
+        available = tokenBalance.value.uiAmount || 0;
+      }
+    } catch (error) {
+      console.error(`Error fetching token balance for ${drtType}:`, error);
+    }
+    
+    availableDRTs.push({
+      name: drtType,
+      mint: drtMint.toBase58(),
+      supply,
+      cost,
+      available,
+      isMinted,
+      githubUrl,
+      codeHash
+    });
+  }
+  
+  return availableDRTs;
 }

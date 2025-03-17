@@ -20,9 +20,8 @@
 
 import React, { useState, useEffect, JSX } from 'react'
 import { BN } from "@coral-xyz/anchor"
-import * as anchor from "@coral-xyz/anchor"
 import { useDrtProgram } from "@/lib/useDrtProgram"
-import { createPool, createNewMint, initializeDRT } from "@/lib/drtHelpers"
+import { createPoolWithDrts, getFeeVaultPda } from "@/lib/drtHelpers"
 import { useWallet } from "@solana/wallet-adapter-react"
 import { RefreshCcw, Check, AlertTriangle, Wallet, Copy } from "lucide-react"
 
@@ -34,6 +33,7 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Switch } from "@/components/ui/switch"
 import FilePicker from '@/components/FilePicker';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { SchemaPreview, validateJsonSchema } from '@/components/schemaUtils';
@@ -456,12 +456,16 @@ function PoolCreationStep({
   const [poolId, setPoolId] = useState(1);
   const [poolNameLocked, setPoolNameLocked] = useState(false);
   const [isCheckingName, setIsCheckingName] = useState(false);
+  const [skipVmCreation, setSkipVmCreation] = useState(false);
   const [teeDeploymentId, setTeeDeploymentId] = useState<string | null>(null);
   const [teeStatus, setTeeStatus] = useState<string | null>(null);
   const [ownershipSupply, setOwnershipSupply] = useState(1000000);
   const [appendSupply, setAppendSupply] = useState(5000);
   const [wComputeSupply, setWComputeSupply] = useState(800);
   const [pyComputeSupply, setPyComputeSupply] = useState(800);
+  const [appendCost, setAppendCost] = useState(100000000); // 0.1 SOL in lamports
+  const [wComputeCost, setWComputeCost] = useState(100000000); // 0.1 SOL in lamports
+  const [pyComputeCost, setPyComputeCost] = useState(100000000); // 0.1 SOL in lamports
   const [steps, setSteps] = useState<{ name: string; walletSignatureRequired: boolean; }[]>([]);
   const [progress, setProgress] = useState<Progress>({
     step: 0,
@@ -513,6 +517,11 @@ function PoolCreationStep({
   };
 
   const deployTEE = async (vmName: string) => {
+    if (skipVmCreation) {
+      console.log("Skipping VM creation as requested");
+      return "mock-deployment-id";
+    }
+    
     try {
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/deployments?name_prefix=${vmName}`, { method: 'POST' });
       if (!response.ok) throw new Error(`Failed to deploy TEE (Status ${response.status})`);
@@ -525,6 +534,11 @@ function PoolCreationStep({
   };
 
   const checkTEEStatus = async (requestId: string) => {
+    if (skipVmCreation) {
+      console.log("Skipping TEE status check as VM creation is disabled");
+      return { status: 'completed', public_ip: '127.0.0.1', vm_name: 'mock-vm' };
+    }
+    
     try {
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/deployments/${requestId}`);
       if (!response.ok) {
@@ -540,7 +554,7 @@ function PoolCreationStep({
 
   useEffect(() => {
     let interval: NodeJS.Timeout;
-    if (teeDeploymentId && teeStatus !== 'completed' && teeStatus !== 'failed') {
+    if (teeDeploymentId && teeStatus !== 'completed' && teeStatus !== 'failed' && !skipVmCreation) {
       interval = setInterval(async () => {
         try {
           const status = await checkTEEStatus(teeDeploymentId);
@@ -551,7 +565,7 @@ function PoolCreationStep({
       }, 30000);
     }
     return () => { if (interval) clearInterval(interval); };
-  }, [teeDeploymentId, teeStatus]);
+  }, [teeDeploymentId, teeStatus, skipVmCreation]);
 
   const saveEnclaveMeasurement = async (
     poolId: string,
@@ -559,6 +573,11 @@ function PoolCreationStep({
     publicIp: string | null,
     actualName: string | null
   ) => {
+    if (skipVmCreation) {
+      console.log("Skipping enclave measurement saving as VM creation is disabled");
+      return;
+    }
+    
     if (!measurements) {
       console.warn("No enclave measurement to save");
       return;
@@ -582,38 +601,27 @@ function PoolCreationStep({
   };
 
   useEffect(() => {
-    const stepsList = [
-      { name: "Create New VM", walletSignatureRequired: false },
-      { name: "Create Ownership Mint", walletSignatureRequired: true },
-      { name: "Initialize Pool", walletSignatureRequired: true },
-      { name: "Initialize Fee Vault", walletSignatureRequired: true },
+    // Define the steps in the pool creation process
+    const baseSteps = [
+      { name: "Create Pool with DRTs", walletSignatureRequired: true },
     ];
-    if (appendSelected) {
-      stepsList.push(
-        { name: "Create Append Mint", walletSignatureRequired: true },
-        { name: "Initialize Append DRT", walletSignatureRequired: true }
-      );
-    }
-    if (wComputeSelected) {
-      stepsList.push(
-        { name: "Create W Compute Mint", walletSignatureRequired: true },
-        { name: "Initialize W Compute DRT", walletSignatureRequired: true }
-      );
-    }
-    if (pyComputeSelected) {
-      stepsList.push(
-        { name: "Create Py Compute Mint", walletSignatureRequired: true },
-        { name: "Initialize Py Compute DRT", walletSignatureRequired: true }
-      );
-    }
-    stepsList.push(
+    
+    // Add VM creation steps if not skipped
+    const vmSteps = skipVmCreation ? [] : [
+      { name: "Create New VM", walletSignatureRequired: false },
       { name: "Wait for Enclave", walletSignatureRequired: false },
       { name: "Create Data Pool in Enclave", walletSignatureRequired: false },
+    ];
+    
+    // Final step
+    const finalSteps = [
       { name: "Save Pool Metadata", walletSignatureRequired: false }
-    );
-    setSteps(stepsList);
-    setProgress(prev => ({ ...prev, total: stepsList.length }));
-  }, [appendSelected, wComputeSelected, pyComputeSelected]);
+    ];
+    
+    const allSteps = [...baseSteps, ...vmSteps, ...finalSteps];
+    setSteps(allSteps);
+    setProgress(prev => ({ ...prev, total: allSteps.length }));
+  }, [skipVmCreation, appendSelected, wComputeSelected, pyComputeSelected]);
 
   const updateProgress = (
     step: number,
@@ -635,11 +643,11 @@ function PoolCreationStep({
       updateProgress(0, "Wallet not connected or program not loaded.", 'error');
       return;
     }
-    if (!dataFile) {
+    if (!dataFile && !skipVmCreation) {
       updateProgress(0, "Data file not selected.", 'error');
       return;
     }
-
+  
     setIsSubmitting(true);
     setAllInputsLocked(true);
     
@@ -647,175 +655,208 @@ function PoolCreationStep({
       if (!poolName.trim()) throw new Error("Pool name is required");
       if (!description.trim()) throw new Error("Pool description is required");
       if (!poolNameLocked) throw new Error("Please lock the pool name before creating");
-
+  
+      // Prepare DRT configurations for the pool creation
+      const drtConfigs = [];
+      
+      if (appendSelected) {
+        drtConfigs.push({
+          drtType: "append",
+          supply: new BN(appendSupply),
+          cost: new BN(appendCost),
+          githubUrl: "https://github.com/nautilus-project/append",
+          codeHash: undefined // Changed from null to undefined to match TypeScript expectations
+        });
+      }
+      
+      if (wComputeSelected) {
+        drtConfigs.push({
+          drtType: "w_compute_median",
+          supply: new BN(wComputeSupply),
+          cost: new BN(wComputeCost),
+          githubUrl: "https://github.com/nautilus-project/w_compute_median",
+          codeHash: undefined // Changed from null to undefined
+        });
+      }
+      
+      if (pyComputeSelected) {
+        drtConfigs.push({
+          drtType: "py_compute_median",
+          supply: new BN(pyComputeSupply),
+          cost: new BN(pyComputeCost),
+          githubUrl: "https://github.com/nautilus-project/py_compute_median",
+          codeHash: undefined // Changed from null to undefined
+        });
+      }
+  
+      // Start the VM deployment in parallel if not skipped
+      let vmDeploymentPromise;
       let measurements = null;
       let publicIp: string | null = null;
       let vmName: string | null = null;
-
-      updateProgress(0, "Creating New VM", "loading", "Deploying VM, please wait...");
-      await new Promise(resolve => setTimeout(resolve, 5000));
-      const vmDeploymentPromise = deployTEE(poolName)
-        .then(deploymentId => {
-          setTeeDeploymentId(deploymentId);
-          return deploymentId;
-        })
-        .catch(err => {
-          console.error("VM deployment error:", err);
-          throw err;
-        });
-
-      const allowedDrts: string[] = [];
-      if (appendSelected) allowedDrts.push("append");
-      if (wComputeSelected) allowedDrts.push("w_compute_median");
-      if (pyComputeSelected) allowedDrts.push("py_compute_median");
-
-      const result = await createPool(
-        program,
-        program.provider as any,
-        poolName,
-        poolId,
-        new BN(ownershipSupply),
-        new BN(appendSelected ? appendSupply : 0),
-        allowedDrts,
-        (status) => {
-          if (status.includes("1/3")) {
-            updateProgress(1, "Creating ownership token mint", 'loading', "Please sign with your wallet");
-          } else if (status.includes("2/3")) {
-            updateProgress(2, "Initializing pool on-chain", 'loading', "Please sign with your wallet");
-          } else if (status.includes("3/3")) {
-            updateProgress(3, "Initializing fee vault", 'loading', "Please sign with your wallet");
+      
+      if (!skipVmCreation) {
+        updateProgress(0, "Creating New VM", "loading", "Deploying VM, please wait...");
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        vmDeploymentPromise = deployTEE(poolName)
+          .then(deploymentId => {
+            setTeeDeploymentId(deploymentId);
+            return deploymentId;
+          })
+          .catch(err => {
+            console.error("VM deployment error:", err);
+            throw err;
+          });
+      }
+  
+      // Create the pool with all DRTs in one transaction
+      updateProgress(1, "Creating pool with DRTs", 'loading', "Please sign with your wallet");
+      
+      let result;
+      try {
+        result = await createPoolWithDrts(
+          program,
+          program.provider as any,
+          poolName,
+          drtConfigs,
+          new BN(ownershipSupply),
+          (status) => {
+            console.log("Creation status update:", status);
+            updateProgress(1, status, 'loading');
+          }
+        );
+      } catch (error) {
+        // Check for known error conditions
+        if (error instanceof Error) {
+          // Handle duplicate pool name gracefully
+          if (error.message.includes("already exists")) {
+            setAllInputsLocked(false);
+            setPoolNameLocked(false);
+            throw new Error(`Pool with name "${poolName}" already exists. Please choose a different name.`);
+          }
+          
+          // Handle transaction simulation errors
+          if (error.message.includes("Simulation failed")) {
+            if (error.message.includes("already in use")) {
+              setAllInputsLocked(false);
+              setPoolNameLocked(false);
+              throw new Error(`Pool with name "${poolName}" already exists. Please choose a different name.`);
+            }
           }
         }
-      );
-
+        throw error;
+      }
+  
       const chainAddress = result.pool.toBase58();
-      updateProgress(3, "Pool and fee vault initialized", 'success');
-
-      const provider = program.provider as anchor.AnchorProvider;
-      let currentStep = 4;
-
-      if (appendSelected) {
-        updateProgress(currentStep, "Creating mint for Append DRT", 'loading', "Please sign with your wallet");
-        const appendMint = await createNewMint(provider, result.vault);
-        updateProgress(currentStep, "Mint for Append DRT created", 'success');
-        currentStep++;
-        updateProgress(currentStep, "Initializing Append DRT on-chain", 'loading', "Please sign with your wallet");
-        await initializeDRT(program, result.pool, result.vault, publicKey, appendMint, new BN(appendSupply), "append");
-        updateProgress(currentStep, "Append DRT initialized", 'success');
-        currentStep++;
-      }
-
-      if (wComputeSelected) {
-        updateProgress(currentStep, "Creating mint for W Compute Median DRT", 'loading', "Please sign with your wallet");
-        const wComputeMint = await createNewMint(provider, result.vault);
-        updateProgress(currentStep, "Mint for W Compute Median created", 'success');
-        currentStep++;
-        updateProgress(currentStep, "Initializing W Compute Median DRT on-chain", 'loading', "Please sign with your wallet");
-        await initializeDRT(program, result.pool, result.vault, publicKey, wComputeMint, new BN(wComputeSupply), "w_compute_median");
-        updateProgress(currentStep, "W Compute Median DRT initialized", 'success');
-        currentStep++;
-      }
-
-      if (pyComputeSelected) {
-        updateProgress(currentStep, "Creating mint for Py Compute Median DRT", 'loading', "Please sign with your wallet");
-        const pyComputeMint = await createNewMint(provider, result.vault);
-        updateProgress(currentStep, "Mint for Py Compute Median created", 'success');
-        currentStep++;
-        updateProgress(currentStep, "Initializing Py Compute Median DRT on-chain", 'loading', "Please sign with your wallet");
-        await initializeDRT(program, result.pool, result.vault, publicKey, pyComputeMint, new BN(pyComputeSupply), "py_compute_median");
-        updateProgress(currentStep, "Py Compute Median DRT initialized", 'success');
-        currentStep++;
-      }
-
-      updateProgress(currentStep, "Waiting for Enclave", "loading", "Deploying enclave, please wait...");
-      const deploymentId = await vmDeploymentPromise;
-      let teeDeploymentComplete = false;
-      while (!teeDeploymentComplete) {
-        const status = await checkTEEStatus(deploymentId);
-        console.log("Full TEE status response:", JSON.stringify(status, null, 2));
-        setTeeStatus(status.status);
-        if (status.status === 'completed') {
-          teeDeploymentComplete = true;
-          if (status.details?.sigstruct) {
-            measurements = {
-              mrenclave: status.details.sigstruct.mr_enclave,
-              mrsigner: status.details.sigstruct.mr_signer,
-              isvProdId: status.details.sigstruct.isv_prod_id,
-              isvSvn: status.details.sigstruct.isv_svn,
-            };
-            publicIp = status.public_ip;
-            vmName = status.vm_name;
-            console.log('TEE deployment successful, measurements:', measurements, 'publicIp:', publicIp, 'vmName:', vmName);
-          } else {
-            publicIp = status.public_ip;
-            vmName = status.vm_name;
-            console.log('No sigstruct, but extracted publicIp:', publicIp, 'vmName:', vmName);
-            console.warn('TEE deployment completed but missing sigstruct details');
+      updateProgress(1, "Pool created successfully with all DRTs", 'success');
+  
+      // Get the fee vault bump for later use
+      const [, feeVaultBump] = getFeeVaultPda(result.pool, program.programId);
+  
+      // If VM creation is enabled, wait for the TEE deployment to complete
+      if (!skipVmCreation) {
+        updateProgress(2, "Waiting for Enclave", "loading", "Deploying enclave, please wait...");
+        const deploymentId = await vmDeploymentPromise;
+        let teeDeploymentComplete = false;
+        while (!teeDeploymentComplete) {
+          const status = await checkTEEStatus(deploymentId);
+          console.log("Full TEE status response:", JSON.stringify(status, null, 2));
+          setTeeStatus(status.status);
+          if (status.status === 'completed') {
+            teeDeploymentComplete = true;
+            if (status.details?.sigstruct) {
+              measurements = {
+                mrenclave: status.details.sigstruct.mr_enclave,
+                mrsigner: status.details.sigstruct.mr_signer,
+                isvProdId: status.details.sigstruct.isv_prod_id,
+                isvSvn: status.details.sigstruct.isv_svn,
+              };
+              publicIp = status.public_ip;
+              vmName = status.vm_name;
+              console.log('TEE deployment successful, measurements:', measurements, 'publicIp:', publicIp, 'vmName:', vmName);
+            } else {
+              publicIp = status.public_ip;
+              vmName = status.vm_name;
+              console.log('No sigstruct, but extracted publicIp:', publicIp, 'vmName:', vmName);
+              console.warn('TEE deployment completed but missing sigstruct details');
+            }
+          } else if (status.status === 'failed') {
+            throw new Error('TEE deployment failed');
           }
-        } else if (status.status === 'failed') {
-          throw new Error('TEE deployment failed');
-        }
-        if (!teeDeploymentComplete) {
-          console.log('Waiting for TEE deployment to complete...');
-          await new Promise(resolve => setTimeout(resolve, 30000));
-        }
-      }
-      currentStep++;
-
-      updateProgress(currentStep, "Creating new data pool in the enclave", "loading");
-      const dataReader = new FileReader();
-      const dataPromise = new Promise((resolve, reject) => {
-        dataReader.onload = (e) => {
-          try {
-            const data = JSON.parse(e.target?.result as string);
-            console.log("Data file parsed for enclave:", data);
-            resolve(data);
-          } catch (err) {
-            reject(new Error("Invalid JSON in data file"));
+          if (!teeDeploymentComplete) {
+            console.log('Waiting for TEE deployment to complete...');
+            await new Promise(resolve => setTimeout(resolve, 30000));
           }
-        };
-        dataReader.onerror = () => reject(new Error("Failed to read data file"));
-        dataReader.readAsText(dataFile);
-      });
-
-      const dataJson = await dataPromise;
-
-      if (!publicIp) throw new Error("Public IP not available from TEE deployment");
-
-      const proxyResponse = await fetch("/api/create-data-pool", { // Updated to match route.ts
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ publicIp, data: dataJson }),
-      });
-
-      if (!proxyResponse.ok) {
-        const errorData = await proxyResponse.json();
-        throw new Error(`Failed to create data pool via proxy: ${errorData.error}`);
+        }
+        updateProgress(2, "Enclave deployed successfully", 'success');
+  
+        // Create the data pool in the enclave
+        updateProgress(3, "Creating new data pool in the enclave", "loading");
+        const dataReader = new FileReader();
+        const dataPromise = new Promise((resolve, reject) => {
+          dataReader.onload = (e) => {
+            try {
+              const data = JSON.parse(e.target?.result as string);
+              console.log("Data file parsed for enclave:", data);
+              resolve(data);
+            } catch (err) {
+              reject(new Error("Invalid JSON in data file"));
+            }
+          };
+          dataReader.onerror = () => reject(new Error("Failed to read data file"));
+          dataReader.readAsText(dataFile!);
+        });
+  
+        const dataJson = await dataPromise;
+  
+        if (!publicIp) throw new Error("Public IP not available from TEE deployment");
+  
+        const proxyResponse = await fetch("/api/create-data-pool", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ publicIp, data: dataJson }),
+        });
+  
+        if (!proxyResponse.ok) {
+          const errorData = await proxyResponse.json();
+          throw new Error(`Failed to create data pool via proxy: ${errorData.error}`);
+        }
+  
+        const proxyResult = await proxyResponse.json();
+        console.log("Proxy response:", proxyResult);
+  
+        if (proxyResult.result === "Data pool created, sealed, and saved successfully") {
+          updateProgress(3, "Data pool created in enclave", "success");
+        } else {
+          throw new Error(`Unexpected response from enclave via proxy: ${proxyResult.result}`);
+        }
       }
-
-      const proxyResult = await proxyResponse.json();
-      console.log("Proxy response:", proxyResult);
-
-      if (proxyResult.result === "Data pool created, sealed, and saved successfully") {
-        updateProgress(currentStep, "Data pool created in enclave", "success");
-      } else {
-        throw new Error(`Unexpected response from enclave via proxy: ${proxyResult.result}`);
-      }
-      currentStep++;
-
+  
+      // Save the pool metadata
+      const currentStep = skipVmCreation ? 2 : 4;
       updateProgress(currentStep, "Saving pool data off-chain", 'loading');
+      
+      // Prepare DRT types for database
+      const drtTypes = drtConfigs.map(config => config.drtType);
+      
+      // Create a mapping of DRT types to their mint addresses
+      const drtMintAddresses: Record<string, string> = {}; // Properly typed now
+      for (const [drtType, mintAddress] of Object.entries(result.drtMints)) {
+        drtMintAddresses[drtType] = mintAddress.toBase58();
+      }
+      
       const payload = {
         name: poolName,
         description,
         poolSequenceId: poolId,
         chainAddress,
-        vaultAddress: result.vault.toBase58(),
         feeVaultAddress: result.feeVault.toBase58(),
         ownershipMintAddress: result.ownershipMint.toBase58(),
         schemaDefinition: schemaDefinition,
-        allowedDrts
+        allowedDrts: drtTypes,
+        drtMintAddresses: drtMintAddresses, 
       };
-
+  
       const res = await fetch("/api/pools-dashboard", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -830,23 +871,20 @@ function PoolCreationStep({
       const responseData = await res.json();
       console.log("The response data is:", responseData);
       if (responseData.success && responseData.pool.id) {
-        if (measurements) {
+        if (!skipVmCreation && measurements) {
           try {
             await saveEnclaveMeasurement(responseData.pool.id, measurements, publicIp, vmName);
             console.log("Successfully saved enclave measurement for pool:", responseData.pool.id);
           } catch (error) {
             console.error("Failed to save enclave measurement:", error);
           }
-        } else {
-          console.warn("No enclave measurement available to save");
         }
-        currentStep++;
         updateProgress(currentStep, "Pool successfully created and saved!", 'success', `Chain address: ${chainAddress}`);
         setPoolCreated(prev => !prev);
       } else {
         throw new Error("Failed to save pool to database or missing pool ID");
       }
-
+  
     } catch (error: any) {
       console.error("Pool creation error:", error);
       updateProgress(progress?.step || 0, `Error during pool creation: ${error.message}`, 'error', "Please check console for details");
@@ -911,6 +949,22 @@ function PoolCreationStep({
           />
         </div>
       </div>
+      
+      <div className="flex items-center space-x-2 mt-4">
+        <Switch
+          id="skip-vm"
+          checked={skipVmCreation}
+          onCheckedChange={setSkipVmCreation}
+          disabled={isSubmitting || allInputsLocked}
+        />
+        <label
+          htmlFor="skip-vm"
+          className="text-sm font-medium cursor-pointer"
+        >
+          Skip VM creation (blockchain only)
+        </label>
+      </div>
+      
       <div className="h-2" />
       <Card className="p-4 mt-2">
         <div className="flex items-center justify-between mb-3">
@@ -923,7 +977,7 @@ function PoolCreationStep({
           </div>
         </div>
         <div className="bg-gray-50 rounded-md p-3">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-4">
               <div className="flex items-center space-x-2">
                 <label className="text-sm font-medium">Ownership Token Supply:</label>
@@ -936,7 +990,9 @@ function PoolCreationStep({
                   disabled={allInputsLocked}
                 />
               </div>
+              
               {appendSelected && (
+                <>
                 <div className="flex items-center space-x-2">
                   <label className="text-sm font-medium">Append DRT Supply:</label>
                   <Input
@@ -948,12 +1004,29 @@ function PoolCreationStep({
                     disabled={allInputsLocked}
                   />
                 </div>
+                <div className="flex items-center space-x-2">
+                  <label className="text-sm font-medium">Append DRT Cost (lamports):</label>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={appendCost}
+                    onChange={(e) => setAppendCost(Number(e.target.value))}
+                    className={`w-32 ${allInputsLocked ? "bg-gray-100" : ""}`}
+                    disabled={allInputsLocked}
+                  />
+                  <span className="text-xs text-gray-500">
+                    ({(appendCost / 1_000_000_000).toFixed(3)} SOL)
+                  </span>
+                </div>
+                </>
               )}
             </div>
-            <div className="space-y-4 flex flex-col items-end">
+            
+            <div className="space-y-4">
               {wComputeSelected && (
+                <>
                 <div className="flex items-center space-x-2">
-                  <label className="text-sm font-medium">W Compute Median DRT Supply:</label>
+                  <label className="text-sm font-medium">W Compute DRT Supply:</label>
                   <Input
                     type="number"
                     min={1}
@@ -963,10 +1036,27 @@ function PoolCreationStep({
                     disabled={allInputsLocked}
                   />
                 </div>
-              )}
-              {pyComputeSelected && (
                 <div className="flex items-center space-x-2">
-                  <label className="text-sm font-medium">Py Compute Median DRT Supply:</label>
+                  <label className="text-sm font-medium">W Compute Cost (lamports):</label>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={wComputeCost}
+                    onChange={(e) => setWComputeCost(Number(e.target.value))}
+                    className={`w-32 ${allInputsLocked ? "bg-gray-100" : ""}`}
+                    disabled={allInputsLocked}
+                  />
+                  <span className="text-xs text-gray-500">
+                    ({(wComputeCost / 1_000_000_000).toFixed(3)} SOL)
+                  </span>
+                </div>
+                </>
+              )}
+              
+              {pyComputeSelected && (
+                <>
+                <div className="flex items-center space-x-2">
+                  <label className="text-sm font-medium">Py Compute DRT Supply:</label>
                   <Input
                     type="number"
                     min={1}
@@ -976,6 +1066,21 @@ function PoolCreationStep({
                     disabled={allInputsLocked}
                   />
                 </div>
+                <div className="flex items-center space-x-2">
+                  <label className="text-sm font-medium">Py Compute Cost (lamports):</label>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={pyComputeCost}
+                    onChange={(e) => setPyComputeCost(Number(e.target.value))}
+                    className={`w-32 ${allInputsLocked ? "bg-gray-100" : ""}`}
+                    disabled={allInputsLocked}
+                  />
+                  <span className="text-xs text-gray-500">
+                    ({(pyComputeCost / 1_000_000_000).toFixed(3)} SOL)
+                  </span>
+                </div>
+                </>
               )}
             </div>
           </div>
