@@ -37,7 +37,15 @@ export default function SignInPage() {
             <div className="mb-6 text-center">
               <div className="mb-4 flex justify-center">
                 <div className="w-80 h-80 relative">
-                  <Image src="/logo.png" alt="Logo" fill className="object-contain" priority />
+                  <Image
+                    src="/logo.png"
+                    fill
+                    sizes="(max-width:768px)100vw,(max-width:1200px)80vw,400px"
+                    placeholder="blur"
+                    blurDataURL="/logo.png"
+                    className="object-contain"
+                    alt="Logo"
+                  />
                 </div>
               </div>
               <h2 className="text-2xl font-bold text-gray-900">Nautilus MVP Sign In</h2>

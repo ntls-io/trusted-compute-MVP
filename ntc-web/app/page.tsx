@@ -755,10 +755,13 @@ export default function Home() {
   useEffect(() => {
     async function fetchData() {
 
-      if (isAuthLoaded && isSignedIn && userProfile && roles.length === 0 && !isLoadingProfile) {
-        setIsLoadingPools(false);
-        setIsLoadingDRTs(false);
-        return;
+      if (isAuthLoaded && isSignedIn && !isLoadingProfile) { // Check profile loading state too
+        if ((userProfile && roles.length === 0) || (!userProfile && isErrorProfile && (isErrorProfile as any).status === 404)) {
+          // User will be redirected, so skip main data fetch.
+          setIsLoadingPools(false); 
+          setIsLoadingDRTs(false);
+          return;
+        }
       }
 
       if (!(isAuthLoaded && isSignedIn)) {
@@ -816,7 +819,7 @@ export default function Home() {
   
     if (isAuthLoaded) {
       fetchData();
-  }
+    }
   }, [isAuthLoaded, isSignedIn, userProfile, roles, isLoadingProfile]);
 
   const handlePoolSort = (field: typeof sortField) => {

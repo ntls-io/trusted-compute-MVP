@@ -43,7 +43,7 @@ function getRoleLabel(roleName: ClientRoleName): string {
 export default function SelectRolesPage() {
     const { user, isSignedIn, isLoaded: isAuthLoaded } = useUser();
     const router = useRouter();
-    const searchParams = useSearchParams(); // <-- Get searchParams
+    const searchParams = useSearchParams();
     const { mutate } = useSWRConfig();
 
     const [allAvailableRoles, setAllAvailableRoles] = useState<FetchedRole[]>([]);
@@ -92,7 +92,7 @@ export default function SelectRolesPage() {
 
     const handleRoleChange = (roleName: ClientRoleName) => {
         setSelectedClientRoles(prev => prev.includes(roleName) ? prev.filter(r => r !== roleName) : [...prev, roleName]);
-        setError(null);
+        setError(null); // Clear error when user makes a change
         setSuccessMessage(null);
     };
 
@@ -102,6 +102,14 @@ export default function SelectRolesPage() {
             setError("You must be signed in to update roles.");
             return;
         }
+
+        // --- MODIFIED: Enforce at least one role selection ---
+        if (selectedClientRoles.length === 0) {
+            setError("Please select at least one role to continue.");
+            return;
+        }
+        // --- End of modification ---
+
         setIsSubmitting(true);
         setError(null);
         setSuccessMessage(null);
@@ -116,7 +124,7 @@ export default function SelectRolesPage() {
             setSuccessMessage(data.message || 'Roles updated successfully! Redirecting...');
             await mutate('/api/user/me');
 
-            const nextUrl = searchParams.get('next') || '/'; // <-- Use 'next' param or default to '/'
+            const nextUrl = searchParams.get('next') || '/';
             setTimeout(() => router.push(nextUrl), 2000);
         } catch (err: any) {
             setError(err.message);
@@ -129,21 +137,20 @@ export default function SelectRolesPage() {
         return <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px', background: '#f7fafc' }}>Loading information...</div>;
     }
 
+    // --- MODIFIED: Condition for disabling the submit button ---
+    const isSubmitDisabled = isSubmitting || selectedClientRoles.length === 0;
+
     return (
-        // ... JSX structure remains the same as your provided version ...
-        // Just ensure the form part is within <SignedIn>
         <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '20px', background: '#f7fafc' }}>
             <SignedIn>
                 <div style={{ background: 'white', padding: '30px', borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)', maxWidth: '550px', width: '100%' }}>
-                    {/* ... h1 and p tags ... */}
                      <h1 style={{ fontSize: '22px', fontWeight: '600', textAlign: 'center', marginBottom: '8px', color: '#1a202c' }}>
                         {user?.firstName ? `Manage Roles for ${user.firstName}` : 'Manage Your Roles'}
                     </h1>
                     <p style={{ textAlign: 'center', marginBottom: '25px', color: '#4a5568', fontSize: '15px' }}>
-                        Select or update your roles to best describe how you'll interact with Nautilus.
+                        Select or update your roles to best describe how you'll interact with Nautilus. You must select at least one.
                     </p>
                     <form onSubmit={handleSubmit}>
-                        {/* ... mapping over allAvailableRoles ... */}
                         {allAvailableRoles.length === 0 && !isFetchingPageData && <p className="text-center text-gray-500">No roles are currently available to select.</p>}
                         {allAvailableRoles.map(role => (
                             <div 
@@ -174,7 +181,25 @@ export default function SelectRolesPage() {
                                 </label>
                             </div>
                         ))}
-                        <button type="submit" disabled={isSubmitting} style={{ width: '100%', padding: '10px 15px', marginTop: '25px', background: isSubmitting ? '#cbd5e0' : '#3182ce', color: 'white', border: 'none', borderRadius: '6px', cursor: isSubmitting ? 'not-allowed' : 'pointer', fontSize: '16px', fontWeight: '500', transition: 'background-color 0.2s ease' }} className="hover:bg-blue-700 disabled:hover:bg-gray-400" >
+                        {/* MODIFIED: Button disabled state and background */}
+                        <button 
+                            type="submit" 
+                            disabled={isSubmitDisabled} 
+                            style={{ 
+                                width: '100%', 
+                                padding: '10px 15px', 
+                                marginTop: '25px', 
+                                background: isSubmitDisabled ? '#cbd5e0' : '#3182ce', // gray-400 if disabled, else blue-600
+                                color: 'white', 
+                                border: 'none', 
+                                borderRadius: '6px', 
+                                cursor: isSubmitDisabled ? 'not-allowed' : 'pointer', 
+                                fontSize: '16px', 
+                                fontWeight: '500', 
+                                transition: 'background-color 0.2s ease' 
+                            }} 
+                            className="hover:bg-blue-700 disabled:hover:bg-gray-400" 
+                        >
                             {isSubmitting ? 'Saving...' : 'Save and Continue'}
                         </button>
                         {error && <p style={{ color: '#e53e3e', marginTop: '15px', textAlign: 'center', fontSize: '14px' }}>Error: {error}</p>}
@@ -183,7 +208,6 @@ export default function SelectRolesPage() {
                 </div>
             </SignedIn>
             <SignedOut>
-                {/* ... SignedOut JSX ... */}
                  <div style={{ textAlign: 'center', background: 'white', padding: '40px', borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
                     <p style={{ marginBottom: '20px' }}>Please sign in to select or manage your roles.</p>
                     <SignInButton mode="modal">
