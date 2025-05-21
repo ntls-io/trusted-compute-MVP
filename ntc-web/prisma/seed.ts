@@ -16,510 +16,155 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, RoleName } from '@prisma/client'; // Make sure RoleName is imported
 import dotenv from 'dotenv';
 dotenv.config();
 
 const prisma = new PrismaClient();
 
 async function main() {
-  // 🧹 Clean up existing data
+  console.log(`🌱 Starting seed process...`);
+
+  // --- Section 1: Optional Full Clean-up for Sample/Transactional Data ---
+  // This is useful if you run `npx prisma db seed` directly for a fresh set of sample data.
+  // If `npx prisma db reset` is used, it handles schema and data wiping before seeding.
+  // For production-like seeds or just updating reference data, you might disable parts of this.
+  console.log('🧹 Cleaning up existing sample/transactional data (order matters for FK constraints)...');
   await prisma.$transaction([
-    prisma.dRTInstance.deleteMany(),
-    prisma.poolAllowedDRT.deleteMany(),
-    prisma.digitalRightToken.deleteMany(),
-    prisma.enclaveMeasurement.deleteMany(),
-    prisma.pool.deleteMany(),
-    prisma.user.deleteMany(),
+    prisma.userRole.deleteMany(),        // Depends on User and Role
+    prisma.dRTInstance.deleteMany(),     // Depends on User, Pool, DigitalRightToken
+    prisma.poolAllowedDRT.deleteMany(),  // Depends on Pool, DigitalRightToken
+    prisma.enclaveMeasurement.deleteMany(),// Depends on Pool
+    prisma.pool.deleteMany(),            // Depends on User
+    prisma.user.deleteMany(),            // Base user data for samples
+    // Note: We are NOT deleting DigitalRightToken or Role here by default,
+    // as we'll use upsert for them, making them managed reference data.
   ]);
-  console.log('✅ Database cleaned');
+  console.log('✅ Sample/transactional data cleaned.');
 
-  // // 👤 Create users with Clerk authentication
-  // const user1 = await prisma.user.create({
-  //   data: {
-  //     id: 'user_alice',
-  //     clerkId: process.env.CLERK_ID_ALICE || 'clerk_123456789_alice',
-  //     walletAddress: '5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty',
-  //   },
-  // });
+  // --- Section 2: Seed Reference Data (Idempotent using upsert) ---
+  // This ensures essential lookup data (Roles, DRT Types) is present and up-to-date.
 
-  // const user2 = await prisma.user.create({
-  //   data: {
-  //     id: 'user_bob',
-  //     clerkId: process.env.CLERK_ID_BOB || 'clerk_987654321_bob',
-  //     walletAddress: '5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY',
-  //   },
-  // });
+  console.log('🔑 Seeding Roles...');
+  const rolesToCreate = [
+    { name: RoleName.DATA_PROVIDER, description: "User who provides data to pools." }, // Optional: add descriptions
+    { name: RoleName.DATA_ANALYST, description: "User who analyzes data in pools." },
+    { name: RoleName.CODE_PROVIDER, description: "User who provides computation code for DRTs." },
+  ];
+  for (const roleData of rolesToCreate) {
+    const role = await prisma.role.upsert({
+      where: { name: roleData.name },
+      update: { description: roleData.description }, // Update description if it changes
+      create: { name: roleData.name, description: roleData.description },
+    });
+    console.log(`Upserted role: ${role.name} (ID: ${role.id})`);
+  }
+  console.log('✅ Roles seeded.');
 
-  // const user3 = await prisma.user.create({
-  //   data: {
-  //     id: 'user_charlie',
-  //     clerkId: process.env.CLERK_ID_CHARLIE || 'clerk_567890123_charlie',
-  //     walletAddress: '5FLSigC9HGRKVhB9FiEo4Y3koPsNmBmLJbpXg2mp1hXcS59Y',
-  //   },
-  // });
-
-  // const user4 = await prisma.user.create({
-  //   data: {
-  //     id: 'user_david',
-  //     clerkId: process.env.CLERK_ID_DAVID || 'user_2riTXLKwxmEVB0AhqCXbdD91Xid',
-  //     walletAddress: '5GHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694dz',
-  //   },
-  // });
-
-  // console.log('✅ Users created with Clerk IDs');
-
-  // 🏷️ Create DRT types
-  const appendDrt = await prisma.digitalRightToken.create({
-    data: {
+  console.log('🏷️ Seeding Digital Right Tokens (DRTs)...');
+  const drtsToUpsert = [
+    {
       id: 'APPEND_DATA_POOL',
       name: 'Append Data Pool',
-      description:
-        'Allows adding new data entries while maintaining schema integrity',
-      githubUrl:
-        'https://github.com/ntls-io/trusted-compute-MVP/blob/main/sgx-mvp/json-append/src/lib.rs',
+      description: 'Allows adding new data entries while maintaining schema integrity.',
+      githubUrl: 'https://github.com/ntls-io/trusted-compute-MVP/blob/main/sgx-mvp/json-append/src/lib.rs',
       isActive: true,
+      hash: null,
     },
-  });
-
-  const executeMedianWASMDrt = await prisma.digitalRightToken.create({
-    data: {
+    {
       id: 'EXECUTE_MEDIAN_WASM',
       name: 'Execute Median WASM',
-      description: 'Runs Rust WebAssembly-based median calculations',
-      githubUrl:
-        'https://github.com/ntls-io/WASM-Binaries-MVP/blob/master/bin/get_median_wasm.wasm',
+      description: 'Runs Rust WebAssembly-based median calculations.',
+      githubUrl: 'https://github.com/ntls-io/WASM-Binaries-MVP/blob/master/bin/get_median_wasm.wasm',
       isActive: true,
       hash: '728445d425153350b3e353cc96d29c16d5d81978ea3d7bad21f3d2b2dd76d813',
     },
-  });
-
-  const executeMedianPythonDrt = await prisma.digitalRightToken.create({
-    data: {
+    {
       id: 'EXECUTE_MEDIAN_PYTHON',
       name: 'Execute Median Python',
-      description:
-        'Runs Python-based median computations on data pools',
-      githubUrl:
-        'https://github.com/ntls-io/Python-Scripts-MVP/blob/main/calculate_median.py',
+      description: 'Runs Python-based median computations on data pools.',
+      githubUrl: 'https://github.com/ntls-io/Python-Scripts-MVP/blob/main/calculate_median.py',
       isActive: true,
       hash: 'c648a5eefbd58c1fe95c48a53ceb7f0957ee1c5842f043710a41b21123e170d7',
     },
-  });
-
-  const ownershipTokenDrt = await prisma.digitalRightToken.upsert({
-    where: { id: 'OWNERSHIP_TOKEN' },
-    update: {},
-    create: {
+    {
       id: 'OWNERSHIP_TOKEN',
       name: 'Ownership Token',
-      description: 'Represents ownership in a data pool, received upon redeeming an append DRT',
+      description: 'Represents ownership in a data pool, received upon redeeming an append DRT.',
       githubUrl: null,
       hash: null,
       isActive: false,
     },
-  });
+  ];
 
-  console.log('✅ DRT Types created');
+  for (const drtData of drtsToUpsert) {
+    const drt = await prisma.digitalRightToken.upsert({
+      where: { id: drtData.id },
+      update: { // Define what fields to update if the DRT already exists
+        name: drtData.name,
+        description: drtData.description,
+        githubUrl: drtData.githubUrl,
+        isActive: drtData.isActive,
+        hash: drtData.hash,
+      },
+      create: drtData, // Full data for creation
+    });
+    console.log(`Upserted DRT: ${drt.name} (ID: ${drt.id})`);
+  }
+  console.log('✅ DRT Types seeded.');
 
-  // // 🏦 Create pools with schema definitions and new on-chain addresses
-  // // Using poolSequenceId for each pool
-  // const marketAnalysisPool = await prisma.pool.create({
-  //   data: {
-  //     name: 'Market Analysis Pool',
-  //     description: 'Contains market trend data from 2023-2024',
-  //     poolSequenceId: 1, // First pool of this name for user1
-  //     chainAddress: '7nYuwdHqwrxbr5CKqRqZY6ZduuB3ZSLJsBz8RPKkqvCp',
-  //     vaultAddress: 'VaultPDA_marketAnalysis',
-  //     feeVaultAddress: 'FeeVaultPDA_marketAnalysis',
-  //     ownershipMintAddress: 'OwnershipMint_marketAnalysis',
-  //     ownerId: user1.id,
-  //     schemaDefinition: {
-  //       "$schema": "http://json-schema.org/draft-07/schema#",
-  //       "type": "object",
-  //       "properties": {
-  //         "timestamp": {
-  //           "type": "array",
-  //           "items": {
-  //             "type": "number"
-  //           }
-  //         },
-  //         "marketValue": {
-  //           "type": "array",
-  //           "items": {
-  //             "type": "number"
-  //           }
-  //         },
-  //         "volume": {
-  //           "type": "array",
-  //           "items": {
-  //             "type": "number"
-  //           }
-  //         }
-  //       },
-  //       "required": [
-  //         "timestamp",
-  //         "marketValue",
-  //         "volume"
-  //       ]
-  //     },
-  //   },
+  // --- Section 3: Seed Sample Data (Users, Pools, etc.) ---
+  // This is where you'd uncomment and adapt your sample data creation.
+  // These will be created fresh if the clean-up section runs.
+
+  // console.log('👤 Creating sample users...');
+  // const user1Data = {
+  //   id: process.env.CLERK_ID_ALICE || 'user_test_alice', // Use actual Clerk User ID for testing if possible
+  //   clerkId: process.env.CLERK_ID_ALICE || 'user_test_alice',
+  //   walletAddress: '5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty',
+  // };
+  // const user1 = await prisma.user.upsert({ // Using upsert for users allows re-running seed
+  //   where: { id: user1Data.id },
+  //   update: { walletAddress: user1Data.walletAddress }, // Example update
+  //   create: user1Data,
   // });
-    
-  // const customerInsightsPool = await prisma.pool.create({
-  //   data: {
-  //     name: 'Customer Insights',
-  //     description: 'Aggregated customer behavior metrics',
-  //     poolSequenceId: 1, // First pool of this name for user2 
-  //     chainAddress: 'BPFLoader2111111111111111111111111111111111',
-  //     vaultAddress: 'VaultPDA_customerInsights',
-  //     feeVaultAddress: 'FeeVaultPDA_customerInsights',
-  //     ownershipMintAddress: 'OwnershipMint_customerInsights',
-  //     ownerId: user2.id,
-  //     schemaDefinition: {
-  //       "$schema": "http://json-schema.org/draft-07/schema#",
-  //       "type": "object",
-  //       "properties": {
-  //         "customerCount": {
-  //           "type": "array",
-  //           "items": {
-  //             "type": "number"
-  //           }
-  //         },
-  //         "averageSpend": {
-  //           "type": "array",
-  //           "items": {
-  //             "type": "number"
-  //           }
-  //         },
-  //         "segmentId": {
-  //           "type": "array",
-  //           "items": {
-  //             "type": "number"
-  //           }
-  //         }
-  //       },
-  //       "required": [
-  //         "customerCount",
-  //         "averageSpend",
-  //         "segmentId"
-  //       ]
-  //     },
-  //   },
-  // });
-    
-  // const financialMetricsPool = await prisma.pool.create({
-  //   data: {
-  //     name: 'Financial Metrics',
-  //     description: 'Quarterly financial performance data',
-  //     poolSequenceId: 1, // First pool of this name for user4
-  //     chainAddress: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
-  //     vaultAddress: 'VaultPDA_financialMetrics',
-  //     feeVaultAddress: 'FeeVaultPDA_financialMetrics',
-  //     ownershipMintAddress: 'OwnershipMint_financialMetrics',
-  //     ownerId: user4.id,
-  //     schemaDefinition: {
-  //       "$schema": "http://json-schema.org/draft-07/schema#",
-  //       "type": "object",
-  //       "properties": {
-  //         "revenue": {
-  //           "type": "array",
-  //           "items": {
-  //             "type": "number"
-  //           }
-  //         },
-  //         "profit": {
-  //           "type": "array",
-  //           "items": {
-  //             "type": "number"
-  //           }
-  //         },
-  //         "expenses": {
-  //           "type": "array",
-  //           "items": {
-  //             "type": "number"
-  //           }
-  //         }
-  //       },
-  //       "required": [
-  //         "revenue",
-  //         "profit",
-  //         "expenses"
-  //       ]
-  //     },
-  //   },
-  // });
-    
-  // const developerSalaryPool = await prisma.pool.create({
-  //   data: {
-  //     name: 'Developer Salaries',
-  //     description: 'Monthly salary data for software developers',
-  //     poolSequenceId: 1, // First pool of this name for user4
-  //     chainAddress: 'sdfhjkhasmnjjasdkhjkhsSsoadijsdklfjsd',
-  //     vaultAddress: 'VaultPDA_developerSalary',
-  //     feeVaultAddress: 'FeeVaultPDA_developerSalary',
-  //     ownershipMintAddress: 'OwnershipMint_developerSalary',
-  //     ownerId: user4.id,
-  //     schemaDefinition: {
-  //       "$schema": "http://json-schema.org/draft-07/schema#",
-  //       "type": "object",
-  //       "properties": {
-  //         "income": {
-  //           "type": "array",
-  //           "items": {
-  //             "type": "number"
-  //           }
-  //         },
-  //         "tax": {
-  //           "type": "array",
-  //           "items": {
-  //             "type": "number"
-  //           }
-  //         },
-  //         "netSalary": {
-  //           "type": "array",
-  //           "items": {
-  //             "type": "number"
-  //           }
-  //         }
-  //       },
-  //       "required": [
-  //         "income",
-  //         "tax",
-  //         "netSalary"
-  //       ]
-  //     },
-  //   },
-  // });  
-  
-  // // Create a second Financial Metrics pool for user4 to demonstrate poolSequenceId incrementing
-  // const financialMetricsPool2 = await prisma.pool.create({
-  //   data: {
-  //     name: 'Financial Metrics',
-  //     description: 'Annual financial performance data', // Different description
-  //     poolSequenceId: 2, // Second pool of this name for user4
-  //     chainAddress: 'F1nanc1alM3tr1cs2T0k3nAddressSec0ndInstance',
-  //     vaultAddress: 'VaultPDA_financialMetrics2',
-  //     feeVaultAddress: 'FeeVaultPDA_financialMetrics2',
-  //     ownershipMintAddress: 'OwnershipMint_financialMetrics2',
-  //     ownerId: user4.id,
-  //     schemaDefinition: {
-  //       "$schema": "http://json-schema.org/draft-07/schema#",
-  //       "type": "object",
-  //       "properties": {
-  //         "yearlyRevenue": {
-  //           "type": "array",
-  //           "items": {
-  //             "type": "number"
-  //           }
-  //         },
-  //         "yearlyProfit": {
-  //           "type": "array",
-  //           "items": {
-  //             "type": "number"
-  //           }
-  //         }
-  //       },
-  //       "required": [
-  //         "yearlyRevenue",
-  //         "yearlyProfit"
-  //       ]
-  //     },
-  //   },
-  // });
+  // console.log(`Upserted sample user: ${user1.id}`);
 
-  // console.log('✅ Pools created');
+  // // ... (user2, user3, user4 creation using upsert similarly)
 
-  // // 🔗 Define Pool-DRT Relationships
-  // await prisma.poolAllowedDRT.createMany({
-  //   data: [
-  //     { poolId: marketAnalysisPool.id, drtId: appendDrt.id },
-  //     { poolId: marketAnalysisPool.id, drtId: executeMedianWASMDrt.id },
-  //     { poolId: customerInsightsPool.id, drtId: executeMedianPythonDrt.id },
-  //     { poolId: financialMetricsPool.id, drtId: appendDrt.id },
-  //     { poolId: financialMetricsPool.id, drtId: executeMedianWASMDrt.id },
-  //     { poolId: financialMetricsPool.id, drtId: executeMedianPythonDrt.id },
-  //     { poolId: developerSalaryPool.id, drtId: appendDrt.id },
-  //     { poolId: developerSalaryPool.id, drtId: executeMedianPythonDrt.id },
-  //     { poolId: financialMetricsPool2.id, drtId: appendDrt.id }, // Add relationships for second pool
-  //     { poolId: financialMetricsPool2.id, drtId: executeMedianWASMDrt.id },
-  //   ],
-  // });
+  // // Example: Assigning roles to sample user1
+  // if (user1) {
+  //   const dataProviderRole = await prisma.role.findUnique({ where: { name: RoleName.DATA_PROVIDER }});
+  //   const codeProviderRole = await prisma.role.findUnique({ where: { name: RoleName.CODE_PROVIDER }});
 
-  // console.log('✅ Pool-DRT relationships set');
+  //   if (dataProviderRole) {
+  //     await prisma.userRole.upsert({
+  //       where: { userId_roleId: { userId: user1.id, roleId: dataProviderRole.id } },
+  //       update: {},
+  //       create: { userId: user1.id, roleId: dataProviderRole.id },
+  //     });
+  //   }
+  //   if (codeProviderRole) {
+  //      await prisma.userRole.upsert({
+  //       where: { userId_roleId: { userId: user1.id, roleId: codeProviderRole.id } },
+  //       update: {},
+  //       create: { userId: user1.id, roleId: codeProviderRole.id },
+  //     });
+  //   }
+  //   console.log(`Upserted roles for ${user1.id}`);
+  // }
+  // console.log('✅ Sample users and roles assigned.');
 
-  // // 📈 Create enclave measurements
-  // await prisma.enclaveMeasurement.create({
-  //   data: {
-  //     poolId: marketAnalysisPool.id,
-  //     mrenclave:
-  //       'c5e34826d42766363286055750373441545bc601df37fab07231bca4324db319',
-  //     mrsigner:
-  //       'eb33db710373cbf7c6bfa26e6e9d40e261cfd1f5adc38db6599bfe764e9180cc',
-  //     isvProdId: '0',
-  //     isvSvn: '0',
-  //   },
-  // });
 
-  // await prisma.enclaveMeasurement.create({
-  //   data: {
-  //     poolId: customerInsightsPool.id,
-  //     mrenclave: 'kljsdfkljkljesk12321la89237jklshdfjkhsdf',
-  //     mrsigner: '6e6e9d40e261cfd1f5adc38db6599bfe764e9180cc',
-  //     isvProdId: '0',
-  //     isvSvn: '0',
-  //   },
-  // });
+  // console.log('🏦 Creating sample pools...');
+  // // Your pool creation logic... ensure ownerId maps to the sample users created above
+  // // const marketAnalysisPool = await prisma.pool.upsert({ where: { chainAddress: '7nYuwdHqwrxbr5CKqRqZY6ZduuB3ZSLJsBz8RPKkqvCp'}, update: {...}, create: { name: 'Market Analysis Pool', ownerId: user1.id, chainAddress: '...', ... }});
+  // console.log('✅ Sample pools created.');
 
-  // await prisma.enclaveMeasurement.create({
-  //   data: {
-  //     poolId: financialMetricsPool.id,
-  //     mrenclave: 'jkhsdfjkhjkadhSDA786Das6as78d6asd786dsaHASDJg',
-  //     mrsigner: '879sadf756df232esd7F7SD801237432HUJ89DR71213',
-  //     isvProdId: '0',
-  //     isvSvn: '0',
-  //   },
-  // });
+  // // ... (PoolAllowedDRT, EnclaveMeasurement, DRTInstance creation for sample data) ...
+  // // For these, if they are purely sample, deleting and createMany might be simpler than individual upserts unless you need to update specific instances.
 
-  // await prisma.enclaveMeasurement.create({
-  //   data: {
-  //     poolId: developerSalaryPool.id,
-  //     mrenclave: 'JKASHDKLKJSDYS79s7d61972jkhsajkhfd76979asd',
-  //     mrsigner: 'sdfkhg32j4h4jl32891789asldhnjksdaghkgwyiqu28',
-  //     isvProdId: '0',
-  //     isvSvn: '0',
-  //   },
-  // });
-  
-  // await prisma.enclaveMeasurement.create({
-  //   data: {
-  //     poolId: financialMetricsPool2.id,
-  //     mrenclave: 'JKASHDKLKJSDYS79s7d61972jkhsajkhfd76979bce',
-  //     mrsigner: 'sdfkhg32j4h4jl32891789asldhnjksdaghkgwyiqu99',
-  //     isvProdId: '0',
-  //     isvSvn: '0',
-  //   },
-  // });
-
-  // console.log('✅ Enclave Measurements added');
-
-  // // 🎟️ Create DRT instances
-  // await prisma.dRTInstance.createMany({
-  //   data: [
-  //     {
-  //       mintAddress: 'market_append_1',
-  //       drtId: appendDrt.id,
-  //       poolId: marketAnalysisPool.id,
-  //       ownerId: user1.id,
-  //       state: 'active',
-  //       isListed: true,
-  //       price: 2.0,
-  //     },
-  //     {
-  //       mintAddress: 'market_wasm_1',
-  //       drtId: executeMedianWASMDrt.id,
-  //       poolId: marketAnalysisPool.id,
-  //       ownerId: user1.id,
-  //       state: 'active',
-  //       isListed: true,
-  //       price: 3.1,
-  //     },
-  //     {
-  //       mintAddress: 'customer_python_1',
-  //       drtId: executeMedianPythonDrt.id,
-  //       poolId: customerInsightsPool.id,
-  //       ownerId: user2.id,
-  //       state: 'active',
-  //       isListed: true,
-  //       price: 2.5,
-  //     },
-  //     {
-  //       mintAddress: 'financial_append_1',
-  //       drtId: appendDrt.id,
-  //       poolId: financialMetricsPool.id,
-  //       ownerId: user4.id,
-  //       state: 'pending',
-  //       isListed: false,
-  //       price: 3.0,
-  //     },
-  //     {
-  //       mintAddress: 'financial_python_1',
-  //       drtId: executeMedianPythonDrt.id,
-  //       poolId: financialMetricsPool.id,
-  //       ownerId: user4.id,
-  //       state: 'active',
-  //       isListed: false,
-  //       price: 2.8,
-  //     },
-  //     {
-  //       mintAddress: 'developer_append_1',
-  //       drtId: appendDrt.id,
-  //       poolId: developerSalaryPool.id,
-  //       ownerId: user4.id,
-  //       state: 'completed',
-  //       isListed: false,
-  //       price: 1.9,
-  //     },
-  //     {
-  //       mintAddress: 'developer_python_1',
-  //       drtId: executeMedianPythonDrt.id,
-  //       poolId: developerSalaryPool.id,
-  //       ownerId: user4.id,
-  //       state: 'completed',
-  //       isListed: false,
-  //       price: 2.2,
-  //     },
-  //     {
-  //       mintAddress: 'financial_wasm_1',
-  //       drtId: executeMedianWASMDrt.id,
-  //       poolId: financialMetricsPool.id,
-  //       ownerId: user4.id,
-  //       state: 'active',
-  //       isListed: true,
-  //       price: 3.3,
-  //     },
-  //     {
-  //       mintAddress: 'market_python_1',
-  //       drtId: executeMedianPythonDrt.id,
-  //       poolId: marketAnalysisPool.id,
-  //       ownerId: user1.id,
-  //       state: 'active',
-  //       isListed: true,
-  //       price: 2.7,
-  //     },
-  //     {
-  //       mintAddress: 'developer_wasm_1',
-  //       drtId: executeMedianWASMDrt.id,
-  //       poolId: developerSalaryPool.id,
-  //       ownerId: user4.id,
-  //       state: 'active',
-  //       isListed: false,
-  //       price: 2.4,
-  //     },
-  //     // DRT instances for the second financial metrics pool
-  //     {
-  //       mintAddress: 'financial2_append_1',
-  //       drtId: appendDrt.id,
-  //       poolId: financialMetricsPool2.id,
-  //       ownerId: user4.id,
-  //       state: 'active',
-  //       isListed: true,
-  //       price: 3.5,
-  //     },
-  //     {
-  //       mintAddress: 'financial2_wasm_1',
-  //       drtId: executeMedianWASMDrt.id,
-  //       poolId: financialMetricsPool2.id,
-  //       ownerId: user4.id,
-  //       state: 'active',
-  //       isListed: true,
-  //       price: 4.0,
-  //     },
-  //   ],
-  // });
-
-  // console.log('✅ DRT Instances created');
-  console.log('🌱 Seed data fully loaded!');
+  console.log('🎉 Seed data fully processed!');
 }
 
 main()
