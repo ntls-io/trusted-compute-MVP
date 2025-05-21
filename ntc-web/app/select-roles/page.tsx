@@ -3,7 +3,8 @@
 
 import { useState, useEffect, FormEvent } from 'react';
 import { useUser, SignedIn, SignedOut, SignInButton } from '@clerk/nextjs';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { useSWRConfig } from 'swr';
 
 // Matches Prisma's RoleName enum values. Used for selection state.
 enum ClientRoleName {
@@ -14,11 +15,9 @@ enum ClientRoleName {
 
 // Interface for a role object fetched from /api/roles
 interface FetchedRole {
-    id: number; // The integer ID from the database Role table
-    name: ClientRoleName; // The RoleName string value
+    id: number;
+    name: ClientRoleName;
     description: string;
-    // Add 'label' if your API provides it, or derive it if needed.
-    // For now, we'll derive label from 'name' or use a mapping.
 }
 
 // Interface for the expected user profile data from /api/user/me
@@ -35,44 +34,42 @@ function getRoleLabel(roleName: ClientRoleName): string {
         case ClientRoleName.DATA_PROVIDER: return "Data Provider";
         case ClientRoleName.DATA_ANALYST: return "Data Analyst";
         case ClientRoleName.CODE_PROVIDER: return "Code Provider";
-        default: return roleName; // Fallback to the raw name
+        default:
+            const words = (roleName as string).toLowerCase().split('_');
+            return words.map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
     }
 }
-
 
 export default function SelectRolesPage() {
     const { user, isSignedIn, isLoaded: isAuthLoaded } = useUser();
     const router = useRouter();
+    const searchParams = useSearchParams(); // <-- Get searchParams
+    const { mutate } = useSWRConfig();
 
-    const [allAvailableRoles, setAllAvailableRoles] = useState<FetchedRole[]>([]); // Stores roles from DB
+    const [allAvailableRoles, setAllAvailableRoles] = useState<FetchedRole[]>([]);
     const [selectedClientRoles, setSelectedClientRoles] = useState<ClientRoleName[]>([]);
-
     const [isSubmitting, setIsSubmitting] = useState(false);
-    const [isFetchingPageData, setIsFetchingPageData] = useState(true); // Combined loading state
-
+    const [isFetchingPageData, setIsFetchingPageData] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
     useEffect(() => {
         async function loadPageData() {
-            if (isAuthLoaded && isSignedIn && user) {
-                setError(null);
-                setIsFetchingPageData(true);
-                try {
-                    // Fetch all available roles (name, description)
-                    const rolesResponse = await fetch('/api/roles');
-                    if (!rolesResponse.ok) throw new Error('Failed to fetch available roles.');
-                    const fetchedRoles: FetchedRole[] = await rolesResponse.json();
-                    setAllAvailableRoles(fetchedRoles);
+            setIsFetchingPageData(true);
+            setError(null);
+            try {
+                const rolesResponse = await fetch('/api/roles');
+                if (!rolesResponse.ok) throw new Error('Failed to fetch available roles.');
+                const fetchedRolesData: FetchedRole[] = await rolesResponse.json();
+                setAllAvailableRoles(fetchedRolesData);
 
-                    // Fetch user's currently selected roles
+                if (isSignedIn && user) {
                     const userProfileResponse = await fetch('/api/user/me');
                     if (!userProfileResponse.ok) {
                         if (userProfileResponse.status === 404) {
-                            console.warn("User profile not found via /api/user/me. New user or check-user issue.");
-                            // No roles selected yet for a new user, this is fine.
+                            console.warn("User profile (for roles) not found via /api/user/me for role pre-selection.");
                         } else {
-                            throw new Error(`Failed to fetch current roles (status: ${userProfileResponse.status})`);
+                            console.error(`Failed to fetch current roles (status: ${userProfileResponse.status})`);
                         }
                     } else {
                         const userData: UserProfileWithRoles = await userProfileResponse.json();
@@ -80,38 +77,21 @@ export default function SelectRolesPage() {
                             setSelectedClientRoles(userData.roles);
                         }
                     }
-                } catch (fetchError: any) {
-                    console.error("Error loading page data:", fetchError);
-                    setError(fetchError.message || "Could not load necessary data. Please try again.");
-                } finally {
-                    setIsFetchingPageData(false);
                 }
-            } else if (isAuthLoaded && !isSignedIn) {
-                setIsFetchingPageData(false); // Not signed in, no data to fetch for user
-                // Fetch available roles even if not signed in if the page should show them
-                try {
-                     setIsFetchingPageData(true);
-                     const rolesResponse = await fetch('/api/roles');
-                     if (!rolesResponse.ok) throw new Error('Failed to fetch available roles.');
-                     const fetchedRoles: FetchedRole[] = await rolesResponse.json();
-                     setAllAvailableRoles(fetchedRoles);
-                } catch (fetchError: any) {
-                    console.error("Error fetching available roles (signed out):", fetchError);
-                    // Potentially show a limited view or error for fetching role list
-                } finally {
-                    setIsFetchingPageData(false);
-                }
+            } catch (fetchError: any) {
+                console.error("Error loading page data for /select-roles:", fetchError);
+                setError(fetchError.message || "Could not load page data.");
+            } finally {
+                setIsFetchingPageData(false);
             }
         }
-        loadPageData();
+        if (isAuthLoaded) {
+            loadPageData();
+        }
     }, [isAuthLoaded, isSignedIn, user]);
 
     const handleRoleChange = (roleName: ClientRoleName) => {
-        setSelectedClientRoles(prev =>
-            prev.includes(roleName)
-                ? prev.filter(r => r !== roleName)
-                : [...prev, roleName]
-        );
+        setSelectedClientRoles(prev => prev.includes(roleName) ? prev.filter(r => r !== roleName) : [...prev, roleName]);
         setError(null);
         setSuccessMessage(null);
     };
@@ -134,7 +114,10 @@ export default function SelectRolesPage() {
             const data = await response.json();
             if (!response.ok) throw new Error(data.message || 'An unknown error occurred.');
             setSuccessMessage(data.message || 'Roles updated successfully! Redirecting...');
-            setTimeout(() => router.push('/'), 2000);
+            await mutate('/api/user/me');
+
+            const nextUrl = searchParams.get('next') || '/'; // <-- Use 'next' param or default to '/'
+            setTimeout(() => router.push(nextUrl), 2000);
         } catch (err: any) {
             setError(err.message);
         } finally {
@@ -142,29 +125,29 @@ export default function SelectRolesPage() {
         }
     };
 
-    if (isFetchingPageData) {
-        return (
-            <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px', background: '#f7fafc' }}>
-                Loading information...
-            </div>
-        );
+    if (!isAuthLoaded || isFetchingPageData) {
+        return <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px', background: '#f7fafc' }}>Loading information...</div>;
     }
 
     return (
+        // ... JSX structure remains the same as your provided version ...
+        // Just ensure the form part is within <SignedIn>
         <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '20px', background: '#f7fafc' }}>
             <SignedIn>
                 <div style={{ background: 'white', padding: '30px', borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)', maxWidth: '550px', width: '100%' }}>
-                    <h1 style={{ fontSize: '22px', fontWeight: '600', textAlign: 'center', marginBottom: '8px', color: '#1a202c' }}>
+                    {/* ... h1 and p tags ... */}
+                     <h1 style={{ fontSize: '22px', fontWeight: '600', textAlign: 'center', marginBottom: '8px', color: '#1a202c' }}>
                         {user?.firstName ? `Manage Roles for ${user.firstName}` : 'Manage Your Roles'}
                     </h1>
                     <p style={{ textAlign: 'center', marginBottom: '25px', color: '#4a5568', fontSize: '15px' }}>
                         Select or update your roles to best describe how you'll interact with Nautilus.
                     </p>
                     <form onSubmit={handleSubmit}>
-                        {allAvailableRoles.length === 0 && !isFetchingPageData && <p>No roles available to select at this moment.</p>}
+                        {/* ... mapping over allAvailableRoles ... */}
+                        {allAvailableRoles.length === 0 && !isFetchingPageData && <p className="text-center text-gray-500">No roles are currently available to select.</p>}
                         {allAvailableRoles.map(role => (
                             <div 
-                                key={role.name} // Use role.name (ClientRoleName) as it's unique and used for selection
+                                key={role.name} 
                                 style={{ 
                                     marginBottom: '12px', 
                                     padding: '12px 15px', 
@@ -186,7 +169,6 @@ export default function SelectRolesPage() {
                                     />
                                     <div>
                                         <span style={{ fontWeight: '500', color: '#2d3748' }}>{getRoleLabel(role.name)}</span>
-                                        {/* Display description fetched from DB */}
                                         <p style={{ fontSize: '13px', color: '#718096', margin: '3px 0 0 0' }}>{role.description}</p>
                                     </div>
                                 </label>
@@ -201,7 +183,8 @@ export default function SelectRolesPage() {
                 </div>
             </SignedIn>
             <SignedOut>
-                <div style={{ textAlign: 'center', background: 'white', padding: '40px', borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
+                {/* ... SignedOut JSX ... */}
+                 <div style={{ textAlign: 'center', background: 'white', padding: '40px', borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
                     <p style={{ marginBottom: '20px' }}>Please sign in to select or manage your roles.</p>
                     <SignInButton mode="modal">
                         <button style={{ padding: '10px 20px', background: '#3182ce', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Sign In</button>

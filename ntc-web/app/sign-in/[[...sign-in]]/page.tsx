@@ -16,6 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// ntc-web/app/sign-in/[[...sign-in]]/page.tsx
 'use client';
 
 import { SignIn } from '@clerk/nextjs';
@@ -42,7 +43,7 @@ export default function SignInPage() {
               <h2 className="text-2xl font-bold text-gray-900">Nautilus MVP Sign In</h2>
             </div>
             <SignIn
-              afterSignInUrl={redirectUrl}
+              fallbackRedirectUrl={redirectUrl}
               appearance={{
                 elements: {
                   formButtonPrimary: 'bg-blue-600 hover:bg-blue-700 text-sm normal-case',

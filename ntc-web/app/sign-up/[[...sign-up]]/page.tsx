@@ -16,6 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// ntc-web/app/sign-up/[[...sign-up]]/page.tsx
 'use client';
 
 import { SignUp, useUser } from "@clerk/nextjs";
@@ -199,8 +200,7 @@ export default function SignUpPage() {
         </div>
 
         <SignUp
-          afterSignUpUrl="/sign-up?step=selectRoles" // Critical: redirect back here after Clerk sign-up
-          afterSignInUrl="/sign-up?step=selectRoles" // For cases where sign-up leads to auto sign-in
+          fallbackRedirectUrl="/sign-up?step=selectRoles" // Critical: redirect back here after Clerk sign-up
           appearance={{
             elements: {
               formButtonPrimary: "bg-blue-600 hover:bg-blue-700 text-sm normal-case",
