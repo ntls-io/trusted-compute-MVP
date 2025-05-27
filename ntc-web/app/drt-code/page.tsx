@@ -64,6 +64,27 @@ interface FormState {
   hash: string
 }
 
+// ── validation helpers ───────────────────────────────
+const SHA256_REGEX = /^[A-Fa-f0-9]{64}$/
+
+function normaliseGithubUrl(raw: string): string | null {
+  if (!raw) return ''
+  const trimmed = raw.trim()
+
+  // Accept either https://github.com/… or github.com/…
+  let candidate = trimmed
+  if (candidate.startsWith('github.com/')) {
+    candidate = `https://${candidate}`
+  }
+
+  if (!candidate.startsWith('https://github.com/')) return null
+  return candidate
+}
+
+function isValidSha256(hex: string): boolean {
+  return SHA256_REGEX.test(hex.trim())
+}
+
 /* ────────────────────────────────────────────────────
    Small utility component to show + copy long hashes
 ────────────────────────────────────────────────────── */
@@ -134,6 +155,9 @@ export default function DrtCodePage() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [saving, setSaving] = useState(false)
 
+  /* ------- validation/errors ------- */
+  const [fieldErrors, setFieldErrors] = useState<{ githubUrl?: string; hash?: string }>({})
+
   /* ------- delete-confirm state ------- */
   const [deleteId, setDeleteId] = useState<string | null>(null)
 
@@ -157,6 +181,7 @@ export default function DrtCodePage() {
   const openNew = () => {
     setEditingId(null)
     setForm(emptyForm)
+    setFieldErrors({})
     setDialogOpen(true)
   }
 
@@ -169,28 +194,53 @@ export default function DrtCodePage() {
       githubUrl: d.githubUrl || '',
       hash: d.hash || '',
     })
+    setFieldErrors({})
     setDialogOpen(true)
   }
 
   const handleSave = async () => {
+    // ── client-side validation ───────────
+    const errors: { githubUrl?: string; hash?: string } = {}
+
+    const normalisedUrl = normaliseGithubUrl(form.githubUrl)
+    if (normalisedUrl === null) {
+      errors.githubUrl = 'URL must start with https://github.com/'
+    }
+
+    if (!isValidSha256(form.hash)) {
+      errors.hash = 'Hash must be 64 hexadecimal characters (valid SHA-256)'
+    }
+
+    setFieldErrors(errors)
+
+    if (Object.keys(errors).length > 0) return // abort save – user must fix
+
     setSaving(true)
 
     try {
+      const body = editingId
+        ? {
+            description: form.description,
+            githubUrl: normalisedUrl!,
+            hash: form.hash.trim(),
+            isActive: true,
+          }
+        : {
+            ...form,
+            githubUrl: normalisedUrl!,
+            hash: form.hash.trim(),
+          }
+
       const res = editingId
         ? await fetch(`/api/drt-code/${editingId}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              description: form.description,
-              githubUrl: form.githubUrl,
-              hash: form.hash,
-              isActive: true,
-            }),
+            body: JSON.stringify(body),
           })
         : await fetch('/api/drt-code', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(form),
+            body: JSON.stringify(body),
           })
 
       /* —— duplicate-name error —— */
@@ -198,7 +248,7 @@ export default function DrtCodePage() {
         const { error } = await res.json()
         setErrorMsg(error ?? 'A DRT with that name already exists.')
         setSaving(false)
-        return // keep dialog open so user can fix
+        return
       }
 
       /* —— any other server error —— */
@@ -229,9 +279,7 @@ export default function DrtCodePage() {
   /* ───── UI ───── */
   if (!isSignedIn)
     return (
-      <div className="container mx-auto p-10 text-center text-lg">
-        Please sign in.
-      </div>
+      <div className="container mx-auto p-10 text-center text-lg">Please sign in.</div>
     )
 
   const thClass = 'bg-gray-800 text-white font-medium'
@@ -241,9 +289,7 @@ export default function DrtCodePage() {
       <div className="container mx-auto max-w-6xl p-6 space-y-10">
         {/* ================= Header ================= */}
         <div className="flex justify-between items-center">
-          <h1 className="text-3xl font-bold">
-            Digital Right Token&nbsp;– Code Management
-          </h1>
+          <h1 className="text-3xl font-bold">Digital Right Token&nbsp;– Code Management</h1>
         </div>
 
         {/* ================= Baseline table ================= */}
@@ -292,9 +338,7 @@ export default function DrtCodePage() {
         <section>
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-xl font-semibold">Custom Defined DRTs</h2>
-            <Button size="sm" onClick={openNew}>
-              New&nbsp;DRT
-            </Button>
+            <Button size="sm" onClick={openNew}>New&nbsp;DRT</Button>
           </div>
 
           <Card className="p-0 overflow-x-auto">
@@ -305,9 +349,7 @@ export default function DrtCodePage() {
                   <TableHead className={thClass}>Description</TableHead>
                   <TableHead className={thClass}>GitHub&nbsp;URL</TableHead>
                   <TableHead className={thClass}>SHA-256&nbsp;Hash</TableHead>
-                  <TableHead className={thClass} style={{ width: 120 }}>
-                    Actions
-                  </TableHead>
+                  <TableHead className={thClass} style={{ width: 120 }}>Actions</TableHead>
                 </TableRow>
               </TableHeader>
 
@@ -322,9 +364,7 @@ export default function DrtCodePage() {
               ) : customDrts.length === 0 ? (
                 <tbody>
                   <tr>
-                    <td colSpan={5} className="p-6 text-center text-gray-500">
-                      No custom DRTs yet.
-                    </td>
+                    <td colSpan={5} className="p-6 text-center text-gray-500">No custom DRTs yet.</td>
                   </tr>
                 </tbody>
               ) : (
@@ -355,11 +395,7 @@ export default function DrtCodePage() {
                           {/* ---- Edit ---- */}
                           <Tooltip>
                             <TooltipTrigger asChild>
-                              <Button
-                                size="icon"
-                                variant="ghost"
-                                onClick={() => openEdit(d)}
-                              >
+                              <Button size="icon" variant="ghost" onClick={() => openEdit(d)}>
                                 <Pencil className="w-4 h-4" />
                               </Button>
                             </TooltipTrigger>
@@ -371,11 +407,7 @@ export default function DrtCodePage() {
                             <Tooltip>
                               <TooltipTrigger asChild>
                                 <AlertDialogTrigger asChild>
-                                  <Button
-                                    size="icon"
-                                    variant="ghost"
-                                    onClick={() => setDeleteId(d.id)}
-                                  >
+                                  <Button size="icon" variant="ghost" onClick={() => setDeleteId(d.id)}>
                                     <Trash className="w-4 h-4" />
                                   </Button>
                                 </AlertDialogTrigger>
@@ -407,9 +439,7 @@ export default function DrtCodePage() {
                     <label className="text-sm font-medium">Operation</label>
                     <Input
                       value={form.operation}
-                      onChange={(e) =>
-                        setForm({ ...form, operation: e.target.value })
-                      }
+                      onChange={(e) => setForm({ ...form, operation: e.target.value })}
                       placeholder="Execute Mean"
                     />
                   </div>
@@ -419,10 +449,7 @@ export default function DrtCodePage() {
                       className="w-full border rounded-md p-2"
                       value={form.language}
                       onChange={(e) =>
-                        setForm({
-                          ...form,
-                          language: e.target.value as 'PYTHON' | 'WASM',
-                        })
+                        setForm({ ...form, language: e.target.value as 'PYTHON' | 'WASM' })
                       }
                     >
                       <option value="PYTHON">Python</option>
@@ -436,30 +463,34 @@ export default function DrtCodePage() {
                 <label className="text-sm font-medium">Description</label>
                 <Textarea
                   value={form.description}
-                  onChange={(e) =>
-                    setForm({ ...form, description: e.target.value })
-                  }
+                  onChange={(e) => setForm({ ...form, description: e.target.value })}
                 />
               </div>
 
+              {/* GitHub URL */}
               <div className="space-y-2">
                 <label className="text-sm font-medium">GitHub URL</label>
                 <Input
+                  className={fieldErrors.githubUrl ? 'border-red-500' : ''}
                   value={form.githubUrl}
-                  onChange={(e) =>
-                    setForm({ ...form, githubUrl: e.target.value })
-                  }
+                  onChange={(e) => setForm({ ...form, githubUrl: e.target.value })}
+                  placeholder="https://github.com/org/repo/path/to/file"
                 />
+                {fieldErrors.githubUrl && (
+                  <p className="text-sm text-red-600">{fieldErrors.githubUrl}</p>
+                )}
               </div>
 
+              {/* SHA-256 Hash */}
               <div className="space-y-2">
                 <label className="text-sm font-medium">SHA-256 Hash</label>
                 <Input
+                  className={fieldErrors.hash ? 'border-red-500' : ''}
                   value={form.hash}
-                  onChange={(e) =>
-                    setForm({ ...form, hash: e.target.value })
-                  }
+                  onChange={(e) => setForm({ ...form, hash: e.target.value })}
+                  placeholder="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
                 />
+                {fieldErrors.hash && <p className="text-sm text-red-600">{fieldErrors.hash}</p>}
               </div>
 
               <Button
@@ -469,9 +500,7 @@ export default function DrtCodePage() {
                   saving || (!editingId && form.operation.trim().length === 0)
                 }
               >
-                {saving && (
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                )}
+                {saving && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
                 {editingId ? 'Save' : 'Create'}
               </Button>
             </div>
@@ -479,22 +508,17 @@ export default function DrtCodePage() {
         </Dialog>
 
         {/* ================= Delete Confirm Dialog ================= */}
-        <AlertDialog
-          open={deleteId !== null}
-          onOpenChange={(open) => !open && setDeleteId(null)}
-        >
+        <AlertDialog open={deleteId !== null} onOpenChange={(open) => !open && setDeleteId(null)}>
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>
-                <Info className="w-5 h-5 text-red-500 inline-block mr-2" />
-                Delete DRT?
+                <Info className="w-5 h-5 text-red-500 inline-block mr-2" /> Delete DRT?
               </AlertDialogTitle>
               <AlertDialogDescription className="text-justify mb-4 flex items-start gap-2 p-3 bg-gray-100 rounded-md">
                 <span>
-                  This will permanently remove the selected Digital Right Token
-                  from your account. Pools that already reference this DRT will
-                  remain unaffected, but the token definition itself will be
-                  deleted.
+                  This will permanently remove the selected Digital Right Token from your account.
+                  Pools that already reference this DRT will remain unaffected, but the token
+                  definition itself will be deleted.
                 </span>
               </AlertDialogDescription>
               <AlertDialogDescription className="text-justify">
@@ -506,25 +530,18 @@ export default function DrtCodePage() {
                 <Button variant="outline">Cancel</Button>
               </AlertDialogCancel>
               <AlertDialogAction asChild>
-                <Button variant="destructive" onClick={confirmDelete}>
-                  Delete
-                </Button>
+                <Button variant="destructive" onClick={confirmDelete}>Delete</Button>
               </AlertDialogAction>
             </div>
           </AlertDialogContent>
         </AlertDialog>
 
         {/* ================= GLOBAL ERROR MODAL ================= */}
-        <AlertDialog
-          open={errorMsg !== null}
-          onOpenChange={(open) => !open && setErrorMsg(null)}
-        >
+        <AlertDialog open={errorMsg !== null} onOpenChange={(open) => !open && setErrorMsg(null)}>
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>Error:</AlertDialogTitle>
-              <AlertDialogDescription className="whitespace-pre-line">
-                {errorMsg}
-              </AlertDialogDescription>
+              <AlertDialogDescription className="whitespace-pre-line">{errorMsg}</AlertDialogDescription>
             </AlertDialogHeader>
             <div className="flex justify-end">
               <AlertDialogAction asChild>
