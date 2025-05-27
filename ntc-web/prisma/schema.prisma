@@ -65,6 +65,7 @@ model User {
     // Relationships
     pools         Pool[]
     drtInstances  DRTInstance[]
+    drtCode  DigitalRightToken[] @relation("UserDRTCode")
     userRoles     UserRole[]
 }
 
@@ -96,9 +97,16 @@ model DigitalRightToken {
     githubUrl   String?
     hash        String?   
     isActive    Boolean   @default(true)
+
+    // owner == NULL → seeded / immutable
+    ownerId String?
+    owner   User?   @relation("UserDRTCode", fields: [ownerId], references: [id])
     
     instances   DRTInstance[]
     allowedPools PoolAllowedDRT[]    // New relationship to track pools where this DRT is allowed
+
+    @@unique([name])                                  // prevent duplicates across tenant
+    @@index([ownerId])
 }
 
 // Tracks DRT instances that exist on-chain

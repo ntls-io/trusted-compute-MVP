@@ -36,6 +36,7 @@ const routeRoleRequirements: Record<string, ClientRoleName[] | undefined> = {
   '/pools': [ClientRoleName.DATA_PROVIDER, ClientRoleName.CODE_PROVIDER],
   '/analysis': [ClientRoleName.DATA_ANALYST],
   '/drt-listings': [ClientRoleName.DATA_PROVIDER, ClientRoleName.CODE_PROVIDER, ClientRoleName.DATA_ANALYST],
+  'drt-code': [ClientRoleName.CODE_PROVIDER],
   // Example: To block '/market' even if it's not explicitly disabled in sidebar:
   // '/market': ["A_ROLE_NO_ONE_HAS" as ClientRoleName], // This would effectively block it if roles are enforced
 };

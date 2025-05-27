@@ -22,27 +22,20 @@
 import React from 'react';
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Home, LayoutDashboard, LineChart, ShoppingCart, Loader2, Cog, AlertTriangle, Database, Code2 } from 'lucide-react'
+import { Home, LayoutDashboard, LineChart, ShoppingCart, Code } from 'lucide-react'
 import { useUserProfile, ClientRoleName } from '@/hooks/useUserProfile'; // Ensure this path is correct
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-
 interface SidebarProps {
   isOpen: boolean;
   onHoverStart: () => void;
   onHoverEnd: () => void;
 }
 
-const roleIconMap: Record<ClientRoleName, { icon: React.ReactElement; label: string }> = {
-  [ClientRoleName.DATA_PROVIDER]: { icon: <Database className="h-5 w-5 text-sky-600" />, label: "Data Provider" },
-  [ClientRoleName.DATA_ANALYST]: { icon: <LineChart className="h-5 w-5 text-green-600" />, label: "Data Analyst" },
-  [ClientRoleName.CODE_PROVIDER]: { icon: <Code2 className="h-5 w-5 text-purple-600" />, label: "Code Provider" },
-};
-
 const allNavItems = [
   { name: 'Home', href: '/', icon: Home, disabled: false, requiredRoles: [] as ClientRoleName[] },
   { name: 'Pools', href: '/pools', icon: LayoutDashboard, disabled: false, requiredRoles: [ClientRoleName.DATA_PROVIDER, ClientRoleName.CODE_PROVIDER] },
   { name: 'Analysis', href: '/analysis', icon: LineChart, disabled: false, requiredRoles: [ClientRoleName.DATA_ANALYST] },
   { name: 'DRT Marketplace', href: '/drt-listings', icon: ShoppingCart, disabled: false, requiredRoles: [ClientRoleName.DATA_PROVIDER, ClientRoleName.CODE_PROVIDER, ClientRoleName.DATA_ANALYST] },
+  { name: 'Custom DRTs', href: '/drt-code', icon: Code, disabled: false, requiredRoles: [ClientRoleName.CODE_PROVIDER] },
   { name: 'Market', href: '/market', icon: ShoppingCart, disabled: true, requiredRoles: [] as ClientRoleName[] },
 ];
 
