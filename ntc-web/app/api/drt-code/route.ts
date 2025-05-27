@@ -1,35 +1,67 @@
 // app/api/drt-code/route.ts
 
-import { NextResponse } from 'next/server';
-import { auth } from '@clerk/nextjs/server';
-import { PrismaClient } from '@prisma/client';
+import { NextResponse } from 'next/server'
+import { auth } from '@clerk/nextjs/server'
+import { PrismaClient, Prisma } from '@prisma/client'
 
-const prisma = new PrismaClient();
+const prisma = new PrismaClient()
 
+/* -------------------- GET -------------------- */
 export async function GET() {
-  const { userId } = await auth();
-  if (!userId) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
+  const { userId } = await auth()
+  if (!userId)
+    return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
 
-  const drts = await prisma.digitalRightToken.findMany({ orderBy: { name: 'asc' } });
-  return NextResponse.json(drts.map((d) => ({ ...d, editable: d.ownerId === userId })));
+  const drts = await prisma.digitalRightToken.findMany({
+    orderBy: { name: 'asc' },
+  })
+
+  return NextResponse.json(
+    drts.map((d) => ({ ...d, editable: d.ownerId === userId })),
+  )
 }
 
+/* -------------------- POST ------------------- */
 export async function POST(req: Request) {
-  const { userId } = await auth();
-  if (!userId) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
+  const { userId } = await auth()
+  if (!userId)
+    return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
 
-  const { operation, language, description, githubUrl, hash } = await req.json();
-  if (!operation || !language) return NextResponse.json({ error: 'Missing fields' }, { status: 400 });
+  const { operation, language, description, githubUrl, hash } = await req.json()
 
-  const compositeName = `${operation.trim()} ${language === 'PYTHON' ? 'Python' : 'WASM'}`;
-  const id = compositeName.toUpperCase().replace(/\s+/g, '_');
+  if (!operation || !language)
+    return NextResponse.json({ error: 'Missing fields' }, { status: 400 })
 
-  // uniqueness check
-  const exists = await prisma.digitalRightToken.findUnique({ where: { id } });
-  if (exists) return NextResponse.json({ error: 'A DRT with that name already exists.' }, { status: 409 });
+  const compositeName = `${operation.trim()} ${
+    language === 'PYTHON' ? 'Python' : 'WASM'
+  }`
+  const id = compositeName.toUpperCase().replace(/\s+/g, '_')
 
-  const drt = await prisma.digitalRightToken.create({
-    data: { id, name: compositeName, description, githubUrl, hash, isActive: true, owner: { connect: { clerkId: userId } } },
-  });
-  return NextResponse.json(drt, { status: 201 });
+  try {
+    const drt = await prisma.digitalRightToken.create({
+      data: {
+        id,
+        name: compositeName,
+        description,
+        githubUrl,
+        hash,
+        isActive: true,
+        owner: { connect: { clerkId: userId } },
+      },
+    })
+    return NextResponse.json(drt, { status: 201 })
+  } catch (err) {
+    /* ---- unique-constraint violation (duplicate id) ---- */
+    if (
+      err instanceof Prisma.PrismaClientKnownRequestError &&
+      err.code === 'P2002'
+    ) {
+      return NextResponse.json(
+        { error: 'A DRT with that name already exists, please enter another name.' },
+        { status: 409 },
+      )
+    }
+    /* ---- anything else becomes 500 ---- */
+    throw err
+  }
 }

@@ -42,7 +42,7 @@ import {
 } from '@/components/ui/tooltip'
 
 // ── icons ────────────────────────────────────────────
-import { Loader2, Pencil, Trash, Copy, Check } from 'lucide-react'
+import { Loader2, Pencil, Trash, Copy, Check, Info } from 'lucide-react'
 
 // ── helpers / types ──────────────────────────────────
 interface Drt {
@@ -50,7 +50,7 @@ interface Drt {
   name: string
   description: string
   githubUrl?: string | null
-  hash?: string | null // This is the source of the 'undefined'
+  hash?: string | null
   editable: boolean
   isActive: boolean
   ownerId?: string | null
@@ -64,40 +64,37 @@ interface FormState {
   hash: string
 }
 
-// ─────────────────────────────────────────────────────
-
-// New HashDisplay Component
-// Change the type of hash to string | null | undefined
+/* ────────────────────────────────────────────────────
+   Small utility component to show + copy long hashes
+────────────────────────────────────────────────────── */
 function HashDisplay({ hash }: { hash: string | null | undefined }) {
   const [copied, setCopied] = useState(false)
-
   if (!hash) return <span>—</span>
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(hash)
     setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+    setTimeout(() => setCopied(false), 2_000)
   }
 
-  const truncatedHash = `${hash.slice(0, 4)}....${hash.slice(-4)}`
+  const truncated = `${hash.slice(0, 4)}....${hash.slice(-4)}`
 
   return (
-    <TooltipProvider>
+    <TooltipProvider delayDuration={100}>
       <Tooltip>
         <TooltipTrigger asChild>
-          <div className="font-mono text-sm bg-gray-100 p-2 rounded-md overflow-x-auto whitespace-nowrap flex items-center justify-between group cursor-pointer">
-            <span>{truncatedHash}</span>
+          <div
+            className="font-mono text-sm bg-gray-100 p-2 rounded-md overflow-x-auto whitespace-nowrap
+                       flex items-center justify-between group cursor-pointer"
+            onClick={handleCopy}
+          >
+            <span>{truncated}</span>
             <Button
               variant="ghost"
               size="sm"
               className="opacity-0 group-hover:opacity-100 transition-opacity ml-2 h-6 w-6 p-0"
-              onClick={handleCopy}
             >
-              {copied ? (
-                <Check className="h-4 w-4 text-green-500" />
-              ) : (
-                <Copy className="h-4 w-4" />
-              )}
+              {copied ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
             </Button>
           </div>
         </TooltipTrigger>
@@ -109,21 +106,22 @@ function HashDisplay({ hash }: { hash: string | null | undefined }) {
   )
 }
 
-// ─────────────────────────────────────────────────────
+/* ────────────────────────────────────────────────────
+                       PAGE
+────────────────────────────────────────────────────── */
 export default function DrtCodePage() {
   const { isSignedIn } = useUser()
 
-  /* ------------------- local state ------------------ */
+  /* ------- local + table state ------- */
   const [allDrts, setAllDrts] = useState<Drt[]>([])
   const [loading, setLoading] = useState(true)
 
-  // split into baseline vs custom
   const baselineDrts = allDrts.filter(
-    (d) => !d.editable && d.isActive && d.id !== 'OWNERSHIP_TOKEN'
+    (d) => !d.editable && d.isActive && d.id !== 'OWNERSHIP_TOKEN',
   )
-  const customDrts   = allDrts.filter((d) => d.editable)
+  const customDrts = allDrts.filter((d) => d.editable)
 
-  /* -------------- form / dialog state --------------- */
+  /* ------- dialog / form state ------- */
   const emptyForm: FormState = {
     operation: '',
     language: 'PYTHON',
@@ -131,15 +129,18 @@ export default function DrtCodePage() {
     githubUrl: '',
     hash: '',
   }
-  const [form, setForm]           = useState<FormState>(emptyForm)
+  const [form, setForm] = useState<FormState>(emptyForm)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [dialogOpen, setDialogOpen] = useState(false)
-  const [saving, setSaving]       = useState(false)
+  const [saving, setSaving] = useState(false)
 
-  /* -------------- delete-confirm state -------------- */
-  const [deleteId, setDeleteId]   = useState<string | null>(null)
+  /* ------- delete-confirm state ------- */
+  const [deleteId, setDeleteId] = useState<string | null>(null)
 
-  /* ------------------- fetch helper ----------------- */
+  /* ------- NEW: global error modal state ------- */
+  const [errorMsg, setErrorMsg] = useState<string | null>(null)
+
+  /* ------- fetch helpers ------- */
   const fetchDrts = async () => {
     setLoading(true)
     const res = await fetch('/api/drt-code')
@@ -148,12 +149,11 @@ export default function DrtCodePage() {
     setLoading(false)
   }
 
-  /* -------------------- effects --------------------- */
   useEffect(() => {
     fetchDrts()
   }, [])
 
-  /* ---------------- handlers ------------------------ */
+  /* ───── handlers ───── */
   const openNew = () => {
     setEditingId(null)
     setForm(emptyForm)
@@ -163,11 +163,11 @@ export default function DrtCodePage() {
   const openEdit = (d: Drt) => {
     setEditingId(d.id)
     setForm({
-      operation   : d.name.replace(/ (Python|WASM)$/, ''),
-      language    : d.name.endsWith('Python') ? 'PYTHON' : 'WASM',
-      description : d.description,
-      githubUrl   : d.githubUrl || '',
-      hash        : d.hash || '',
+      operation: d.name.replace(/ (Python|WASM)$/, ''),
+      language: d.name.endsWith('Python') ? 'PYTHON' : 'WASM',
+      description: d.description,
+      githubUrl: d.githubUrl || '',
+      hash: d.hash || '',
     })
     setDialogOpen(true)
   }
@@ -175,28 +175,48 @@ export default function DrtCodePage() {
   const handleSave = async () => {
     setSaving(true)
 
-    if (editingId) {
-      await fetch(`/api/drt-code/${editingId}`, {
-        method : 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body   : JSON.stringify({
-          description : form.description,
-          githubUrl   : form.githubUrl,
-          hash        : form.hash,
-          isActive    : true,
-        }),
-      })
-    } else {
-      await fetch('/api/drt-code', {
-        method : 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body   : JSON.stringify(form),
-      })
-    }
+    try {
+      const res = editingId
+        ? await fetch(`/api/drt-code/${editingId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              description: form.description,
+              githubUrl: form.githubUrl,
+              hash: form.hash,
+              isActive: true,
+            }),
+          })
+        : await fetch('/api/drt-code', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(form),
+          })
 
-    setSaving(false)
-    setDialogOpen(false)
-    fetchDrts()
+      /* —— duplicate-name error —— */
+      if (res.status === 409) {
+        const { error } = await res.json()
+        setErrorMsg(error ?? 'A DRT with that name already exists.')
+        setSaving(false)
+        return // keep dialog open so user can fix
+      }
+
+      /* —— any other server error —— */
+      if (!res.ok) {
+        const { error } = await res.json().catch(() => ({}))
+        setErrorMsg(error ?? `Server responded with ${res.status}.`)
+        setSaving(false)
+        return
+      }
+
+      /* —— success —— */
+      setSaving(false)
+      setDialogOpen(false)
+      fetchDrts()
+    } catch (err: any) {
+      setErrorMsg(err.message ?? 'Network error – could not reach the server.')
+      setSaving(false)
+    }
   }
 
   const confirmDelete = async () => {
@@ -206,7 +226,7 @@ export default function DrtCodePage() {
     fetchDrts()
   }
 
-  /* ------------------- render ----------------------- */
+  /* ───── UI ───── */
   if (!isSignedIn)
     return (
       <div className="container mx-auto p-10 text-center text-lg">
@@ -221,10 +241,12 @@ export default function DrtCodePage() {
       <div className="container mx-auto max-w-6xl p-6 space-y-10">
         {/* ================= Header ================= */}
         <div className="flex justify-between items-center">
-          <h1 className="text-3xl font-bold">Digital Right Token - Code Management</h1>
+          <h1 className="text-3xl font-bold">
+            Digital Right Token&nbsp;– Code Management
+          </h1>
         </div>
 
-        {/* ================= Baseline DRTs ================= */}
+        {/* ================= Baseline table ================= */}
         <section>
           <h2 className="text-xl font-semibold mb-3">Nautilus Baseline DRTs</h2>
           <Card className="p-0 overflow-x-auto">
@@ -250,14 +272,14 @@ export default function DrtCodePage() {
                           rel="noopener noreferrer"
                           className="underline"
                         >
-                          View Source
+                          View&nbsp;Source
                         </a>
                       ) : (
                         '—'
                       )}
                     </TableCell>
                     <TableCell>
-                      <HashDisplay hash={d.hash} /> {/* Use HashDisplay here */}
+                      <HashDisplay hash={d.hash} />
                     </TableCell>
                   </TableRow>
                 ))}
@@ -266,12 +288,12 @@ export default function DrtCodePage() {
           </Card>
         </section>
 
-        {/* ================= Custom DRTs ================= */}
+        {/* ================= Custom table ================= */}
         <section>
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-xl font-semibold">Custom Defined DRTs</h2>
             <Button size="sm" onClick={openNew}>
-              New DRT
+              New&nbsp;DRT
             </Button>
           </div>
 
@@ -319,14 +341,14 @@ export default function DrtCodePage() {
                             rel="noopener noreferrer"
                             className="underline text-blue-600 hover:text-blue-800"
                           >
-                            View Source
+                            View&nbsp;Source
                           </a>
                         ) : (
                           '—'
                         )}
                       </TableCell>
                       <TableCell>
-                        <HashDisplay hash={d.hash} /> {/* Use HashDisplay here */}
+                        <HashDisplay hash={d.hash} />
                       </TableCell>
                       <TableCell>
                         <div className="flex gap-1 justify-center">
@@ -375,9 +397,7 @@ export default function DrtCodePage() {
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogContent className="sm:max-w-lg">
             <DialogHeader>
-              <DialogTitle>
-                {editingId ? 'Edit DRT' : 'Create DRT'}
-              </DialogTitle>
+              <DialogTitle>{editingId ? 'Edit DRT' : 'Create DRT'}</DialogTitle>
             </DialogHeader>
 
             <div className="space-y-4 py-4">
@@ -449,26 +469,36 @@ export default function DrtCodePage() {
                   saving || (!editingId && form.operation.trim().length === 0)
                 }
               >
-                {saving && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                {saving && (
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                )}
                 {editingId ? 'Save' : 'Create'}
               </Button>
             </div>
           </DialogContent>
         </Dialog>
 
-        {/* ================= Delete Confirm Dialog ================ */}
+        {/* ================= Delete Confirm Dialog ================= */}
         <AlertDialog
           open={deleteId !== null}
           onOpenChange={(open) => !open && setDeleteId(null)}
         >
           <AlertDialogContent>
             <AlertDialogHeader>
-              <AlertDialogTitle>Delete DRT?</AlertDialogTitle>
-              <AlertDialogDescription>
-                This will permanently remove the selected Digital Right Token
-                from your account. Pools that already reference this DRT will
-                remain unaffected, but the token definition itself will be
-                deleted. Are you sure?
+              <AlertDialogTitle>
+                <Info className="w-5 h-5 text-red-500 inline-block mr-2" />
+                Delete DRT?
+              </AlertDialogTitle>
+              <AlertDialogDescription className="text-justify mb-4 flex items-start gap-2 p-3 bg-gray-100 rounded-md">
+                <span>
+                  This will permanently remove the selected Digital Right Token
+                  from your account. Pools that already reference this DRT will
+                  remain unaffected, but the token definition itself will be
+                  deleted.
+                </span>
+              </AlertDialogDescription>
+              <AlertDialogDescription className="text-justify">
+                <strong>This action cannot be undone.</strong>
               </AlertDialogDescription>
             </AlertDialogHeader>
             <div className="flex justify-end gap-2">
@@ -479,6 +509,26 @@ export default function DrtCodePage() {
                 <Button variant="destructive" onClick={confirmDelete}>
                   Delete
                 </Button>
+              </AlertDialogAction>
+            </div>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* ================= GLOBAL ERROR MODAL ================= */}
+        <AlertDialog
+          open={errorMsg !== null}
+          onOpenChange={(open) => !open && setErrorMsg(null)}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Error:</AlertDialogTitle>
+              <AlertDialogDescription className="whitespace-pre-line">
+                {errorMsg}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <div className="flex justify-end">
+              <AlertDialogAction asChild>
+                <Button onClick={() => setErrorMsg(null)}>Dismiss</Button>
               </AlertDialogAction>
             </div>
           </AlertDialogContent>
