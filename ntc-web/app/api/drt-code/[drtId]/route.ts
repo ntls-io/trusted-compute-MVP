@@ -1,3 +1,5 @@
+// ntc-web/app/api/drt-code/[drtId]/route.ts
+
 import { NextResponse } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
 import { PrismaClient } from '@prisma/client'

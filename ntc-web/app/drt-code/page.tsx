@@ -2,7 +2,7 @@
 
 'use client'
 
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useMemo } from 'react'
 import { useUser } from '@clerk/nextjs'
 
 // ── shadcn ui ─────────────────────────────────────────
@@ -131,16 +131,45 @@ function HashDisplay({ hash }: { hash: string | null | undefined }) {
                        PAGE
 ────────────────────────────────────────────────────── */
 export default function DrtCodePage() {
-  const { isSignedIn } = useUser()
+  const { isSignedIn, user } = useUser()
 
   /* ------- local + table state ------- */
   const [allDrts, setAllDrts] = useState<Drt[]>([])
   const [loading, setLoading] = useState(true)
 
-  const baselineDrts = allDrts.filter(
-    (d) => !d.editable && d.isActive && d.id !== 'OWNERSHIP_TOKEN',
+  // --- search state for community table ---
+  const [otherSearch, setOtherSearch] = useState('')
+
+  // --- memoised user id to avoid re-renders if Clerk object changes ---
+  const currentUserId = user?.id ?? ''
+
+  const baselineDrts = useMemo(
+    () =>
+      allDrts.filter(
+        (d) => !d.editable && !d.ownerId && d.isActive && d.id !== 'OWNERSHIP_TOKEN',
+      ),
+    [allDrts],
   )
-  const customDrts = allDrts.filter((d) => d.editable)
+
+  const customDrts = useMemo(() => allDrts.filter((d) => d.editable), [allDrts])
+
+  const otherDrts = useMemo(
+    () =>
+      allDrts.filter(
+        (d) => !d.editable && d.ownerId && d.ownerId !== currentUserId && d.id !== 'OWNERSHIP_TOKEN',
+      ),
+    [allDrts, currentUserId],
+  )
+
+  const filteredOtherDrts = useMemo(() => {
+    if (!otherSearch.trim()) return otherDrts
+    const q = otherSearch.toLowerCase()
+    return otherDrts.filter(
+      (d) =>
+        d.name.toLowerCase().includes(q) ||
+        (d.description ?? '').toLowerCase().includes(q),
+    )
+  }, [otherDrts, otherSearch])
 
   /* ------- dialog / form state ------- */
   const emptyForm: FormState = {
@@ -175,6 +204,7 @@ export default function DrtCodePage() {
 
   useEffect(() => {
     fetchDrts()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   /* ───── handlers ───── */
@@ -188,8 +218,8 @@ export default function DrtCodePage() {
   const openEdit = (d: Drt) => {
     setEditingId(d.id)
     setForm({
-      operation: d.name.replace(/ (Python|WASM)$/, ''),
-      language: d.name.endsWith('Python') ? 'PYTHON' : 'WASM',
+      operation: d.name.replace(/ (Python|WASM)$/i, ''),
+      language: d.name.toUpperCase().endsWith('PYTHON') ? 'PYTHON' : 'WASM',
       description: d.description,
       githubUrl: d.githubUrl || '',
       hash: d.hash || '',
@@ -337,7 +367,7 @@ export default function DrtCodePage() {
         {/* ================= Custom table ================= */}
         <section>
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-xl font-semibold">Custom Defined DRTs</h2>
+            <h2 className="text-xl font-semibold">My Custom DRTs</h2>
             <Button size="sm" onClick={openNew}>New&nbsp;DRT</Button>
           </div>
 
@@ -425,6 +455,73 @@ export default function DrtCodePage() {
           </Card>
         </section>
 
+        {/* ================= Community table (other users) ================= */}
+        <section>
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-3 gap-2">
+            <h2 className="text-xl font-semibold">Community DRTs</h2>
+            <Input
+              value={otherSearch}
+              onChange={(e) => setOtherSearch(e.target.value)}
+              placeholder="Search DRTs…"
+              className="sm:max-w-xs"
+            />
+          </div>
+
+          <Card className="p-0 overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className={thClass}>Name</TableHead>
+                  <TableHead className={thClass}>Description</TableHead>
+                  <TableHead className={thClass}>GitHub&nbsp;URL</TableHead>
+                  <TableHead className={thClass}>SHA-256&nbsp;Hash</TableHead>
+                </TableRow>
+              </TableHeader>
+              {loading ? (
+                <tbody>
+                  <tr>
+                    <td colSpan={4} className="p-8 text-center">
+                      <Loader2 className="animate-spin" />
+                    </td>
+                  </tr>
+                </tbody>
+              ) : filteredOtherDrts.length === 0 ? (
+                <tbody>
+                  <tr>
+                    <td colSpan={4} className="p-6 text-center text-gray-500">No community DRTs found.</td>
+                  </tr>
+                </tbody>
+              ) : (
+                <TableBody>
+                  {filteredOtherDrts.map((d) => (
+                    <TableRow key={d.id}>
+                      <TableCell className="font-medium">{d.name}</TableCell>
+                      <TableCell>{d.description}</TableCell>
+                      <TableCell>
+                        {d.githubUrl ? (
+                          <a
+                            href={d.githubUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="underline text-blue-600 hover:text-blue-800"
+                          >
+                            View&nbsp;Source
+                          </a>
+                        ) : (
+                          '—'
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <HashDisplay hash={d.hash} />
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              )}
+            </Table>
+          </Card>
+        </section>
+
         {/* ================= Create / Edit Dialog ================= */}
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogContent className="sm:max-w-lg">
@@ -433,6 +530,7 @@ export default function DrtCodePage() {
             </DialogHeader>
 
             <div className="space-y-4 py-4">
+              {/* --- operation + language only on create --- */}
               {!editingId && (
                 <>
                   <div className="space-y-2">
@@ -512,11 +610,11 @@ export default function DrtCodePage() {
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>
-                <Info className="w-5 h-5 text-red-500 inline-block mr-2" /> Delete DRT?
+                <Info className="w-5 h-5 text-red-500 inline-block mr-2" /> Delete DRT Code Definition?
               </AlertDialogTitle>
               <AlertDialogDescription className="text-justify mb-4 flex items-start gap-2 p-3 bg-gray-100 rounded-md">
                 <span>
-                  This will permanently remove the selected Digital Right Token from your account.
+                  This will permanently remove the selected custom Digital Right Token definition from your account.
                   Pools that already reference this DRT will remain unaffected, but the token
                   definition itself will be deleted.
                 </span>
