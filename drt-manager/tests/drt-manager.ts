@@ -16,6 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// drt-manager/tests/drt-manager.ts
 import * as anchor from "@coral-xyz/anchor";
 import { Program, web3, BN, AnchorProvider } from "@coral-xyz/anchor";
 import { DrtManager } from "../target/types/drt_manager";

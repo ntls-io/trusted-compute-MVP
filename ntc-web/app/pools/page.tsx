@@ -19,9 +19,9 @@
 "use client"
 
 import React, { useState, useEffect, JSX } from 'react'
-import { BN } from "@coral-xyz/anchor"
+import { BN, AnchorProvider } from "@coral-xyz/anchor"
 import { useDrtProgram } from "@/lib/useDrtProgram"
-import { createPoolWithDrts, getFeeVaultPda } from "@/lib/drtHelpers"
+import { buildPoolCreationTx, formatDrtConfigs, derivePoolPdas, getFeeVaultPda } from "@/lib/drtHelpers"
 import { useWallet } from "@solana/wallet-adapter-react"
 import { RefreshCcw, Check, AlertTriangle, Wallet, Copy } from "lucide-react"
 
@@ -603,7 +603,7 @@ function PoolCreationStep({
   useEffect(() => {
     // Define the steps in the pool creation process
     const baseSteps = [
-      { name: "Create Pool with DRTs", walletSignatureRequired: true },
+      { name: "Create Pool / Init & Mint", walletSignatureRequired: true },
     ];
     
     // Add VM creation steps if not skipped
@@ -648,6 +648,14 @@ function PoolCreationStep({
       return;
     }
   
+    // Anchor’s Program carries a provider but it’s typed as `Provider | undefined`.
+    // We cast it once to AnchorProvider and bail if it’s missing.
+    const provider = program.provider as AnchorProvider | undefined;
+    if (!provider) {
+      updateProgress(0, "Anchor provider not available", "error");
+      return;
+    }
+
     setIsSubmitting(true);
     setAllInputsLocked(true);
     
@@ -709,49 +717,32 @@ function PoolCreationStep({
           });
       }
   
-      // Create the pool with all DRTs in one transaction
-      updateProgress(1, "Creating pool with DRTs", 'loading', "Please sign with your wallet");
-      
-      let result;
-      try {
-        result = await createPoolWithDrts(
-          program,
-          program.provider as any,
-          poolName,
-          drtConfigs,
-          new BN(ownershipSupply),
-          (status) => {
-            console.log("Creation status update:", status);
-            updateProgress(1, status, 'loading');
-          }
-        );
-      } catch (error) {
-        // Check for known error conditions
-        if (error instanceof Error) {
-          // Handle duplicate pool name gracefully
-          if (error.message.includes("already exists")) {
-            setAllInputsLocked(false);
-            setPoolNameLocked(false);
-            throw new Error(`Pool with name "${poolName}" already exists. Please choose a different name.`);
-          }
-          
-          // Handle transaction simulation errors
-          if (error.message.includes("Simulation failed")) {
-            if (error.message.includes("already in use")) {
-              setAllInputsLocked(false);
-              setPoolNameLocked(false);
-              throw new Error(`Pool with name "${poolName}" already exists. Please choose a different name.`);
-            }
-          }
-        }
-        throw error;
-      }
-  
-      const chainAddress = result.pool.toBase58();
-      updateProgress(1, "Pool created successfully with all DRTs", 'success');
-  
-      // Get the fee vault bump for later use
-      const [, feeVaultBump] = getFeeVaultPda(result.pool, program.programId);
+      /* ----------------------------------------------------------------
+         Single-signature path
+      ---------------------------------------------------------------- */
+      updateProgress(1, "Building transaction", "loading");
+
+      // 1) anchor-side structs must be ‘null’-clean; helper does that
+      const formatted = formatDrtConfigs(drtConfigs);
+
+      // 2) build the TX locally
+      const { tx, pdas } = await buildPoolCreationTx(
+        program,
+        provider,
+        poolName,
+        formatted,
+        new BN(ownershipSupply)
+      );
+
+      // 3) sign & send once
+      updateProgress(1, "Waiting for wallet signature…", "loading");
+      const sig = await provider.sendAndConfirm(tx, [], { commitment: "confirmed" });
+
+      console.log("Pool TX:", sig);
+      updateProgress(1, "Pool created (mints initialised & funded)", "success");
+
+      const chainAddress   = pdas.poolPda.toBase58();
+      const feeVaultBump   = (await getFeeVaultPda(pdas.poolPda, program.programId))[1];      
   
       // If VM creation is enabled, wait for the TEE deployment to complete
       if (!skipVmCreation) {
@@ -841,7 +832,7 @@ function PoolCreationStep({
       
       // Create a mapping of DRT types to their mint addresses
       const drtMintAddresses: Record<string, string> = {}; // Properly typed now
-      for (const [drtType, mintAddress] of Object.entries(result.drtMints)) {
+      for (const [drtType, mintAddress] of Object.entries(pdas.drtMintPdas)) {
         drtMintAddresses[drtType] = mintAddress.toBase58();
       }
       
@@ -850,8 +841,8 @@ function PoolCreationStep({
         description,
         poolSequenceId: poolId,
         chainAddress,
-        feeVaultAddress: result.feeVault.toBase58(),
-        ownershipMintAddress: result.ownershipMint.toBase58(),
+        feeVaultAddress: pdas.feeVaultPda.toBase58(),
+        ownershipMintAddress: pdas.ownershipMintPda.toBase58(),
         schemaDefinition: schemaDefinition,
         allowedDrts: drtTypes,
         drtMintAddresses: drtMintAddresses, 

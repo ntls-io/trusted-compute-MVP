@@ -119,7 +119,7 @@ docker exec -it postgres psql -U postgres -c "CREATE DATABASE ntls_dev;"
 
 - Reset database (⚠️ deletes all data):
     ```bash
-    npx prisma db reset
+    npx prisma db push --force-reset
     ```
 
 - Update Prisma client after schema changes:

@@ -20,7 +20,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { fetchAvailableDRTs, buyDRT } from "@/lib/drtHelpers";
+import { fetchAvailableDRTs, buyDrt } from "@/lib/drtHelpers";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useDrtProgram } from "@/lib/useDrtProgram";
 import { useUser } from '@clerk/nextjs';
@@ -257,9 +257,12 @@ export default function DrtListings() {
       const drtsOnChain = await fetchAvailableDRTs(program, pool.chainAddress); // Already fetches latest supply, including burned tokens
       
       // Hardcode cost as 0.01 SOL for all tokens
-      const drts: DRTInfo[] = drtsOnChain.map((drt: DRTInfo) => {
+      const drts: DRTInfo[] = drtsOnChain.map((drt) => {
         return { 
-          ...drt, 
+          name: drt.name,
+          mint: drt.mint,
+          initialSupply: drt.supply, // Map 'supply' to 'initialSupply'
+          available: drt.available,
           cost: 0.01,
           quantity: 1 // Default quantity
         };
@@ -300,14 +303,11 @@ export default function DrtListings() {
       console.log(`Buying ${quantity} ${drt.name} tokens for ${drt.cost * quantity} SOL total`);
       
       // Execute blockchain transactions
-      const transactions = await buyDRT(
+      const transactions = await buyDrt(
         program,
         wallet,
         selectedPool.chainAddress,
-        drt.mint,
-        drt.name,
-        drt.cost,
-        quantity
+        drt.name
       );
       
       setSuccess(`Successfully purchased ${quantity} ${formatDrtName(drt.name)} token(s) for ${selectedPool.name}!`);
@@ -315,7 +315,7 @@ export default function DrtListings() {
       // Only attempt database recording if user is logged in
       if (user) {
         // Record purchase in database
-        const newDrtInstances = await recordPurchase(transactions, drt, quantity, selectedPool);
+        const newDrtInstances = await recordPurchase([transactions], drt, quantity, selectedPool);
         if (newDrtInstances) {
             // Add new purchases to the list of owned DRTs without filtering duplicates
             setMyDRTs(prev => {
@@ -330,13 +330,16 @@ export default function DrtListings() {
       
       // Refresh the DRT availability after purchase
       const drtsOnChain = await fetchAvailableDRTs(program, selectedPool.chainAddress);
-      const updatedDrts: DRTInfo[] = drtsOnChain.map((updatedDrt: DRTInfo) => {
+      const updatedDrts: DRTInfo[] = drtsOnChain.map((updatedDrt) => {
         // Preserve existing quantity settings where possible
         const existingDrt = availableDRTs.find(d => d.name === updatedDrt.name);
         const quantity = existingDrt?.quantity || 1;
         
         return {
-          ...updatedDrt,
+          name: updatedDrt.name,
+          mint: updatedDrt.mint,
+          initialSupply: updatedDrt.supply, // Map 'supply' to 'initialSupply'
+          available: updatedDrt.available,
           cost: 0.01, // Hardcoded to 0.01 SOL
           quantity: Math.min(quantity, updatedDrt.available) // Ensure quantity <= available
         };

@@ -23,7 +23,8 @@ import {
   TOKEN_PROGRAM_ID,
   ASSOCIATED_TOKEN_PROGRAM_ID,
   getAssociatedTokenAddress,
-  createAssociatedTokenAccountInstruction
+  createAssociatedTokenAccountInstruction,
+  getAssociatedTokenAddressSync
 } from "@solana/spl-token";
 import { 
   PublicKey, 
@@ -350,7 +351,7 @@ export async function buyDrt(
   
   // Fetch pool account to get DRT information
   updateStatus?.("Fetching pool data...");
-  const poolAccount = await program.account.pool.fetch(poolPubkey);
+  const poolAccount = await (program.account as any).pool.fetch(poolPubkey);
   
   // Find the DRT config
   const drtConfig = poolAccount.drts.find((drt: any) => 
@@ -435,7 +436,7 @@ export async function redeemDrt(
   
   // Fetch pool account
   updateStatus?.("Fetching pool data...");
-  const poolAccount = await program.account.pool.fetch(poolPubkey);
+  const poolAccount = await (program.account as any).pool.fetch(poolPubkey);
   
   // Find the DRT config
   const drtConfig = poolAccount.drts.find((drt: any) => 
@@ -518,7 +519,7 @@ export async function redeemFees(
   
   // Fetch pool account
   updateStatus?.("Fetching pool data...");
-  const poolAccount = await program.account.pool.fetch(poolPubkey);
+  const poolAccount = await (program.account as any).pool.fetch(poolPubkey);
   const ownershipMint = poolAccount.ownershipMint;
   
   // Find fee vault and its bump
@@ -586,7 +587,7 @@ export async function fetchAvailableDRTs(
   const connection = (program.provider as AnchorProvider).connection;
   
   // Fetch pool account
-  const poolAccount = await program.account.pool.fetch(poolPubkey);
+  const poolAccount = await (program.account as any).pool.fetch(poolPubkey);
   const availableDRTs = [];
   
   // Process each DRT in the pool
@@ -629,4 +630,120 @@ export async function fetchAvailableDRTs(
   }
   
   return availableDRTs;
+}
+
+// Helper function to format DRT configurations
+export const formatDrtConfigs = <
+  T extends { drtType: string; supply: BN; cost: BN; githubUrl?: string; codeHash?: string }
+>(cfg: T[]) =>
+  cfg.map(c => ({
+    drtType:  c.drtType,
+    supply:   c.supply,
+    cost:     c.cost,
+    githubUrl: c.githubUrl ?? null,
+    codeHash:  c.codeHash  ?? null,
+  }));
+
+// Helper function to bundle PDAs
+export function derivePoolPdas(
+  poolName: string,
+  drtCfg: ReturnType<typeof formatDrtConfigs>,
+  programId: PublicKey,
+  owner: PublicKey,
+) {
+  const [poolPda]         = getPoolPda(owner, poolName, programId);
+  const [feeVaultPda]     = getFeeVaultPda(poolPda, programId);
+  const [ownershipMintPda]= getOwnershipMintPda(poolPda, programId);
+
+  const drtMintPdas: Record<string, PublicKey> = {};
+  for (const c of drtCfg) {
+    const [pda] = getDrtMintPda(poolPda, c.drtType, programId);
+    drtMintPdas[c.drtType] = pda;
+  }
+  return { poolPda, feeVaultPda, ownershipMintPda, drtMintPdas };
+}
+
+/**
+ * Build a single-signature pool-creation TX:
+ *  ▸ ix0  create_pool_with_drts
+ *  ▸ ix1…n initialize_drt_mint   (one per DRT)
+ *  ▸ ixN… mint_drt_supply        (one per DRT)
+ */
+export async function buildPoolCreationTx(
+  program: anchor.Program,
+  provider: AnchorProvider,
+  poolName: string,
+  drtConfigs: ReturnType<typeof formatDrtConfigs>,   // reuse your formatter
+  ownershipSupply: BN
+): Promise<{ tx: anchor.web3.Transaction; pdas: ReturnType<typeof derivePoolPdas> }> {
+  const owner = provider.wallet.publicKey;
+  const { poolPda, feeVaultPda, ownershipMintPda, drtMintPdas } =
+        derivePoolPdas(poolName, drtConfigs, program.programId, owner);
+
+  /* -- ix0 ──────────────────────────────────────────────────────────── */
+  const createPoolIx = await program.methods
+    .createPoolWithDrts(poolName, drtConfigs, ownershipSupply)
+    .accounts({
+      pool: poolPda,
+      owner,
+      ownershipMint:        ownershipMintPda,
+      ownershipTokenAccount: await getAssociatedTokenAddress(ownershipMintPda, owner),
+      feeVault:             feeVaultPda,
+      systemProgram:        SystemProgram.programId,
+      tokenProgram:         TOKEN_PROGRAM_ID,
+      associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+      rent:                 SYSVAR_RENT_PUBKEY,
+    })
+    .instruction();                            // <-- NOT rpc()
+
+  /* -- ix1…n initialise each DRT mint ───────────────────────────────── */
+  const initMintIxs = await Promise.all(
+    Object.entries(drtMintPdas).map(([drtType, mintPda]) =>
+      program.methods
+        .initializeDrtMint(drtType)
+        .accounts({
+          pool: poolPda,
+          drtMint: mintPda,
+          owner,
+          systemProgram: SystemProgram.programId,
+          tokenProgram:  TOKEN_PROGRAM_ID,
+          rent:          SYSVAR_RENT_PUBKEY,
+        })
+        .instruction()
+    )
+  );
+
+  /* -- ix(n+1)… create vault ATAs  ──────────────────────────────────── */
+  const createVaultIxs = Object.values(drtMintPdas).map(mintPda => {
+    const vaultAta = getAssociatedTokenAddressSync(mintPda, poolPda, true);
+    return createAssociatedTokenAccountInstruction(
+      owner,        // fee-payer
+      vaultAta,     // new ATA
+      poolPda,      // owner (off curve PDA, allowed)
+      mintPda
+    );
+  });
+
+  /* -- ixN… mint initial supplies ───────────────────────────────────── */
+  const mintSupplyIxs = await Promise.all(
+    Object.entries(drtMintPdas).map(([drtType, mintPda]) => {
+      const vaultAta = getAssociatedTokenAddressSync(mintPda, poolPda, true);
+      return program.methods
+        .mintDrtSupply(drtType)
+        .accounts({
+          pool: poolPda,
+          drtMint: mintPda,
+          owner,
+          vaultTokenAccount: vaultAta,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .instruction();
+    })
+  );
+
+  /* -- build tx ------------------------------------------------------- */
+  const tx = new anchor.web3.Transaction()
+    .add(createPoolIx, ...initMintIxs, ...createVaultIxs, ...mintSupplyIxs);
+
+  return { tx, pdas: { poolPda, feeVaultPda, ownershipMintPda, drtMintPdas } };
 }
