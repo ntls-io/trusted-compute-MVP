@@ -403,24 +403,13 @@ const JoinPoolDialog = ({ pool, drtInstances, fetchUserData }: { pool: Pool; drt
       const drtInstance = appendDrts.find(drt => drt.id === selectedDrt);
       if (!drtInstance) throw new Error("Selected DRT not found");
 
-      const poolPubkey = new PublicKey(pool.chainAddress);
-      const drtMint = new PublicKey(drtInstance.mintAddress);
-      const ownershipMint = new PublicKey(pool.ownershipMintAddress);
-      const userDrtTokenAccount = await getAssociatedTokenAddress(drtMint, wallet.publicKey);
-      const userOwnershipTokenAccount = await getAssociatedTokenAddress(ownershipMint, wallet.publicKey);
-
       updateProgress(1, "Redeeming Append DRT", "loading", "Please sign with your wallet");
       const { tx, ownershipTokenReceived } = await redeemDrt(
         program,
-        poolPubkey,
-        drtMint,
-        ownershipMint,
-        userDrtTokenAccount,
-        userOwnershipTokenAccount,
-        "append",
         wallet,
-        (status) => updateProgress(1, status, "loading"),
-        pool.id
+        pool.chainAddress,
+        "append",
+        (msg) => updateProgress(1, msg, "loading")
       );
 
       if (!ownershipTokenReceived) throw new Error("Ownership token not received");

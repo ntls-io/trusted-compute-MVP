@@ -16,6 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// ntc-web/app/page.tsx
 "use client";
 
 import { useEffect, useState } from 'react';
@@ -45,8 +46,6 @@ import {
 } from "@/components/ui/dialog";
 import { useDrtProgram } from "@/lib/useDrtProgram";
 import { useWallet } from "@solana/wallet-adapter-react";
-import { PublicKey } from "@solana/web3.js";
-import { getAssociatedTokenAddress } from "@solana/spl-token";
 import { redeemDrt } from "@/lib/drtHelpers";
 import PoolAccount from "@/components/PoolAccount";
 
@@ -123,6 +122,19 @@ interface ExecutionResult {
   result?: any;
   error?: string;
 }
+
+const mapDrtTypeForChain = (name: string): string => {
+  switch (name) {
+    case 'Execute Median Python':
+      return 'py_compute_median';
+    case 'Execute Median WASM':
+      return 'w_compute_median';
+    case 'Append Data Pool':
+      return 'append';
+    default:
+      return name.toLowerCase(); // fallback
+  }
+};
 
 // Enclave Dialog Component (unchanged)
 const EnclaveDialog = ({ pool, onAttest }: { pool: Pool; onAttest: () => Promise<AttestationResult> }) => {
@@ -347,29 +359,18 @@ const PythonExecutionDialog = ({
     setExecutionResult(null);
 
     try {
-      if (!program || !wallet.connected) {
-        throw new Error("Wallet not connected or program not initialized");
-      }
+      if (!program || !wallet.connected)
+        throw new Error("Wallet not connected or program not initialised");
 
-      const poolPubkey = new PublicKey(drtInstance.pool.chainAddress);
-      const drtMint = new PublicKey(drtInstance.mintAddress);
-      const ownershipMint = new PublicKey(drtInstance.pool.ownershipMintAddress);
-      const userDrtTokenAccount = await getAssociatedTokenAddress(drtMint, wallet.publicKey);
-      const userOwnershipTokenAccount = await getAssociatedTokenAddress(ownershipMint, wallet.publicKey);
-      const drtType = "py_compute_median";
-
-      console.log("Redeeming Python DRT on Solana...");
-      await redeemDrt(
+      const chainDrtType = mapDrtTypeForChain(drtInstance.drt.name);
+      const { tx } = await redeemDrt(
         program,
-        poolPubkey,
-        drtMint,
-        ownershipMint,
-        userDrtTokenAccount,
-        userOwnershipTokenAccount,
-        drtType,
-        wallet
+        wallet,
+        drtInstance.pool.chainAddress,
+        chainDrtType,
+        (msg) => console.log(msg)
       );
-      console.log("Solana Python DRT redemption successful");
+      console.log("Solana DRT redemption successful, tx:", tx);
 
       const pythonResult = await onRedeem();
       setExecutionResult(pythonResult);
@@ -377,21 +378,13 @@ const PythonExecutionDialog = ({
       if (pythonResult.success) {
         await fetch('/api/update-drt-state', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            drtInstanceId: drtInstance.id,
-            state: 'completed',
-          }),
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ drtInstanceId: drtInstance.id, state: 'completed' }),
         });
         onStateUpdate('completed');
       }
-    } catch (error) {
-      setExecutionResult({
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error during redemption',
-      });
+    } catch (err) {
+      setExecutionResult({ success: false, error: (err as Error).message });
     } finally {
       setIsRedeeming(false);
     }
@@ -515,29 +508,18 @@ const WasmExecutionDialog = ({
     setExecutionResult(null);
 
     try {
-      if (!program || !wallet.connected) {
-        throw new Error("Wallet not connected or program not initialized");
-      }
+      if (!program || !wallet.connected)
+        throw new Error("Wallet not connected or program not initialised");
 
-      const poolPubkey = new PublicKey(drtInstance.pool.chainAddress);
-      const drtMint = new PublicKey(drtInstance.mintAddress);
-      const ownershipMint = new PublicKey(drtInstance.pool.ownershipMintAddress);
-      const userDrtTokenAccount = await getAssociatedTokenAddress(drtMint, wallet.publicKey);
-      const userOwnershipTokenAccount = await getAssociatedTokenAddress(ownershipMint, wallet.publicKey);
-      const drtType = "w_compute_median";
-
-      console.log("Redeeming WASM DRT on Solana...");
-      await redeemDrt(
+      const chainDrtType = mapDrtTypeForChain(drtInstance.drt.name);
+      const { tx } = await redeemDrt(
         program,
-        poolPubkey,
-        drtMint,
-        ownershipMint,
-        userDrtTokenAccount,
-        userOwnershipTokenAccount,
-        drtType,
-        wallet
+        wallet,
+        drtInstance.pool.chainAddress,
+        chainDrtType,
+        (msg) => console.log(msg)
       );
-      console.log("Solana WASM DRT redemption successful");
+      console.log("Solana DRT redemption successful, tx:", tx);
 
       const wasmResult = await onRedeem();
       setExecutionResult(wasmResult);
@@ -545,21 +527,13 @@ const WasmExecutionDialog = ({
       if (wasmResult.success) {
         await fetch('/api/update-drt-state', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            drtInstanceId: drtInstance.id,
-            state: 'completed',
-          }),
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ drtInstanceId: drtInstance.id, state: 'completed' }),
         });
         onStateUpdate('completed');
       }
-    } catch (error) {
-      setExecutionResult({
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error during redemption',
-      });
+    } catch (err) {
+      setExecutionResult({ success: false, error: (err as Error).message });
     } finally {
       setIsRedeeming(false);
     }
