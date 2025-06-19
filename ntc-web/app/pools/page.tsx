@@ -540,7 +540,7 @@ function PoolCreationStep({
     }
     
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/deployments/${requestId}`);
+      const response = await fetch(`/api/deployments/${requestId}`);
       if (!response.ok) {
         if (response.status === 404) return { status: 'pending' };
         throw new Error(`Failed to check TEE status (Status ${response.status})`);
