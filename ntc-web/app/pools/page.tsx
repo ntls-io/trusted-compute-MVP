@@ -540,7 +540,16 @@ function PoolCreationStep({
     }
     
     try {
-      const response = await fetch(`/api/deployments/${requestId}`);
+      let response;
+
+      if (process.env.DEV === 'true') {
+        //Running in development mode, using local API endpoint
+        response = await fetch(`/api/deployments/${requestId}`);
+      } else {
+        // console.log("Running in production mode, using remote API endpoint"
+        response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/deployments/${requestId}`);
+      }
+
       if (!response.ok) {
         if (response.status === 404) return { status: 'pending' };
         throw new Error(`Failed to check TEE status (Status ${response.status})`);
