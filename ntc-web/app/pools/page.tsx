@@ -824,8 +824,8 @@ function PoolCreationStep({
       }
   
       // Save the pool metadata
-      const currentStep = skipVmCreation ? 2 : 4;
-      updateProgress(currentStep, "Saving pool data off-chain", 'loading');
+      const currentStep = skipVmCreation ? 2 : steps.length;
+      updateProgress(currentStep - 1, "Saving pool data off-chain", 'loading');
       
       // Prepare DRT types for database
       const drtTypes = drtConfigs.map(config => config.drtType);
@@ -963,7 +963,7 @@ function PoolCreationStep({
           <div className="flex items-center text-sm text-gray-600 space-x-2">
             <Wallet size={16} />
             <span>
-              {steps.filter(s => s.walletSignatureRequired).length} wallet signatures required
+              {steps.filter(s => s.walletSignatureRequired).length} wallet signature required
             </span>
           </div>
         </div>
