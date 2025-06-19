@@ -63,7 +63,7 @@ jobs:
 
           for file in $FILES; do
             # Skip JSON, Cargo.lock, and yarn.lock files
-            if [[ $file =~ \.json$ || $file == "Cargo.lock" || $file == "yarn.lock" ]]; then
+            if [[ $file =~ \.json$ || $file == "Cargo.lock" || $file == "yarn.lock" || $file == "drt-manager/yarn.lock ]]; then
               continue
             fi
 
