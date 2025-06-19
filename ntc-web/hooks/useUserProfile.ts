@@ -19,7 +19,6 @@
 // hooks/useUserProfile.ts
 "use client";
 
-import { useEffect } from "react";
 import useSWR from "swr";
 import { useUser } from "@clerk/nextjs";
 
@@ -40,14 +39,12 @@ const fetcher = async (url: string) => {
   const res = await fetch(url);
 
   if (res.status === 404) {
-    // signal “not found” without spamming the console
     const err = new Error("Not Found");
     (err as any).status = 404;
     throw err;
   }
 
   if (!res.ok) {
-    // all other errors get logged
     const err = new Error(`Error ${res.status} fetching ${url}`);
     (err as any).status = res.status;
     try {
@@ -64,42 +61,19 @@ const fetcher = async (url: string) => {
   return res.json();
 };
 
+
 export function useUserProfile() {
-  const { isSignedIn, isLoaded: isAuthLoaded, user } = useUser();
+  const { isSignedIn, isLoaded: isAuthLoaded } = useUser();
   const shouldFetch = isAuthLoaded && isSignedIn;
 
   const { data, error, isLoading, mutate } = useSWR<UserProfileWithRoles>(
     shouldFetch ? "/api/user/me" : null,
     fetcher,
     {
-      shouldRetryOnError: false,
+      shouldRetryOnError: false, // Keep this false to handle the 404 state correctly
       revalidateOnFocus: true,
     }
   );
-
-  // If we got a 404, create the profile and then re-fetch
-  useEffect(() => {
-    if (
-      shouldFetch &&
-      error &&
-      (error as any).status === 404 &&
-      user?.id
-    ) {
-      (async () => {
-        try {
-          await fetch("/api/user/me", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ clerkId: user.id }),
-          });
-        } catch (e) {
-          console.error("Failed to create user profile:", e);
-        }
-        // trigger SWR to re-fetch the now-existing profile
-        mutate();
-      })();
-    }
-  }, [error, shouldFetch, user, mutate]);
 
   return {
     userProfile: data,

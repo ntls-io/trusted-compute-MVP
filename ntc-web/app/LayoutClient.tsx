@@ -19,7 +19,7 @@
 // app/LayoutClient.tsx
 "use client";
 
-import React, { useEffect, useState } from "react"; // React import
+import React, { useEffect, useState, useRef } from "react"; // React import
 import Sidebar from "@/components/Sidebar";
 import TopBar from "@/components/TopBar";
 import { useAuth } from "@clerk/nextjs"; // Clerk hook for auth status
@@ -55,25 +55,32 @@ function LayoutClientInner({
   const pathname = usePathname();
   // useUserProfile uses its own useUser for isSignedIn and isLoaded, which is fine.
   const { userProfile, roles, isLoadingProfile, isErrorProfile } = useUserProfile();
-
+  const userCheckInitiated = useRef(false);
   const isExpanded = isNavOpen || isHovered;
 
   // Ensure user exists in database
   useEffect(() => {
-    if (isSignedIn && userId) {
+    // Only proceed if the user is signed in, we have their ID, and the check has NOT been initiated yet.
+    if (isSignedIn && userId && !userCheckInitiated.current) {
+      
+      // Immediately set the flag to true to prevent subsequent runs of this effect
+      userCheckInitiated.current = true;
+
       fetch("/api/auth/check-user", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId }), // Ensure your API expects { userId }
+        body: JSON.stringify({ userId }),
       })
       .then(res => {
         if(!res.ok) {
             console.error("LayoutClientInner: check-user call failed with status:", res.status, res.statusText);
+        } else {
+            console.log("LayoutClientInner: check-user call was successful.");
         }
-        // else { console.log("LayoutClientInner: check-user call successful or already handled.");}
       })
       .catch(err => console.error("LayoutClientInner: check-user fetch error:", err));
     }
+    // Dependency array is correct. The logic inside the effect now controls re-execution.
   }, [isSignedIn, userId]);
 
 
