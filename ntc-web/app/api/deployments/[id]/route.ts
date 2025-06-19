@@ -18,6 +18,12 @@
 
 // ntc-web/app/api/deployments/[id]/route.ts
 
+// Use the Node.js Serverless runtime (not the default Edge one)
+export const runtime = 'nodejs'
+
+// Allow this function to run up to 300 seconds (5 minutes)
+export const maxDuration = 300
+
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
