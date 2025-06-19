@@ -35,7 +35,7 @@ const allNavItems = [
   { name: 'Pools', href: '/pools', icon: LayoutDashboard, disabled: false, requiredRoles: [ClientRoleName.DATA_PROVIDER, ClientRoleName.CODE_PROVIDER] },
   { name: 'Analysis', href: '/analysis', icon: LineChart, disabled: false, requiredRoles: [ClientRoleName.DATA_ANALYST] },
   { name: 'DRT Marketplace', href: '/drt-listings', icon: ShoppingCart, disabled: false, requiredRoles: [ClientRoleName.DATA_PROVIDER, ClientRoleName.CODE_PROVIDER, ClientRoleName.DATA_ANALYST] },
-  { name: 'Custom DRTs', href: '/drt-code', icon: Code, disabled: false, requiredRoles: [ClientRoleName.CODE_PROVIDER] },
+  { name: 'Custom DRTs', href: '/drt-code', icon: Code, disabled: true, requiredRoles: [ClientRoleName.CODE_PROVIDER] },
   { name: 'Market', href: '/market', icon: ShoppingCart, disabled: true, requiredRoles: [] as ClientRoleName[] },
 ];
 

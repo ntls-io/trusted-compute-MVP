@@ -941,7 +941,7 @@ function PoolCreationStep({
         </div>
       </div>
       
-      <div className="flex items-center space-x-2 mt-4">
+      {/* <div className="flex items-center space-x-2 mt-4">
         <Switch
           id="skip-vm"
           checked={skipVmCreation}
@@ -954,7 +954,7 @@ function PoolCreationStep({
         >
           Skip VM creation (blockchain only)
         </label>
-      </div>
+      </div> */}
       
       <div className="h-2" />
       <Card className="p-4 mt-2">
