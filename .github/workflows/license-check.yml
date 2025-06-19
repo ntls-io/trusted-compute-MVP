@@ -62,13 +62,16 @@ jobs:
           MISSING_LICENSE=0
 
           for file in $FILES; do
-            # Skip JSON, Cargo.lock, and yarn.lock files
-            if [[ $file =~ \.json$ || $file == "Cargo.lock" || $file == "yarn.lock" || $file == "drt-manager/yarn.lock ]]; then
+            base=$(basename "$file")
+            # Skip JSON, Cargo.lock, any yarn.lock
+            if [[ $file =~ \.json$ || $base == "Cargo.lock" || $base == "yarn.lock" ]]; then
               continue
             fi
 
-            if [[ $file =~ \.(js|jsx|ts|tsx|py|cpp|c|h|rs|css|scss|sass|less|html|md|sh|toml|yml|yaml|Dockerfile|prisma|cargo)$ ]] || file "$file" | grep -q "ASCII text"; then
-              if [ -f "$file" ] && ! grep -q "Copyright" "$file"; then
+            # Only check source/text files
+            if [[ $file =~ \.(js|jsx|ts|tsx|py|cpp|c|h|rs|css|scss|sass|less|html|md|sh|toml|yml|yaml|Dockerfile|prisma|cargo)$ ]] \
+               || file "$file" | grep -q "ASCII text"; then
+              if ! grep -q "Copyright" "$file"; then
                 echo "::error::Missing license in: $file"
                 MISSING_LICENSE=1
               fi
