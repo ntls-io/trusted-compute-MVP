@@ -1160,28 +1160,6 @@ export default function Home() {
                           </div>
 
                           <div className="flex items-center gap-2">
-                            <span className="font-medium whitespace-nowrap">Vault PDA:</span>
-                            <TooltipProvider>
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <a
-                                    href={`https://explorer.solana.com/address/${pool.vaultAddress}?cluster=devnet`}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="flex items-center gap-1 text-blue-500 hover:text-blue-700"
-                                  >
-                                    <span>Link</span>
-                                    <ExternalLink size={16} />
-                                  </a>
-                                </TooltipTrigger>
-                                <TooltipContent>
-                                  <p className="font-mono text-xs">{pool.vaultAddress}</p>
-                                </TooltipContent>
-                              </Tooltip>
-                            </TooltipProvider>
-                          </div>
-
-                          <div className="flex items-center gap-2">
                             <span className="font-medium whitespace-nowrap">Fee Vault PDA:</span>
                             <TooltipProvider>
                               <Tooltip>
