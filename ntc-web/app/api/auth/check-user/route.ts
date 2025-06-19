@@ -19,43 +19,48 @@
 // app/api/auth/check-user/route.ts
 import { NextResponse } from "next/server";
 import { currentUser } from "@clerk/nextjs/server";
-import { prisma } from "@/lib/prisma"; // Ensure you are using a shared Prisma instance
+import { prisma } from "@/lib/prisma";
 
 export async function POST(req: Request) {
     try {
-        // Get Clerk userId correctly
         const user = await currentUser();
 
         if (!user?.id) {
-            console.warn("🚨 Unauthorized: No user found in Clerk.");
+            console.warn("🚨 Unauthorized: No user found in Clerk session for check-user.");
             return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
         }
 
         const userId = user.id;
 
-        // Check if user exists in Prisma
-        let existingUser = await prisma.user.findUnique({
-            where: { clerkId: userId },
+        // Use prisma.user.upsert to atomically find and create/update the user.
+        // This is safe to call multiple times and prevents race conditions.
+        const userInDb = await prisma.user.upsert({
+            where: {
+                clerkId: userId,
+            },
+            update: {
+                // You can add fields to update on every login here if needed
+                // For example: lastLoginAt: new Date()
+            },
+            create: {
+                id: userId,
+                clerkId: userId,
+                // walletAddress can be set to null or a default value
+                walletAddress: null,
+            },
         });
 
-        // Create user if not exists
-        if (!existingUser) {
-            console.log(`🆕 Creating new user in Prisma for Clerk ID: ${userId}`);
+        console.log(`✅ User ${userInDb.id} ensured in DB.`);
 
-            existingUser = await prisma.user.create({
-                data: {
-                    id: userId,
-                    clerkId: userId,
-                    walletAddress: null, // Optional: Modify based on Clerk metadata if needed
-                },
-            });
-        } else {
-            console.log(`✅ User found in Prisma: ${existingUser.id}`);
-        }
+        return NextResponse.json({ user: userInDb }, { status: 200 });
 
-        return NextResponse.json({ user: existingUser }, { status: 200 });
     } catch (error) {
-        console.error("❌ Error checking user:", error);
-        return NextResponse.json({ message: "Internal server error" }, { status: 500 });
+        console.error("❌ Error in check-user endpoint:", error);
+        // It's helpful to log the specific error to the console
+        const errorMessage = error instanceof Error ? error.message : "An unknown error occurred";
+        return NextResponse.json(
+            { message: `Internal server error: ${errorMessage}` },
+            { status: 500 }
+        );
     }
 }

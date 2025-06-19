@@ -19,7 +19,7 @@
 // ntc-web/app/page.tsx
 "use client";
 
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Table,
   TableBody,
@@ -48,6 +48,9 @@ import { useDrtProgram } from "@/lib/useDrtProgram";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { redeemDrt } from "@/lib/drtHelpers";
 import PoolAccount from "@/components/PoolAccount";
+import { useUser } from "@clerk/nextjs";
+import { useUserProfile, ClientRoleName } from '@/hooks/useUserProfile';
+import { useRouter, usePathname } from 'next/navigation';
 
 // Interfaces
 interface Pool {
@@ -707,6 +710,10 @@ const getDrtTypeColor = (name: string): string => {
 export default function Home() {
   const program = useDrtProgram();
   const wallet = useWallet();
+  const router = useRouter();
+  const pathname = usePathname();
+  const { isSignedIn, isLoaded: isAuthLoaded } = useUser();
+  const { userProfile, roles, isLoadingProfile, isErrorProfile } = useUserProfile();
   const [isLoadingPools, setIsLoadingPools] = useState(true);
   const [isLoadingDRTs, setIsLoadingDRTs] = useState(true);
   const [pools, setPools] = useState<Pool[]>([]);
@@ -720,8 +727,27 @@ export default function Home() {
 
   useEffect(() => {
     async function fetchData() {
+
+      if (isAuthLoaded && isSignedIn && !isLoadingProfile) { // Check profile loading state too
+        if ((userProfile && roles.length === 0) || (!userProfile && isErrorProfile && (isErrorProfile as any).status === 404)) {
+          // User will be redirected, so skip main data fetch.
+          setIsLoadingPools(false); 
+          setIsLoadingDRTs(false);
+          return;
+        }
+      }
+
+      if (!(isAuthLoaded && isSignedIn)) {
+          setIsLoadingPools(false);
+          setIsLoadingDRTs(false);
+          setPools([]);
+          setDrtInstances([]);
+          return;
+      }
+
       setIsLoadingPools(true);
       setIsLoadingDRTs(true);
+      setApiError(null);
       
       try {
         const response = await fetch('/api/user-data');
@@ -764,8 +790,10 @@ export default function Home() {
       }
     }
   
-    fetchData();
-  }, []);
+    if (isAuthLoaded) {
+      fetchData();
+    }
+  }, [isAuthLoaded, isSignedIn, userProfile, roles, isLoadingProfile]);
 
   const handlePoolSort = (field: typeof sortField) => {
     if (sortField === field) {
@@ -969,6 +997,28 @@ export default function Home() {
     direction: 'asc' | 'desc' | null;
   }>({ key: null, direction: null });
 
+  // --- useEffect for Role Check and Redirection ---
+  useEffect(() => {
+    if (!isAuthLoaded || isLoadingProfile) {
+      // Wait for Clerk's auth status AND your user profile (which includes roles) to load.
+      return;
+    }
+
+    if (isSignedIn && userProfile && roles.length === 0) {
+      // Case 1: User is signed in, their profile from DB is loaded, but they have NO roles.
+      console.log("HomePage: User signed in, no roles. Redirecting to /select-roles.");
+      router.push(`/select-roles?next=${encodeURIComponent(pathname)}`);
+    } else if (isSignedIn && !userProfile && isErrorProfile && (isErrorProfile as any).status === 404) {
+      // Case 2: User exists in Clerk, but /api/user/me returned 404 (user not in your DB yet).
+      // This implies they are new and also need to select roles.
+      // This relies on your /api/auth/check-user to eventually create them.
+      console.log("HomePage: User profile not found in DB (404 from /api/user/me), likely new. Redirecting to /select-roles.");
+      router.push(`/select-roles?next=${encodeURIComponent(pathname)}`);
+    }
+    // If userProfile exists and roles.length > 0, they are fine.
+    // If isErrorProfile is true but not a 404, it's a different issue; no auto-redirect here.
+  }, [isAuthLoaded, isSignedIn, userProfile, roles, isLoadingProfile, isErrorProfile, router, pathname]);
+
   const handleDrtSort = (key: keyof DRTInstance) => {
     let direction: 'asc' | 'desc' | null = 'asc';
     
@@ -1035,6 +1085,27 @@ export default function Home() {
       ? (aValue || 0) - (bValue || 0)
       : (bValue || 0) - (aValue || 0);
   });
+
+  if (!isAuthLoaded || (isSignedIn && isLoadingProfile)) {
+    // Covers: Auth not loaded OR (User is signed in AND their profile/roles are still loading)
+    return (
+      <div className="container mx-auto p-4 text-center flex flex-col items-center justify-center min-h-screen">
+        <Loader2 className="h-12 w-12 animate-spin text-gray-500" />
+        <p className="mt-4 text-lg text-gray-700">Loading your experience...</p>
+      </div>
+    );
+  }
+
+  // If a redirect to /select-roles is imminent (user signed in, profile loaded, but no roles)
+  if (isSignedIn && userProfile && roles.length === 0 && !isLoadingProfile) {
+      // This state means the redirect in the useEffect for role check should have fired or will fire immediately.
+      return (
+          <div className="container mx-auto p-4 text-center flex flex-col items-center justify-center min-h-screen">
+              <Loader2 className="h-12 w-12 animate-spin text-gray-500" />
+              <p className="mt-4 text-lg text-gray-700">Finalizing your account setup...</p>
+          </div>
+      );
+  }
 
   return (
     <div className="container mx-auto p-4">

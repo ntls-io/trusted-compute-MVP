@@ -16,6 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// ntc-web/app/sign-in/[[...sign-in]]/page.tsx
 'use client';
 
 import { SignIn } from '@clerk/nextjs';
@@ -36,13 +37,21 @@ export default function SignInPage() {
             <div className="mb-6 text-center">
               <div className="mb-4 flex justify-center">
                 <div className="w-80 h-80 relative">
-                  <Image src="/logo.png" alt="Logo" fill className="object-contain" priority />
+                  <Image
+                    src="/logo.png"
+                    fill
+                    sizes="(max-width:768px)100vw,(max-width:1200px)80vw,400px"
+                    placeholder="blur"
+                    blurDataURL="/logo.png"
+                    className="object-contain"
+                    alt="Logo"
+                  />
                 </div>
               </div>
               <h2 className="text-2xl font-bold text-gray-900">Nautilus MVP Sign In</h2>
             </div>
             <SignIn
-              afterSignInUrl={redirectUrl}
+              fallbackRedirectUrl={redirectUrl}
               appearance={{
                 elements: {
                   formButtonPrimary: 'bg-blue-600 hover:bg-blue-700 text-sm normal-case',

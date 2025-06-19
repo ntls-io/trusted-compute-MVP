@@ -47,6 +47,13 @@ model Pool {
     @@index([ownerId, name, poolSequenceId])
 }
 
+// Enum for role names for type safety
+enum RoleName {
+  DATA_PROVIDER
+  DATA_ANALYST
+  CODE_PROVIDER
+}
+
 model User {
     id            String    @id
     clerkId       String    @unique  // Clerk user_id
@@ -54,10 +61,32 @@ model User {
     createdAt     DateTime  @default(now())
     updatedAt     DateTime  @updatedAt
 
+    // Relationships
     pools         Pool[]
     drtInstances  DRTInstance[]
+    drtCode  DigitalRightToken[] @relation("UserDRTCode")
+    userRoles     UserRole[]
 }
 
+model Role {
+    id        Int      @id @default(autoincrement())
+    name      RoleName @unique // e.g., DATA_PROVIDER, DATA_ANALYST, CODE_PROVIDER
+    description String
+    userRoles UserRole[]
+}
+
+model UserRole {
+    userId    String
+    roleId    Int
+    assignedAt DateTime @default(now())
+
+    user User @relation(fields: [userId], references: [id])
+    role Role @relation(fields: [roleId], references: [id])
+
+    @@id([userId, roleId])
+    @@index([userId])
+    @@index([roleId])
+}
 
 // Reference table for DRT types - mostly static
 model DigitalRightToken {
@@ -67,9 +96,16 @@ model DigitalRightToken {
     githubUrl   String?
     hash        String?   
     isActive    Boolean   @default(true)
+
+    // owner == NULL → seeded / immutable
+    ownerId String?
+    owner   User?   @relation("UserDRTCode", fields: [ownerId], references: [id])
     
     instances   DRTInstance[]
     allowedPools PoolAllowedDRT[]    // New relationship to track pools where this DRT is allowed
+
+    @@unique([name])                                  // prevent duplicates across tenant
+    @@index([ownerId])
 }
 
 // Tracks DRT instances that exist on-chain

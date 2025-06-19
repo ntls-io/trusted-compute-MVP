@@ -16,6 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// ntc-web/app/layout.tsx
 "use client";
 
 import { useMemo } from "react";
