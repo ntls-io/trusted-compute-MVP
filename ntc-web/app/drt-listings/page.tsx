@@ -302,12 +302,14 @@ export default function DrtListings() {
     try {
       console.log(`Buying ${quantity} ${drt.name} tokens for ${drt.cost * quantity} SOL total`);
       
-      // Execute blockchain transactions
-      const transactions = await buyDrt(
+      // Execute blockchain transaction
+      const txSig = await buyDrt(
         program,
         wallet,
         selectedPool.chainAddress,
-        drt.name
+        drt.name,
+        quantity,
+        (msg) => console.log(msg)
       );
       
       setSuccess(`Successfully purchased ${quantity} ${formatDrtName(drt.name)} token(s) for ${selectedPool.name}!`);
@@ -315,7 +317,7 @@ export default function DrtListings() {
       // Only attempt database recording if user is logged in
       if (user) {
         // Record purchase in database
-        const newDrtInstances = await recordPurchase([transactions], drt, quantity, selectedPool);
+        const newDrtInstances = await recordPurchase([txSig], drt, quantity, selectedPool);
         if (newDrtInstances) {
             // Add new purchases to the list of owned DRTs without filtering duplicates
             setMyDRTs(prev => {

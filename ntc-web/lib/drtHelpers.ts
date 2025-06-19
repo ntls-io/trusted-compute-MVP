@@ -31,7 +31,9 @@ import {
   SystemProgram, 
   SYSVAR_RENT_PUBKEY,
   clusterApiUrl, 
-  Connection 
+  Connection,
+  ComputeBudgetProgram, 
+  Transaction
 } from "@solana/web3.js";
 
 // Constants for retry logic and network configuration
@@ -336,6 +338,7 @@ export async function createPoolWithDrts(
  * @param wallet The wallet to use for the purchase
  * @param poolAddress The address of the pool
  * @param drtType The type of DRT to buy
+ * @param quantity The number of DRTs to buy (default is 1)
  * @param updateStatus Optional callback for status updates
  */
 export async function buyDrt(
@@ -343,11 +346,13 @@ export async function buyDrt(
   wallet: any,
   poolAddress: string,
   drtType: string,
+  quantity = 1,
   updateStatus?: (status: string) => void
 ): Promise<string> {
-  const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+  if (quantity < 1) throw new Error("quantity must be ≥ 1");
+
   const poolPubkey = new PublicKey(poolAddress);
-  const connection = (program.provider as AnchorProvider).connection;
   
   // Fetch pool account to get DRT information
   updateStatus?.("Fetching pool data...");
@@ -381,38 +386,43 @@ export async function buyDrt(
   );
   
   updateStatus?.(`Buying ${drtType} DRT...`);
+
+  /* ---------- build instructions ---------- */
+  const ixs: anchor.web3.TransactionInstruction[] = [];
+
+  // optional: raise compute budget (use CBI = Compute-Budget Ix)
+  ixs.push(
+    ComputeBudgetProgram.setComputeUnitLimit({ units: 250_000 }),
+    ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 10 }),
+  );
   
-  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-    try {
-      const tx = await program.methods
-        .buyDrt(drtType)
-        .accounts({
-          pool: poolPubkey,
-          drtMint: drtMint,
-          vaultDrtTokenAccount: vaultDrtTokenAccount,
-          buyer: wallet.publicKey,
-          buyerTokenAccount: buyerTokenAccount,
-          feeVault: feeVault,
-          tokenProgram: TOKEN_PROGRAM_ID,
-          systemProgram: SystemProgram.programId,
-          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
-          rent: SYSVAR_RENT_PUBKEY,
-        })
-        .rpc({ commitment: COMMITMENT });
-        
-      updateStatus?.(`DRT purchased successfully. Transaction: ${tx}`);
-      return tx;
-    } catch (error) {
-      console.warn(`DRT purchase attempt ${attempt + 1} failed:`, error);
-      if (attempt < MAX_RETRIES - 1) {
-        await sleep(RETRY_DELAY * (attempt + 1)); // Exponential backoff
-      } else {
-        throw new Error(`Failed to buy DRT after ${MAX_RETRIES} attempts. Last error: ${error}`);
-      }
-    }
+  for (let i = 0; i < quantity; i++) {
+    const ix = await program.methods
+      .buyDrt(drtType)
+      .accounts({
+        pool:                 poolPubkey,
+        drtMint:              drtMint,
+        vaultDrtTokenAccount: vaultDrtTokenAccount,
+        buyer:                wallet.publicKey,
+        buyerTokenAccount:    buyerTokenAccount,
+        feeVault,
+        tokenProgram:         TOKEN_PROGRAM_ID,
+        systemProgram:        SystemProgram.programId,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        rent:                 SYSVAR_RENT_PUBKEY,
+      })
+      .instruction();                // build, don’t send yet
+    ixs.push(ix);
   }
-  
-  throw new Error("Failed to buy DRT token");
+
+  /* ---------- send tx (can split if gigantic) ---------- */
+  const tx     = new Transaction().add(...ixs);
+  const provider = program.provider as anchor.AnchorProvider;
+  if (!provider) throw new Error("Anchor provider not initialised");
+  const sig    = await provider.sendAndConfirm(tx, [], { commitment: "confirmed" });
+  updateStatus?.(`Bought ${quantity} ${drtType} token(s). Tx: ${sig}`);
+
+  return sig;
 }
 
 /**
