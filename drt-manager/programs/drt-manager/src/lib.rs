@@ -22,7 +22,7 @@ use anchor_spl::{
     token::{self, Burn, Mint, MintTo, Token, TokenAccount},
 };
 
-declare_id!("Fnd7JPGYo6Run9j2ycah4GyT59TFB9rS81TFTkfUtGUD");
+declare_id!("CME2Dg7UEW82Hf99rQetEi7Hc5Db9JQPx6Azmx1eWbEE");
 
 // --------------------------------
 // Event Definitions
