@@ -47,8 +47,13 @@ export async function GET(
 
   const azureUrl = `${apiBase}/deployments/${encodeURIComponent(id)}`
 
+  // ── abort after 5 s to avoid long blocks ──
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), 5_000)
+
   try {
-    const azureRes = await fetch(azureUrl)
+    const azureRes = await fetch(azureUrl, { signal: controller.signal })
+    clearTimeout(timeoutId)
     const text = await azureRes.text()
 
     // If Azure returned non-JSON (e.g. "stream timeout"), treat as still provisioning
@@ -73,6 +78,10 @@ export async function GET(
     return NextResponse.json(payload, { status: azureRes.status })
 
   } catch (err: any) {
+    clearTimeout(timeoutId)
+     if (err.name === 'AbortError') {
+       return NextResponse.json({ status: 'pending' }, { status: 200 })
+     }
     console.error('[proxy:/api/deployments] fetch error:', err)
     return NextResponse.json(
       {

@@ -542,13 +542,10 @@ function PoolCreationStep({
     try {
       let response;
 
-      if (process.env.DEV === 'true') {
-        //Running in development mode, using local API endpoint
-        response = await fetch(`/api/deployments/${requestId}`);
-      } else {
-        // console.log("Running in production mode, using remote API endpoint"
-        response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/deployments/${requestId}`);
-      }
+      response = await fetch(`/api/deployments/${requestId}`, {
+        cache: 'no-cache',
+        headers: { 'Cache-Control': 'no-cache' },
+      });
 
       if (!response.ok) {
         if (response.status === 404) return { status: 'pending' };
@@ -571,7 +568,7 @@ function PoolCreationStep({
         } catch (error) {
           console.error('Error checking TEE status:', error);
         }
-      }, 30000);
+      }, 10000);
     }
     return () => { if (interval) clearInterval(interval); };
   }, [teeDeploymentId, teeStatus, skipVmCreation]);
