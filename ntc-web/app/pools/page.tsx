@@ -18,10 +18,10 @@
 // app/pools/page.tsx
 "use client"
 
-import React, { useState, useEffect, JSX } from 'react'
+import React, { useState, useEffect, useCallback, JSX } from 'react'
 import { BN, AnchorProvider } from "@coral-xyz/anchor"
 import { useDrtProgram } from "@/lib/useDrtProgram"
-import { buildPoolCreationTx, formatDrtConfigs, derivePoolPdas, getFeeVaultPda } from "@/lib/drtHelpers"
+import { buildPoolCreationTx, formatDrtConfigs } from "@/lib/drtHelpers"
 import { useWallet } from "@solana/wallet-adapter-react"
 import { RefreshCcw, Check, AlertTriangle, Wallet, Copy } from "lucide-react"
 
@@ -33,10 +33,9 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Switch } from "@/components/ui/switch"
 import FilePicker from '@/components/FilePicker';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { SchemaPreview, validateJsonSchema } from '@/components/schemaUtils';
+import { SchemaPreview, validateJsonSchema, JsonSchemaLike } from '@/components/schemaUtils';
 import PoolsTable from './PoolsTable'
 
 /* ------------------------------------------------------------------
@@ -194,7 +193,7 @@ function DigitalRightsTable({
    Step 1: File Selection
 ------------------------------------------------------------------ */
 interface FileSelectionStepProps extends StepProps {
-  setSchemaDefinition: (schema: any) => void;
+  setSchemaDefinition: (schema: JsonSchemaLike) => void;
   setDataFile: (file: File | null) => void;
 }
 
@@ -234,13 +233,13 @@ function FileSelectionStep({
       
       if (result.success) {
         const schemaReader = new FileReader();
-        const schemaPromise = new Promise((resolve, reject) => {
+        const schemaPromise = new Promise<JsonSchemaLike>((resolve, reject) => {
           schemaReader.onload = (e) => {
             try {
               const parsed = JSON.parse(e.target?.result as string);
               console.log("Schema parsed:", parsed);
               resolve(parsed);
-            } catch (err) {
+            } catch {
               reject(new Error('Invalid JSON in schema file'));
             }
           };
@@ -433,13 +432,12 @@ interface PoolCreationStepProps extends StepProps {
   wComputeSelected: boolean;
   pyComputeSelected: boolean;
   setPoolCreated: (value: React.SetStateAction<boolean>) => void;
-  schemaDefinition: any;
+  schemaDefinition: JsonSchemaLike | null;
   dataFile: File | null;
 }
 
 function PoolCreationStep({
   isActive,
-  onNext,
   onPrev,
   appendSelected,
   wComputeSelected,
@@ -456,7 +454,7 @@ function PoolCreationStep({
   const [poolId, setPoolId] = useState(1);
   const [poolNameLocked, setPoolNameLocked] = useState(false);
   const [isCheckingName, setIsCheckingName] = useState(false);
-  const [skipVmCreation, setSkipVmCreation] = useState(false);
+  const [skipVmCreation] = useState(false);
   const [teeDeploymentId, setTeeDeploymentId] = useState<string | null>(null);
   const [teeStatus, setTeeStatus] = useState<string | null>(null);
   const [ownershipSupply, setOwnershipSupply] = useState(1000000);
@@ -533,16 +531,14 @@ function PoolCreationStep({
     }
   };
 
-  const checkTEEStatus = async (requestId: string) => {
+  const checkTEEStatus = useCallback(async (requestId: string) => {
     if (skipVmCreation) {
       console.log("Skipping TEE status check as VM creation is disabled");
       return { status: 'completed', public_ip: '127.0.0.1', vm_name: 'mock-vm' };
     }
     
     try {
-      let response;
-
-      response = await fetch(`/api/deployments/${requestId}`, {
+      const response = await fetch(`/api/deployments/${requestId}`, {
         cache: 'no-cache',
         headers: { 'Cache-Control': 'no-cache' },
       });
@@ -556,7 +552,7 @@ function PoolCreationStep({
       console.error('TEE status check error:', error);
       throw error;
     }
-  };
+  }, [skipVmCreation]);
 
   useEffect(() => {
     let interval: NodeJS.Timeout;
@@ -571,7 +567,7 @@ function PoolCreationStep({
       }, 10000);
     }
     return () => { if (interval) clearInterval(interval); };
-  }, [teeDeploymentId, teeStatus, skipVmCreation]);
+  }, [teeDeploymentId, teeStatus, skipVmCreation, checkTEEStatus]);
 
   const saveEnclaveMeasurement = async (
     poolId: string,
@@ -748,7 +744,6 @@ function PoolCreationStep({
       updateProgress(1, "Pool created (mints initialised & funded)", "success");
 
       const chainAddress   = pdas.poolPda.toBase58();
-      const feeVaultBump   = (await getFeeVaultPda(pdas.poolPda, program.programId))[1];      
   
       // If VM creation is enabled, wait for the TEE deployment to complete
       if (!skipVmCreation) {
@@ -796,7 +791,7 @@ function PoolCreationStep({
               const data = JSON.parse(e.target?.result as string);
               console.log("Data file parsed for enclave:", data);
               resolve(data);
-            } catch (err) {
+            } catch {
               reject(new Error("Invalid JSON in data file"));
             }
           };
@@ -882,9 +877,9 @@ function PoolCreationStep({
         throw new Error("Failed to save pool to database or missing pool ID");
       }
   
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Pool creation error:", error);
-      updateProgress(progress?.step || 0, `Error during pool creation: ${error.message}`, 'error', "Please check console for details");
+      updateProgress(progress?.step || 0, `Error during pool creation: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error', "Please check console for details");
       setAllInputsLocked(false);
     } finally {
       setIsSubmitting(false);
@@ -1159,7 +1154,7 @@ function PoolCreationStep({
 ------------------------------------------------------------------ */
 export default function Pools() {
   const [currentStep, setCurrentStep] = useState(1)
-  const [schemaDefinition, setSchemaDefinition] = useState<any>(null);
+  const [schemaDefinition, setSchemaDefinition] = useState<JsonSchemaLike | null>(null);
   const [dataFile, setDataFile] = useState<File | null>(null);
   const [appendSelected, setAppendSelected] = useState(false)
   const [wComputeSelected, setWComputeSelected] = useState(false)

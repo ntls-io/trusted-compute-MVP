@@ -25,12 +25,10 @@ import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
 import { useUser } from "@clerk/nextjs";
 import { Copy } from "lucide-react";
 import WalletBalance from "@/components/WalletBalance";
-import { useSolanaConnection } from "@/lib/solanaConnection";
 
 const WalletConnector = () => {
   const { publicKey, connected, disconnect } = useWallet();
   const { user } = useUser();
-  const connection = useSolanaConnection();
   const [isLinked, setIsLinked] = useState<boolean>(false);
   const [loadingLinkStatus, setLoadingLinkStatus] = useState<boolean>(true);
 

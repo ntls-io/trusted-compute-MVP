@@ -53,7 +53,7 @@ interface DRTInstance {
     name: string
     description: string
     chainAddress: string
-    schemaDefinition: any
+    schemaDefinition: Record<string, unknown>
   }
   owner: {
     id: string
@@ -287,11 +287,6 @@ export default function Analysis() {
         ? prev.filter(v => v !== value)
         : [...prev, value]
     )
-  }
-
-  // Get Solana explorer URL
-  const getSolanaExplorerUrl = (address: string): string => {
-    return `https://explorer.solana.com/address/${address}`
   }
 
   if (loading) {

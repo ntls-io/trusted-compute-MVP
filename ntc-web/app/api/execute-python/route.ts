@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
       agent: new https.Agent({
         rejectUnauthorized: false, // Ignore self-signed certificate
       }),
-    } as any); // Temporary type assertion
+    });
 
     if (!response.ok) {
       const errorText = await response.text();

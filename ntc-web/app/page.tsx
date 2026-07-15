@@ -45,11 +45,12 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { useDrtProgram } from "@/lib/useDrtProgram";
-import { useWallet } from "@solana/wallet-adapter-react";
+import { useWallet, type WalletContextState } from "@solana/wallet-adapter-react";
+import * as anchor from "@coral-xyz/anchor";
 import { redeemDrt } from "@/lib/drtHelpers";
 import PoolAccount from "@/components/PoolAccount";
 import { useUser } from "@clerk/nextjs";
-import { useUserProfile, ClientRoleName } from '@/hooks/useUserProfile';
+import { useUserProfile } from '@/hooks/useUserProfile';
 import { useRouter, usePathname } from 'next/navigation';
 
 // Interfaces
@@ -122,7 +123,7 @@ interface AttestationResult {
 
 interface ExecutionResult {
   success: boolean;
-  result?: any;
+  result?: unknown;
   error?: string;
 }
 
@@ -351,8 +352,8 @@ const PythonExecutionDialog = ({
   drtInstance: DRTInstance; 
   onRedeem: () => Promise<ExecutionResult>; 
   onStateUpdate: (newState: string) => void; 
-  program: any;
-  wallet: any;
+  program: anchor.Program<anchor.Idl> | null;
+  wallet: WalletContextState;
 }) => {
   const [isRedeeming, setIsRedeeming] = useState(false);
   const [executionResult, setExecutionResult] = useState<ExecutionResult | null>(null);
@@ -409,7 +410,7 @@ const PythonExecutionDialog = ({
       <DialogHeader>
         <DialogTitle>Redeem Python DRT - {drtInstance.drt.name}</DialogTitle>
         <DialogDescription>
-          Redeem your DRT on Solana and execute the associated Python script on the pool's data
+          Redeem your DRT on Solana and execute the associated Python script on the pool&apos;s data
         </DialogDescription>
       </DialogHeader>
 
@@ -500,8 +501,8 @@ const WasmExecutionDialog = ({
   drtInstance: DRTInstance; 
   onRedeem: () => Promise<ExecutionResult>; 
   onStateUpdate: (newState: string) => void; 
-  program: any;
-  wallet: any;
+  program: anchor.Program<anchor.Idl> | null;
+  wallet: WalletContextState;
 }) => {
   const [isRedeeming, setIsRedeeming] = useState(false);
   const [executionResult, setExecutionResult] = useState<ExecutionResult | null>(null);
@@ -558,7 +559,7 @@ const WasmExecutionDialog = ({
       <DialogHeader>
         <DialogTitle>Redeem WASM DRT - {drtInstance.drt.name}</DialogTitle>
         <DialogDescription>
-          Redeem your DRT on Solana and execute the associated WASM binary on the pool's data
+          Redeem your DRT on Solana and execute the associated WASM binary on the pool&apos;s data
         </DialogDescription>
       </DialogHeader>
 
@@ -729,7 +730,7 @@ export default function Home() {
     async function fetchData() {
 
       if (isAuthLoaded && isSignedIn && !isLoadingProfile) { // Check profile loading state too
-        if ((userProfile && roles.length === 0) || (!userProfile && isErrorProfile && (isErrorProfile as any).status === 404)) {
+        if ((userProfile && roles.length === 0) || (!userProfile && isErrorProfile && (isErrorProfile as Error & { status?: number }).status === 404)) {
           // User will be redirected, so skip main data fetch.
           setIsLoadingPools(false); 
           setIsLoadingDRTs(false);
@@ -793,7 +794,7 @@ export default function Home() {
     if (isAuthLoaded) {
       fetchData();
     }
-  }, [isAuthLoaded, isSignedIn, userProfile, roles, isLoadingProfile]);
+  }, [isAuthLoaded, isSignedIn, userProfile, roles, isLoadingProfile, isErrorProfile]);
 
   const handlePoolSort = (field: typeof sortField) => {
     if (sortField === field) {
@@ -814,10 +815,6 @@ export default function Home() {
     if (sortDirection === 'asc') return <ChevronUp size={16} />;
     if (sortDirection === 'desc') return <ChevronDown size={16} />;
     return <ChevronsUpDown size={16} />;
-  };
-
-  const getSolanaExplorerUrl = (address: string): string => {
-    return `https://explorer.solana.com/address/${address}`;
   };
 
   const handleAttestation = async (pool: Pool): Promise<AttestationResult> => {
@@ -1008,7 +1005,7 @@ export default function Home() {
       // Case 1: User is signed in, their profile from DB is loaded, but they have NO roles.
       console.log("HomePage: User signed in, no roles. Redirecting to /select-roles.");
       router.push(`/select-roles?next=${encodeURIComponent(pathname)}`);
-    } else if (isSignedIn && !userProfile && isErrorProfile && (isErrorProfile as any).status === 404) {
+    } else if (isSignedIn && !userProfile && isErrorProfile && (isErrorProfile as Error & { status?: number }).status === 404) {
       // Case 2: User exists in Clerk, but /api/user/me returned 404 (user not in your DB yet).
       // This implies they are new and also need to select roles.
       // This relies on your /api/auth/check-user to eventually create them.
@@ -1064,8 +1061,8 @@ export default function Home() {
 
   const sortedDrtInstances = [...drtInstances].sort((a, b) => {
     if (!sortConfig.key || !sortConfig.direction) return 0;
-    let aValue: any = a[sortConfig.key];
-    let bValue: any = b[sortConfig.key];
+    let aValue: unknown = a[sortConfig.key];
+    let bValue: unknown = b[sortConfig.key];
     
     if (sortConfig.key === 'pool') {
       aValue = a.pool.name || '';
@@ -1082,8 +1079,8 @@ export default function Home() {
     }
     
     return sortConfig.direction === 'asc'
-      ? (aValue || 0) - (bValue || 0)
-      : (bValue || 0) - (aValue || 0);
+      ? (Number(aValue) || 0) - (Number(bValue) || 0)
+      : (Number(bValue) || 0) - (Number(aValue) || 0);
   });
 
   if (!isAuthLoaded || (isSignedIn && isLoadingProfile)) {

@@ -42,6 +42,41 @@ const RETRY_DELAY = 1000; // 1 second delay between retries
 const DEVNET_URL = clusterApiUrl('devnet');
 const COMMITMENT = 'confirmed';
 
+// Minimal wallet shape needed by the helpers below
+interface WalletLike {
+  publicKey: PublicKey | null;
+}
+
+// Raw on-chain DRT/pool account shapes (Anchor account fetch results aren't
+// strongly typed from the raw IDL here, so we describe the fields we use).
+interface RawDrtAccount {
+  drtType?: string;
+  drt_type?: string;
+  mint: PublicKey;
+  supply?: number | { toNumber(): number };
+  cost?: number | { toNumber(): number };
+  githubUrl?: string;
+  github_url?: string;
+  codeHash?: string;
+  code_hash?: string;
+  isMinted?: boolean;
+  is_minted?: boolean;
+}
+
+interface RawPoolAccount {
+  owner?: PublicKey;
+  name?: string;
+  bump?: number;
+  ownershipMint: PublicKey;
+  drts: RawDrtAccount[];
+}
+
+function getPoolAccounts(program: anchor.Program) {
+  return program.account as unknown as {
+    pool: { fetch(pubkey: PublicKey): Promise<RawPoolAccount> };
+  };
+}
+
 // Helper to create connection with proper configuration
 export const getConnection = () => new Connection(DEVNET_URL, {
   commitment: COMMITMENT,
@@ -268,7 +303,7 @@ export async function createPoolWithDrts(
         try {
           await provider.connection.getTokenAccountBalance(vaultTokenAccount);
           updateStatus?.(`Vault token account already exists for ${drtType}`);
-        } catch (e) {
+        } catch {
           // Account doesn't exist, create it
           updateStatus?.(`Creating new vault token account for ${drtType}...`);
           
@@ -343,7 +378,7 @@ export async function createPoolWithDrts(
  */
 export async function buyDrt(
   program: anchor.Program,
-  wallet: any,
+  wallet: WalletLike,
   poolAddress: string,
   drtType: string,
   quantity = 1,
@@ -351,15 +386,16 @@ export async function buyDrt(
 ): Promise<string> {
 
   if (quantity < 1) throw new Error("quantity must be ≥ 1");
+  if (!wallet.publicKey) throw new Error("Wallet not connected");
 
   const poolPubkey = new PublicKey(poolAddress);
   
   // Fetch pool account to get DRT information
   updateStatus?.("Fetching pool data...");
-  const poolAccount = await (program.account as any).pool.fetch(poolPubkey);
+  const poolAccount = await getPoolAccounts(program).pool.fetch(poolPubkey);
   
   // Find the DRT config
-  const drtConfig = poolAccount.drts.find((drt: any) => 
+  const drtConfig = poolAccount.drts.find((drt: RawDrtAccount) => 
     drt.drtType === drtType || drt.drt_type === drtType
   );
   
@@ -436,20 +472,21 @@ export async function buyDrt(
  */
 export async function redeemDrt(
   program: anchor.Program,
-  wallet: any,
+  wallet: WalletLike,
   poolAddress: string,
   drtType: string,
   updateStatus?: (status: string) => void
 ): Promise<{ tx: string; ownershipTokenReceived: boolean }> {
+  if (!wallet.publicKey) throw new Error("Wallet not connected");
   const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
   const poolPubkey = new PublicKey(poolAddress);
   
   // Fetch pool account
   updateStatus?.("Fetching pool data...");
-  const poolAccount = await (program.account as any).pool.fetch(poolPubkey);
+  const poolAccount = await getPoolAccounts(program).pool.fetch(poolPubkey);
   
   // Find the DRT config
-  const drtConfig = poolAccount.drts.find((drt: any) => 
+  const drtConfig = poolAccount.drts.find((drt: RawDrtAccount) => 
     drt.drtType === drtType || drt.drt_type === drtType
   );
   
@@ -519,17 +556,18 @@ export async function redeemDrt(
  */
 export async function redeemFees(
   program: anchor.Program,
-  wallet: any,
+  wallet: WalletLike,
   poolAddress: string,
   amount: BN,
   updateStatus?: (status: string) => void
 ): Promise<string> {
+  if (!wallet.publicKey) throw new Error("Wallet not connected");
   const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
   const poolPubkey = new PublicKey(poolAddress);
   
   // Fetch pool account
   updateStatus?.("Fetching pool data...");
-  const poolAccount = await (program.account as any).pool.fetch(poolPubkey);
+  const poolAccount = await getPoolAccounts(program).pool.fetch(poolPubkey);
   const ownershipMint = poolAccount.ownershipMint;
   
   // Find fee vault and its bump
@@ -597,16 +635,16 @@ export async function fetchAvailableDRTs(
   const connection = (program.provider as AnchorProvider).connection;
   
   // Fetch pool account
-  const poolAccount = await (program.account as any).pool.fetch(poolPubkey);
+  const poolAccount = await getPoolAccounts(program).pool.fetch(poolPubkey);
   const availableDRTs = [];
   
   // Process each DRT in the pool
   for (const drt of poolAccount.drts) {
-    const drtType = drt.drtType || drt.drt_type;
+    const drtType = drt.drtType || drt.drt_type || '';
     const drtMint = drt.mint;
     const supply = Number(drt.supply);
     const cost = Number(drt.cost) / 1_000_000_000; // Convert lamports to SOL
-    const isMinted = drt.isMinted || drt.is_minted;
+    const isMinted = drt.isMinted || drt.is_minted || false;
     const githubUrl = drt.githubUrl || drt.github_url;
     const codeHash = drt.codeHash || drt.code_hash;
     

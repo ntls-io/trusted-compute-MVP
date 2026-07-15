@@ -25,7 +25,7 @@ import { PrismaClient } from '@prisma/client'
 const prisma = new PrismaClient()
 
 /* --------- helpers --------- */
-type Ctx = { params: { drtId: string } }
+type Ctx = { params: Promise<{ drtId: string }> }
 
 /* --------------- PUT --------------- */
 export async function PUT(req: Request, context: Ctx) {

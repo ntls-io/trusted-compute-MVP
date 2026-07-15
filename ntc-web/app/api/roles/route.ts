@@ -29,7 +29,7 @@ export interface ApiRole {
     // Add any other fields from the Role model you want to expose
 }
 
-export async function GET(req: Request) {
+export async function GET() {
   try {
     const rolesFromDb = await prisma.role.findMany({
       select: {

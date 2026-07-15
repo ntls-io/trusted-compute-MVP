@@ -33,8 +33,7 @@ import {
 } from "lucide-react";
 import {
   SignInButton,
-  SignedIn,
-  SignedOut,
+  Show,
   UserButton,
   ClerkLoading,
   ClerkLoaded,
@@ -94,7 +93,7 @@ export default function TopBar({ isNavOpen, toggleNav }: TopBarProps) {
       <div className="flex-grow"></div>
 
       <div className="flex items-center pr-4 space-x-3 sm:space-x-4">
-        <SignedIn>
+        <Show when="signed-in">
           {isLoadingProfile && (
             <div className="flex space-x-1" aria-label="Loading roles...">
               <div className="w-6 h-6 bg-gray-200 rounded-full animate-pulse"></div>
@@ -149,7 +148,7 @@ export default function TopBar({ isNavOpen, toggleNav }: TopBarProps) {
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
-        </SignedIn>
+        </Show>
 
         <WalletConnector />
 
@@ -157,16 +156,16 @@ export default function TopBar({ isNavOpen, toggleNav }: TopBarProps) {
           <div className="w-9 h-9 bg-gray-200 animate-pulse rounded-full" aria-label="Loading user authentication..."></div>
         </ClerkLoading>
         <ClerkLoaded>
-          <SignedOut>
+          <Show when="signed-out">
             <SignInButton mode="modal">
               <button className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
                 Sign in
               </button>
             </SignInButton>
-          </SignedOut>
-          <SignedIn>
-            <UserButton afterSignOutUrl="/" appearance={{ elements: { avatarBox: "w-9 h-9" } }} />
-          </SignedIn>
+          </Show>
+          <Show when="signed-in">
+            <UserButton appearance={{ elements: { avatarBox: "w-9 h-9" } }} />
+          </Show>
         </ClerkLoaded>
       </div>
     </header>

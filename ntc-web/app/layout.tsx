@@ -36,7 +36,7 @@ import { SolflareWalletAdapter } from "@solana/wallet-adapter-solflare";
 import "@solana/wallet-adapter-react-ui/styles.css";
 
 import LayoutClient from "./LayoutClient";
-import { SignedIn, SignedOut, RedirectToSignIn } from "@clerk/nextjs";
+import { Show, RedirectToSignIn } from "@clerk/nextjs";
 import { usePathname } from "next/navigation";
 
 const inter = Inter({ subsets: ["latin"] });
@@ -71,12 +71,12 @@ export default function RootLayout({
                     children
                   ) : (
                     <>
-                      <SignedIn>
+                      <Show when="signed-in">
                         <LayoutClient>{children}</LayoutClient>
-                      </SignedIn>
-                      <SignedOut>
+                      </Show>
+                      <Show when="signed-out">
                         <RedirectToSignIn />
-                      </SignedOut>
+                      </Show>
                     </>
                   )}
                 </div>

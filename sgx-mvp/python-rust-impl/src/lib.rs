@@ -18,9 +18,10 @@ use anyhow::Result;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use serde_json::Value;
+use std::ffi::CString;
 
 pub fn run_python(json_data: &Value, py_file_path: &'static str) -> Result<Value> {
-    Python::with_gil(|py| {
+    Python::attach(|py| {
         // Open and read the Python file contents
         let code = std::fs::read_to_string(py_file_path)
             .map_err(|e| anyhow::anyhow!("Failed to read Python script: {}", e))?;
@@ -32,11 +33,12 @@ pub fn run_python(json_data: &Value, py_file_path: &'static str) -> Result<Value
         locals.set_item("data", serde_json::to_string(json_data)?)?;
 
         // Run the Python code from the file in the current Python context
-        py.run(&code, None, None)?;
+        let code = CString::new(code)?;
+        py.run(code.as_c_str(), None, None)?;
 
         // Execute the mean calculation in the current context
         let result: String = py
-            .eval("exec(json.loads(data))", None, Some(locals))?
+            .eval(c"exec(json.loads(data))", None, Some(&locals))?
             .extract()?;
 
         // Parse the result back into a Rust serde_json::Value

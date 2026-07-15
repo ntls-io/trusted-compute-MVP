@@ -20,7 +20,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { currentUser } from '@clerk/nextjs/server';
 import { prisma } from "@/lib/prisma"; // Use shared Prisma instance
-import { Prisma } from '@prisma/client';
 
 // Map from frontend DRT type names to database IDs
 const DRT_TYPE_MAP: Record<string, string> = {
@@ -126,7 +125,7 @@ export async function POST(req: NextRequest) {
 
     // Create the DRT instances
     const drtInstances = [];
-    let baseAddress = data.mintAddress;
+    const baseAddress = data.mintAddress;
     
     for (let i = 0; i < quantity; i++) {
       try {

@@ -19,6 +19,7 @@
 // app/api/enclave-measurements/route.ts
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { Prisma } from '@prisma/client';
 
 export async function POST(request: Request) {
   try {
@@ -51,8 +52,8 @@ export async function POST(request: Request) {
       });
 
       return NextResponse.json(enclaveMeasurement);
-    } catch (prismaError: any) {
-      if (prismaError.code === 'P2025') {
+    } catch (prismaError: unknown) {
+      if (prismaError instanceof Prisma.PrismaClientKnownRequestError && prismaError.code === 'P2025') {
         return NextResponse.json(
           { error: 'Pool not found' },
           { status: 404 }
@@ -60,12 +61,12 @@ export async function POST(request: Request) {
       }
       throw prismaError;
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error saving enclave measurement:', error);
     return NextResponse.json(
       { 
         error: 'Failed to save enclave measurement',
-        details: error.message 
+        details: error instanceof Error ? error.message : 'Unknown error'
       },
       { status: 500 }
     );

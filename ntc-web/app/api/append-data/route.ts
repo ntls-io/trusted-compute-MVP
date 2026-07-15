@@ -54,7 +54,6 @@ export async function POST(req: NextRequest) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ data }),
-      // @ts-ignore - Type mismatch between node-fetch and native fetch
       agent,
     });
 

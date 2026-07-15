@@ -67,7 +67,7 @@ export default function Sidebar({ isOpen, onHoverStart, onHoverEnd }: SidebarPro
   // Default to showing only "Home" if conditions aren't met for more items.
   let navItemsToDisplay = allNavItems.filter(item => item.name === 'Home');
 
-  const profileFetchErrorIs404 = isErrorProfile && (isErrorProfile as any).status === 404;
+  const profileFetchErrorIs404 = isErrorProfile && (isErrorProfile as Error & { status?: number }).status === 404;
   const profileLoadedSuccessfully = userProfile && roles; // `roles` from hook defaults to [] if userProfile.roles is undefined
 
   if (profileLoadedSuccessfully && roles.length > 0) {
@@ -92,7 +92,7 @@ export default function Sidebar({ isOpen, onHoverStart, onHoverEnd }: SidebarPro
     // navItemsToDisplay remains filtered to 'Home'
   } else if (isErrorProfile) { 
     // Any other error fetching profile. Default to "Home" only.
-    console.error("Sidebar: Unexpected error loading user profile, status:", (isErrorProfile as any).status, ". Showing Home only.");
+    console.error("Sidebar: Unexpected error loading user profile, status:", (isErrorProfile as Error & { status?: number }).status, ". Showing Home only.");
     // navItemsToDisplay remains filtered to 'Home'
   }
   // If !userProfile and no error (e.g., signed out, which middleware should prevent here),

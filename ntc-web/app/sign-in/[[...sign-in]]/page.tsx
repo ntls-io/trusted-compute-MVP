@@ -20,11 +20,10 @@
 'use client';
 
 import { SignIn } from '@clerk/nextjs';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 
 export default function SignInPage() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const redirectUrl = searchParams.get('redirect_url') || '/';
   const currentYear = new Date().getFullYear();

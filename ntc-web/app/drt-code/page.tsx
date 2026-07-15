@@ -222,7 +222,7 @@ export default function DrtCodePage() {
 
   useEffect(() => {
     fetchDrts()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [])
 
   /* ───── handlers ───── */
@@ -311,8 +311,8 @@ export default function DrtCodePage() {
       setSaving(false)
       setDialogOpen(false)
       fetchDrts()
-    } catch (err: any) {
-      setErrorMsg(err.message ?? 'Network error – could not reach the server.')
+    } catch (err: unknown) {
+      setErrorMsg(err instanceof Error ? err.message : 'Network error – could not reach the server.')
       setSaving(false)
     }
   }

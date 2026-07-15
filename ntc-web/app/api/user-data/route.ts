@@ -16,11 +16,11 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 // app/api/user-data/route.ts
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { currentUser } from '@clerk/nextjs/server';
 import { prisma } from "@/lib/prisma";
 
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
     const user = await currentUser();
 

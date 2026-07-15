@@ -84,6 +84,28 @@ interface OwnershipToken {
   available: number;
 }
 
+interface RawDrtAccount {
+  drtType?: string;
+  drt_type?: string;
+  mint: { toString(): string };
+  supply: number | { toNumber(): number };
+  cost: number | { toNumber(): number };
+  githubUrl?: string;
+  github_url?: string;
+  codeHash?: string;
+  code_hash?: string;
+  isMinted?: boolean;
+  is_minted?: boolean;
+}
+
+interface RawPoolAccount {
+  owner: { toString(): string };
+  name: string;
+  bump: number;
+  ownershipMint: PublicKey;
+  drts: RawDrtAccount[];
+}
+
 const PoolAccountDialog = ({ 
   poolData, 
   drtTokens, 
@@ -321,7 +343,7 @@ const PoolAccountDialog = ({
                 {/* DRT tokens from the pool.drts array */}
                 {poolData.drts.map((drt, index) => {
                   const drtType = drt.drtType;
-                  const { displayName, badgeClass, githubUrl, githubName } = getDrtDisplayInfo(drtType);
+                  const { displayName, githubUrl, githubName } = getDrtDisplayInfo(drtType);
                   
                   // Find matching DRT in the tokens array by type or mint
                   const matchingDrt = drtTokens.find(t => 
@@ -408,14 +430,17 @@ const PoolAccount: React.FC<PoolAccountProps> = ({ chainAddress }) => {
     setIsLoading(true);
     try {
       const pubkey = new PublicKey(chainAddress);
-      const account = await (program.account as any).pool.fetch(pubkey);
+      const poolAccounts = program.account as unknown as {
+        pool: { fetch(pubkey: PublicKey): Promise<RawPoolAccount> };
+      };
+      const account = await poolAccounts.pool.fetch(pubkey);
       
       console.log('Raw pool account data:', account);
       
       // Format the account data
-      const drts = account.drts.map((drt: any) => {
+      const drts = account.drts.map((drt: RawDrtAccount) => {
         // Normalize DRT field names - handle both camelCase and snake_case
-        const drtType = drt.drtType || drt.drt_type;
+        const drtType = drt.drtType || drt.drt_type || '';
         
         return {
           drtType,
@@ -424,7 +449,7 @@ const PoolAccount: React.FC<PoolAccountProps> = ({ chainAddress }) => {
           cost: typeof drt.cost === 'object' ? drt.cost.toNumber() : drt.cost,
           githubUrl: drt.githubUrl || drt.github_url,
           codeHash: drt.codeHash || drt.code_hash,
-          isMinted: drt.isMinted || drt.is_minted,
+          isMinted: drt.isMinted || drt.is_minted || false,
         };
       });
       

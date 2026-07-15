@@ -18,12 +18,10 @@
 // app/pools/PoolsTable.tsx
 'use client';
 
-import { useState, useEffect, JSX } from 'react';
+import { useState, useEffect, useCallback, JSX } from 'react';
 import { useDrtProgram } from "@/lib/useDrtProgram";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { redeemDrt } from "@/lib/drtHelpers";
-import { PublicKey } from "@solana/web3.js";
-import { getAssociatedTokenAddress } from "@/lib/solanaToken";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -41,8 +39,8 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import FilePicker from '@/components/FilePicker';
-import { SchemaPreview, validateJsonSchema } from '@/components/schemaUtils';
-import { ExternalLink, Shield, Upload, Code2, Eye, RefreshCcw, Check, AlertTriangle } from 'lucide-react';
+import { SchemaPreview, validateJsonSchema, JsonSchemaLike } from '@/components/schemaUtils';
+import { ExternalLink, Shield, Upload, Code2, RefreshCcw, Check, AlertTriangle } from 'lucide-react';
 import { ChevronDown, ChevronUp, ChevronsUpDown, Loader2 } from "lucide-react";
 import PoolAccount from "@/components/PoolAccount";
 
@@ -69,7 +67,7 @@ interface Pool {
   vaultAddress: string;
   feeVaultAddress: string;
   ownershipMintAddress: string;
-  schemaDefinition: JSON; 
+  schemaDefinition: JsonSchemaLike; 
   enclaveMeasurement?: EnclaveMeasurement;
   allowedDRTs: {
     drt: DRT;
@@ -421,7 +419,7 @@ const JoinPoolDialog = ({ pool, drtInstances, fetchUserData }: { pool: Pool; drt
           try {
             const data = JSON.parse(e.target?.result as string);
             resolve(data);
-          } catch (err) {
+          } catch {
             reject(new Error("Invalid JSON in data file"));
           }
         };
@@ -645,7 +643,6 @@ const getDrtTypeColor = (name: string): string => {
 };
 
 export function PoolsTable({ poolCreated }: PoolsTableProps) {
-  const program = useDrtProgram();
   const wallet = useWallet();
   const [search, setSearch] = useState('');
   const [pools, setPools] = useState<Pool[]>([]);
@@ -656,7 +653,7 @@ export function PoolsTable({ poolCreated }: PoolsTableProps) {
   const [sortDirection, setSortDirection] = useState<"asc" | "desc" | null>(null);
   const [apiError, setApiError] = useState<string | null>(null);
 
-  const fetchUserData = async () => {
+  const fetchUserData = useCallback(async () => {
     setLoading(true);
     try {
       // Always use the all-pools endpoint
@@ -698,11 +695,11 @@ export function PoolsTable({ poolCreated }: PoolsTableProps) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [wallet.connected, wallet.publicKey]);
 
   useEffect(() => {
     fetchUserData();
-  }, [poolCreated, wallet.connected, wallet.publicKey]); // Refetch when wallet connection changes
+  }, [poolCreated, wallet.connected, wallet.publicKey, fetchUserData]); // Refetch when wallet connection changes
 
   const handleAttestation = async (pool: Pool): Promise<AttestationResult> => {
     if (!pool.enclaveMeasurement || !pool.enclaveMeasurement.publicIp || !pool.enclaveMeasurement.actualName) {

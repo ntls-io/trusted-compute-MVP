@@ -21,6 +21,7 @@
 
 import { SignUp, useUser } from "@clerk/nextjs";
 import Image from "next/image";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation"; // For App Router
 import { useState, useEffect, FormEvent } from "react";
 
@@ -74,7 +75,7 @@ const PageLayout = ({ children }: { children: React.ReactNode }) => {
 export default function SignUpPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { user, isSignedIn, isLoaded: isUserLoaded } = useUser();
+  const { isSignedIn, isLoaded: isUserLoaded } = useUser();
 
   const [selectedClientRoles, setSelectedClientRoles] = useState<ClientRoleName[]>([]);
   const [isLoadingRoles, setIsLoadingRoles] = useState(false);
@@ -129,8 +130,8 @@ export default function SignUpPage() {
       }
       setRoleSuccessMessage(data.message || 'Roles assigned successfully! Redirecting...');
       setTimeout(() => router.push('/'), 2000); // Adjust redirect path
-    } catch (err: any) {
-      setRoleError(err.message);
+    } catch (err: unknown) {
+      setRoleError(err instanceof Error ? err.message : 'Failed to assign roles.');
     } finally {
       setIsLoadingRoles(false);
     }
@@ -151,7 +152,7 @@ export default function SignUpPage() {
                 </div>
             </div>
             <h2 className="text-2xl font-bold text-gray-900">One Last Step!</h2>
-            <p className="text-gray-600 text-sm mt-2">Tell us how you'll use Nautilus.</p>
+            <p className="text-gray-600 text-sm mt-2">Tell us how you&apos;ll use Nautilus.</p>
         </div>
         
         <form onSubmit={handleRoleSubmit}>
@@ -215,9 +216,9 @@ export default function SignUpPage() {
 
         <div className="mt-6 text-center text-sm">
           <span className="text-gray-600">Already have an account? </span>
-          <a href="/sign-in" className="text-blue-600 hover:text-blue-700 font-semibold">
+          <Link href="/sign-in" className="text-blue-600 hover:text-blue-700 font-semibold">
             Sign In
-          </a>
+          </Link>
         </div>
       </PageLayout>
     );

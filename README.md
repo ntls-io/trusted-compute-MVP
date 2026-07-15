@@ -16,54 +16,33 @@ You should have received a copy of the GNU Affero General Public License
 along with this program. If not, see <https://www.gnu.org/licenses/>.  
 -->
 
-# Nautilus Trusted Compute MVP
+# Trusted Compute MVP
 
-This repository is organized into several sub-directories containing components of the Nautilus Trusted Compute MVP.
+A framework for privacy-preserving, verifiable computation over sensitive data, combining Intel SGX enclaves with Solana-based orchestration.
 
-## Quick Links
+## Architecture
 
-- [Full Documentation](https://ntls-io.github.io/trusted-compute-MVP/)
-- [SGX Server Setup](https://ntls-io.github.io/trusted-compute-MVP/installation/sgx-mvp/)
-- [Attestation Client Guide](https://ntls-io.github.io/trusted-compute-MVP/attestation/client-setup/)
-- [API Documentation](https://ntls-io.github.io/trusted-compute-MVP/api/overview/)
+- **Execution Service & Enclave** ([sgx-mvp](sgx-mvp/)): SGX enclave that executes WASM and Python workloads over sealed data, producing attested results.
+- **Front-end** ([ntc-web](ntc-web/)): Next.js application for managing data pools, digital rights tokens (DRTs), and enclave jobs.
+- **Smart Contract** ([drt-manager](drt-manager/)): Solana program governing DRT issuance and trusted compute orchestration.
+- **Oracle Node**: TBD.
 
-## Core Components
+## Documentation
 
-### Execution Service & Enclave (/SGX-MVP)
-Secure WASM binary execution environment with data sealing/unsealing capabilities and oracle integration.
+- [Full Documentation](https://relational-network.github.io/trusted-compute-MVP/)
+- [SGX Server Setup](https://relational-network.github.io/trusted-compute-MVP/installation/sgx-mvp/)
+- [Attestation Client Guide](https://relational-network.io/trusted-compute-MVP/attestation/client-setup/)
+- [API Documentation](https://relational-network.github.io/trusted-compute-MVP/api/overview/)
 
-### Front-end Next.js (/NTC-WEB)
-Next.js-based front-end for managing and interacting with Nautilus Trusted Compute.
+## License Compliance
 
-### Solana Smart Contract (/drt-manager)
-Solana blockchain integration for trusted compute verification and orchestration.
-
-### Oracle Node (/TBD)
-Blockchain network validator that validates the state of the blockchain.
-
-For detailed component documentation, implementation details, and setup instructions, please visit our [documentation site](https://ntls-io.github.io/trusted-compute-MVP/).
-
-## 🔹 License Compliance & Automation
-
-To ensure all files in the repository include the required license header, we provide a script to **automate license insertion**.
-
-### **Adding License Headers Locally**
-Run the following script to **automatically add the Nautilus AGPL license** to all supported files:
+All files must carry a license header, enforced via CI. To add headers locally:
 
 ```bash
 ./add-license.sh
 ```
 
-This will: ✅ Add license headers to all source code files (`.ts`, `.js`, `.py`, `.rs`, etc.)
-
-* Add an HTML comment license block to .md files
-* Skip unnecessary directories (node_modules, target, dist, etc.)
-
-### GitHub License Check
-
-We also enforce license compliance via GitHub Actions. On every PR, a CI check will fail if files are missing a license header.
-
-To manually validate changed files before pushing, run:
+To check only changed files before pushing:
 
 ```bash
 git diff --name-only | xargs ./add-license.sh
