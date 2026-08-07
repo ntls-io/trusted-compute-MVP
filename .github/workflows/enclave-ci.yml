@@ -5,7 +5,12 @@
 #
 # NO SGX HARDWARE IS NEEDED HERE. gramine-sgx-sign is ordinary RSA signing, so
 # a standard x86-64 runner can produce the image, MRENCLAVE and MRSIGNER. Only
-# *running* the enclave needs SGX, which is what enclave-cd.yml is for.
+# *running* the enclave needs SGX.
+#
+# This workflow's ONLY output is a signed, measured image in GHCR. It does not
+# deploy anywhere: devops-acr provisions SGX VMs on demand and its bootstrap
+# pulls this image (settings.SGX_IMAGE). Publish here, then point SGX_IMAGE at
+# the digest this run prints.
 #
 # The release gate is measurements.toml: this workflow fails if the built
 # mr_enclave differs from the recorded one. That is the whole point of the
@@ -105,14 +110,6 @@ jobs:
           sh -n docker/restart_aesm.sh
           bash -n docker/build.sh
 
-      - name: Validate systemd units
-        run: |
-          for unit in scripts/enclave.service scripts/health-check.service scripts/health-check.timer; do
-            [ -f "$unit" ] || { echo "missing $unit"; exit 1; }
-            grep -q '\[Unit\]' "$unit" || { echo "ERROR: $unit missing [Unit]"; exit 1; }
-            echo "OK $unit"
-          done
-          bash -n scripts/health-check.sh
 
   build-enclave:
     name: Build, Sign and Measure
@@ -203,7 +200,7 @@ jobs:
           load: true
           tags: |
             ${{ env.IMAGE }}:sha-${{ github.sha }}
-            ${{ (github.ref == 'refs/heads/staging' && format('{0}:staging-latest', env.IMAGE)) || '' }}
+            ${{ (github.ref == 'refs/heads/main' && format('{0}:main-latest', env.IMAGE)) || '' }}
           build-args: |
             ORACLE_URL=${{ secrets.ORACLE_URL }}
             ORACLE_PUBKEY_HEX=${{ secrets.ORACLE_PUBKEY_HEX }}
@@ -293,13 +290,3 @@ jobs:
         if: always()
         run: shred -u "$RUNNER_TEMP/enclave-key.pem" 2>/dev/null || true
 
-  deploy:
-    name: Deploy to SGX VM
-    needs: build-enclave
-    if: github.event_name == 'push' && github.ref == 'refs/heads/staging'
-    uses: ./.github/workflows/enclave-cd.yml
-    with:
-      commit_sha: ${{ github.sha }}
-      mr_enclave: ${{ needs.build-enclave.outputs.mr_enclave }}
-      mr_signer: ${{ needs.build-enclave.outputs.mr_signer }}
-    secrets: inherit

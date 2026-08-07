@@ -39,6 +39,16 @@ Build context is the project directory `sgx-mvp/`, not this `docker/` directory 
 [`../.dockerignore`](../.dockerignore). The image is built from the **local checkout**; earlier revisions
 cloned the repo from GitHub inside the Dockerfile, so local changes were silently never built.
 
+## How this image gets deployed
+
+CI publishes the signed image to GHCR and stops there. **devops-acr provisions SGX VMs on demand** and its
+bootstrap script pulls this image by the reference in its `SGX_IMAGE` setting — there is no long-lived VM and
+nothing deploys over SSH.
+
+So the release flow is: build and sign here → record the measurement in `measurements.toml` → point
+devops-acr's `SGX_IMAGE` at the digest CI printed. Use a digest rather than a tag: a measurement only means
+something alongside the exact image content that produced it.
+
 ## Run
 
 The signing key is **not** required at runtime — it is consumed at Docker build time only.

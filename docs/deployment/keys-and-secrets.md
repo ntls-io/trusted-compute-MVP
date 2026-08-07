@@ -103,8 +103,8 @@ openssl rsa -in enclave-key.pem -noout -text | grep publicExponent   # expect: p
 **The signing key is not needed at runtime** — the enclave is signed at build time and the deployment VM never
 sees it. CI shreds its copy on every run.
 
-**Rotation.** Changes MRSIGNER. Every client pinning the old value rejects the new enclave, so the CD pipeline
-deliberately refuses to deploy on an unexplained MRSIGNER change.
+**Rotation.** Changes MRSIGNER. Every client pinning the old value rejects the new enclave, so a rotation must
+be rolled out together with the expected measurements clients check against.
 
 ---
 
@@ -242,14 +242,14 @@ Store `AZURE_CLIENT_ID` (the app ID), `AZURE_TENANT_ID` and `AZURE_SUBSCRIPTION_
 
 ---
 
-## 10. SSH keypair for the SGX VM
+## 10. SSH keypair for the SGX VMs
 
 ```bash
-ssh-keygen -t ed25519 -f ~/.ssh/sgx-vm -C "sgx-mvp deploy"
+ssh-keygen -t ed25519 -f ~/.ssh/sgx-vm -C "sgx-mvp admin"
 ```
 
-The **public** half becomes `SSH_PUBLIC_KEY` (injected into provisioned VMs). The **private** half becomes the
-`SGX_VM_SSH_KEY` secret used by the enclave CD workflow.
+The **public** half becomes `SSH_PUBLIC_KEY` on devops-acr, which injects it into every SGX VM it provisions.
+The private half is for operator access only — no workflow uses it, because nothing deploys over SSH.
 
 ---
 
@@ -268,8 +268,9 @@ The ordering is forced by the dependency chain — steps 4 onward are impossible
 5. **Generate the enclave signing key** (§2) → GitHub secret `ENCLAVE_SIGNING_KEY`.
 6. **Build the enclave** — `make docker-build && make docker-sigstruct`, then record the `[enclave]` block in
    `measurements.toml` and commit it.
-7. **Deploy the enclave** — push to `staging`; CD verifies MRENCLAVE matches the build and refuses on an
-   MRSIGNER change.
+7. **Publish the enclave image** — push to `main`. CI builds, signs, verifies the measurement and prints the
+   image digest. Nothing is deployed by that workflow: set devops-acr's `SGX_IMAGE` variable to the printed
+   digest, and its VM provisioning pulls that image on demand.
 8. **Run the smoke test** — `tests/integration/azure-smoke-test.ts` with `MRENCLAVE`/`MRSIGNER` from
    `measurements.toml`, then re-run with `RESTARTED=1` to confirm sealed state survives a restart.
 
@@ -283,7 +284,6 @@ The ordering is forced by the dependency chain — steps 4 onward are impossible
 | `ENCLAVE_SIGNING_KEY` | GH secret (trusted-compute-MVP) | Docker build only; never at runtime |
 | `CLERK_SECRET_KEY` | Vercel env | ntc-web server routes |
 | `DATABASE_URL` | Vercel env | Prisma |
-| `SGX_VM_SSH_KEY` | GH secret | Enclave CD |
 | `SSH_PUBLIC_KEY` | GH secret | Injected into provisioned VMs (public half) |
 
 | Non-secret | Where stored | Notes |
