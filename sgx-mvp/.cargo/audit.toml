@@ -1,0 +1,21 @@
+# cargo-audit configuration. Read automatically by `cargo audit` when run from
+# sgx-mvp/, and mirrored by the `ignore` input of rustsec/audit-check in
+# .github/workflows/enclave-ci.yml so local and CI results agree.
+#
+# Only *unmaintained* advisories are listed here. A real vulnerability
+# (RUSTSEC with a patched version) must never be added — fix or upgrade instead.
+
+[advisories]
+ignore = [
+    # paste 1.0.15 — proc-macro crate, no longer maintained. No vulnerability;
+    # it is a compile-time-only dependency pulled in by wasmi_core 0.36.5, so it
+    # contributes no code to the enclave binary. Removing it means waiting for
+    # wasmi to drop it upstream.
+    "RUSTSEC-2024-0436",
+
+    # rustls-pemfile 2.2.0 — deprecated in favour of the PEM parsing now built
+    # into rustls-pki-types. No vulnerability. We use it only to parse our own
+    # locally generated RA-TLS cert and key at startup (src/main.rs), never
+    # attacker-supplied PEM. Migrating is a follow-up, not a security fix.
+    "RUSTSEC-2025-0134",
+]
