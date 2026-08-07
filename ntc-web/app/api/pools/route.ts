@@ -56,7 +56,5 @@ export async function GET() {
       { error: "Failed to fetch pools" },
       { status: 500 }
     );
-  } finally {
-    await prisma.$disconnect();
   }
 }

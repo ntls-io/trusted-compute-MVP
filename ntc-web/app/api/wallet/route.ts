@@ -48,8 +48,6 @@ export async function GET() {
       { error: "Internal server error" }, 
       { status: 500 }
     );
-  } finally {
-    await prisma.$disconnect();
   }
 }
 
@@ -168,8 +166,6 @@ export async function POST(request: NextRequest) {
       );
     }
     return NextResponse.json({ error: "Failed to link wallet" }, { status: 500 });
-  } finally {
-    await prisma.$disconnect();
   }
 }
 
@@ -200,7 +196,5 @@ export async function DELETE() {
       { error: "Failed to unlink wallet" },
       { status: 500 }
     );
-  } finally {
-    await prisma.$disconnect();
   }
 }

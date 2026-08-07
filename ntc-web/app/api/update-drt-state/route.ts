@@ -60,7 +60,5 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     console.error("❌ Error updating DRT state:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
-  } finally {
-    await prisma.$disconnect();
   }
 }

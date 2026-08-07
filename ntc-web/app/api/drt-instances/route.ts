@@ -142,7 +142,6 @@ export async function POST(req: NextRequest) {
     }, { status: 500 });
 
   } finally {
-    await prisma.$disconnect();
     console.log(`[${requestId}] Request completed`);
   }
 }
