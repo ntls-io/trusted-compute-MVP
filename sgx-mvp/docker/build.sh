@@ -124,7 +124,7 @@ DOCKER_BUILDKIT=1 docker build \
     --build-arg ORACLE_PUBKEY_HEX="${ORACLE_PUBKEY_HEX}" \
     --build-arg SOLANA_CLUSTER="${SOLANA_CLUSTER}" \
     --build-arg DRT_PROGRAM_ID="${DRT_PROGRAM_ID}" \
-    "${extra_build_args[@]}" \
+    ${extra_build_args[@]+"${extra_build_args[@]}"} \
     --secret id=sgx-key,src="${SGX_KEY}" \
     -t "${IMAGE_TAG}" \
     -f "${SCRIPT_DIR}/Dockerfile" \

@@ -37,7 +37,7 @@
 #   az containerapp show --name relational-devops --resource-group relational-network \
 #       --query properties.configuration.ingress.fqdn -o tsv
 # ─────────────────────────────────────────────────────────────────────────────
-ORACLE_URL ?=
+ORACLE_URL ?=https://relational-devops.redacted-for-mvp.westeurope.azurecontainerapps.io
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ORACLE_PUBKEY_HEX — Ed25519 PUBLIC key of the oracle, 64 lowercase hex chars.
@@ -59,7 +59,7 @@ ORACLE_URL ?=
 # every protected request with 503 enclave_unconfigured, which is a confusing
 # failure to debug after the fact.
 # ─────────────────────────────────────────────────────────────────────────────
-ORACLE_PUBKEY_HEX ?=
+ORACLE_PUBKEY_HEX ?=5d4ed56275d9309f1ad9074b2575e216fcfa68297746781a729ed702d62df04b
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Chain identity the enclave will accept. Claims naming a different cluster or
