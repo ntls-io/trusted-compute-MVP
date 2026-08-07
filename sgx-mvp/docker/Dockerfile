@@ -94,7 +94,10 @@ ARG LIBSSL_DEV_VERSION=1.1.1f-1ubuntu2.24
 # version to hard-pin (see `make docker-pins`).
 ARG PYTHON38_DEV_VERSION=
 ARG LIBFFI_DEV_VERSION=
-
+# Versions come from the build args above plus the frozen apt snapshot;
+# hadolint cannot see through the ${VAR:+=${VAR}} expansion, so DL3008 fires
+# even though these packages are pinned.
+# hadolint ignore=DL3008
 RUN apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     curl=${CURL_VERSION} \
@@ -264,7 +267,10 @@ ARG PYTHON38_VERSION=
 ARG LIBPYTHON38_VERSION=
 ARG NUMPY_VERSION=
 ARG SCIPY_VERSION=
-
+# Versions come from the build args above plus the frozen apt snapshot;
+# hadolint cannot see through the ${VAR:+=${VAR}} expansion, so DL3008 fires
+# even though these packages are pinned.
+# hadolint ignore=DL3008
 RUN apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     gramine=${GRAMINE_VERSION} \
@@ -299,8 +305,8 @@ RUN cp /usr/lib/libdcap_quoteprov.so /lib/x86_64-linux-gnu/libdcap_quoteprov.so 
 # `|| true` because a handful of stdlib test fixtures are intentionally invalid
 # Python and always fail to compile.
 RUN find /usr/lib/python3.8 /usr/lib/python3/dist-packages -name '__pycache__' -type d -prune -exec rm -rf {} + && \
-    python3.8 -m compileall -q -f --invalidation-mode unchecked-hash \
-        /usr/lib/python3.8 /usr/lib/python3/dist-packages || true
+    { python3.8 -m compileall -q -f --invalidation-mode unchecked-hash \
+        /usr/lib/python3.8 /usr/lib/python3/dist-packages || true; }
 
 WORKDIR /app
 
@@ -459,7 +465,10 @@ COPY --from=signer /usr/share/keyrings/microsoft-prod.gpg /usr/share/keyrings/mi
 COPY --from=signer /etc/apt/sources.list.d/gramine.list /etc/apt/sources.list.d/gramine.list
 COPY --from=signer /etc/apt/sources.list.d/intel-sgx.list /etc/apt/sources.list.d/intel-sgx.list
 COPY --from=signer /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/microsoft-prod.list
-
+# Versions come from the build args above plus the frozen apt snapshot;
+# hadolint cannot see through the ${VAR:+=${VAR}} expansion, so DL3008 fires
+# even though these packages are pinned.
+# hadolint ignore=DL3008
 RUN apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     gramine=${GRAMINE_VERSION} \
@@ -488,8 +497,8 @@ RUN cp /usr/lib/libdcap_quoteprov.so /lib/x86_64-linux-gnu/libdcap_quoteprov.so 
 # Byte-identical to the signer stage: these .pyc files were measured into
 # MRENCLAVE, so they must be regenerated exactly the same way here.
 RUN find /usr/lib/python3.8 /usr/lib/python3/dist-packages -name '__pycache__' -type d -prune -exec rm -rf {} + && \
-    python3.8 -m compileall -q -f --invalidation-mode unchecked-hash \
-        /usr/lib/python3.8 /usr/lib/python3/dist-packages || true
+    { python3.8 -m compileall -q -f --invalidation-mode unchecked-hash \
+        /usr/lib/python3.8 /usr/lib/python3/dist-packages || true; }
 
 WORKDIR /app
 
