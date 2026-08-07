@@ -45,7 +45,7 @@ sigstruct_date = "0000-00-00"
 #
 # To change these: rebuild, re-run docker-sigstruct, and update this block in
 # the SAME PR as the source change. CI fails the build on any drift.
-mr_enclave = "8505253a3c35ad4ced3b56944d5216dc9d103b48f0b79d1cdd4160d3d4de538c"
+mr_enclave = "0e3fd7f42d273aa779855c771351871debcfc3506132938beb38b0152c797a90"
 mr_signer = "95c165e1e00cab9cb209a6f0771f15189bf32166679812cebf722ecb2dcbd87c"
 isv_prod_id = 0
 isv_svn = 0

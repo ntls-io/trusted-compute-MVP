@@ -161,8 +161,50 @@ pub fn verify_ratls_files(cert_path: &str, key_path: &str) -> Result<()> {
     Ok(())
 }
 
+/// Selects the rustls crypto provider for the whole process.
+///
+/// rustls 0.23 refuses to guess when more than one provider is compiled in, and
+/// both are: cargo feature unification enables `ring` (via actix-tls) *and*
+/// `aws-lc-rs` (via reqwest/hyper-rustls). Without this, the enclave starts,
+/// generates its RA-TLS certificate, and only then panics inside
+/// `ServerConfig::builder()` with "Could not automatically determine the
+/// process-level CryptoProvider" — leaving a container that looks healthy to
+/// `docker ps` but never listens, and an attestation preflight that fails with
+/// nothing but a connection error to go on.
+///
+/// Pinning it here also makes the choice reviewable rather than an accident of
+/// dependency resolution: this provider is inside the enclave's TCB and is
+/// measured into MRENCLAVE, so it must not be able to change silently when a
+/// transitive dependency flips a feature.
+///
+/// `ring` is chosen over `aws-lc-rs` for its longer track record under Gramine;
+/// `aws-lc-sys` also needs a C toolchain workaround in the enclave image
+/// (see `docker/Dockerfile`'s `CC=clang`, for GCC bug 95189).
+fn install_crypto_provider() -> Result<()> {
+    // Err means a provider is already installed, which is fine and idempotent —
+    // it only matters that exactly one is active before any TLS is configured.
+    if rustls::crypto::ring::default_provider()
+        .install_default()
+        .is_err()
+    {
+        let installed = rustls::crypto::CryptoProvider::get_default()
+            .ok_or_else(|| anyhow!("rustls reported a provider was installed, but none is set"))?;
+        println!(
+            "[+] rustls crypto provider already installed ({} cipher suites)",
+            installed.cipher_suites.len()
+        );
+        return Ok(());
+    }
+
+    println!("[+] rustls crypto provider installed: ring");
+    Ok(())
+}
+
 /// Configures TLS with Gramine RA-TLS certificates
 pub fn configure_ratls(cert_path: &str, key_path: &str) -> Result<ServerConfig> {
+    // Must precede ServerConfig::builder(), which panics without a provider.
+    install_crypto_provider()?;
+
     // First verify the PEM files
     verify_ratls_files(cert_path, key_path)?;
 
@@ -265,6 +307,10 @@ fn save_to_file(data: &[u8]) -> Result<()> {
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     println!("[+] Enclave created successfully, starting server...");
+
+    // Before anything touches TLS — the oracle client uses rustls too, so this
+    // must not be left to whichever code path happens to run first.
+    install_crypto_provider()?;
 
     // Path to certificate and key files
     let certs_file_path = "/tmp/tlscert.pem";

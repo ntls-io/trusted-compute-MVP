@@ -257,11 +257,13 @@ docker-stop:
 .PHONY: docker-sigstruct
 docker-sigstruct:
 	@echo "Extracting enclave measurements from $(IMAGE)..."
-	@docker create --name sgx-mvp-sigstruct $(IMAGE) >/dev/null 2>&1
-	@docker cp sgx-mvp-sigstruct:/app/sgx-mvp.sig /tmp/sgx-mvp-docker.sig >/dev/null 2>&1
-	@docker rm sgx-mvp-sigstruct >/dev/null 2>&1
 	@echo "[enclave]"
-	@gramine-sgx-sigstruct-view --verbose --output-format=toml /tmp/sgx-mvp-docker.sig \
+# Run the viewer inside the image, as verify-mrenclave already does. Copying the
+# .sig out and reading it on the host needs a host gramine install, which cannot
+# exist on macOS — this target failed with "command not found" there.
+	@docker run --rm \
+		--entrypoint gramine-sgx-sigstruct-view \
+		$(IMAGE) --verbose --output-format=toml /app/sgx-mvp.sig \
 		| awk ' \
 			/^mr_enclave = / { mr_enclave = $$0 } \
 			/^mr_signer = / { mr_signer = $$0 } \
@@ -276,7 +278,6 @@ docker-sigstruct:
 				print debug_enclave; \
 			} \
 		'
-	@rm -f /tmp/sgx-mvp-docker.sig
 
 .PHONY: verify-mrenclave
 verify-mrenclave: check-oracle-vars
