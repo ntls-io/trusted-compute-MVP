@@ -37,7 +37,20 @@
 #   az containerapp show --name relational-devops --resource-group relational-network \
 #       --query properties.configuration.ingress.fqdn -o tsv
 # ─────────────────────────────────────────────────────────────────────────────
-ORACLE_URL ?=https://relational-devops.redacted-for-mvp.westeurope.azurecontainerapps.io
+# Left EMPTY on purpose — two separate reasons.
+#
+# 1. The endpoint is withheld deliberately. This is an MVP running on a real
+#    Azure subscription with an open ingress; publishing the hostname invites
+#    scraping and abuse traffic that we would be billed for. Nothing about the
+#    URL is cryptographically secret (see the trade-off note above) — this is
+#    resource protection, not confidentiality.
+#
+# 2. Empty is safer than a placeholder. A stand-in value is still non-empty, so
+#    it satisfies the guard in the Makefile and yields a valid-looking, properly
+#    signed enclave measured against a host that does not resolve. Every
+#    protected request would then fail as an oracle timeout, far from the cause.
+#    Empty makes the build refuse outright.
+ORACLE_URL ?=
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ORACLE_PUBKEY_HEX — Ed25519 PUBLIC key of the oracle, 64 lowercase hex chars.
@@ -59,7 +72,7 @@ ORACLE_URL ?=https://relational-devops.redacted-for-mvp.westeurope.azurecontaine
 # every protected request with 503 enclave_unconfigured, which is a confusing
 # failure to debug after the fact.
 # ─────────────────────────────────────────────────────────────────────────────
-ORACLE_PUBKEY_HEX ?=5d4ed56275d9309f1ad9074b2575e216fcfa68297746781a729ed702d62df04b
+ORACLE_PUBKEY_HEX ?=
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Chain identity the enclave will accept. Claims naming a different cluster or
