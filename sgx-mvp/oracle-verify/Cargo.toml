@@ -1,0 +1,35 @@
+# Nautilus Trusted Compute
+# Copyright (C) 2026 Relational Network
+
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published
+# by the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+[package]
+name = "oracle-verify"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+actix-web = { version = "4", features = ["rustls-0_23"] }
+anyhow = "1.0"
+base64 = "0.22"
+bs58 = "0.5"
+ed25519-dalek = "2"
+hex = "0.4"
+reqwest = { version = "0.12", features = ["blocking", "rustls-tls", "json"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0.127"
+sha2 = "0.10.8"
+
+[dev-dependencies]
+tempfile = "3"

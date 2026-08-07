@@ -19,7 +19,7 @@
 // components/WalletBalance.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { LAMPORTS_PER_SOL } from "@solana/web3.js";
 import { useSolanaConnection } from "@/lib/solanaConnection";
@@ -30,7 +30,7 @@ const WalletBalance = () => {
   const [balance, setBalance] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  const fetchBalance = async () => {
+  const fetchBalance = useCallback(async () => {
     if (!publicKey || !connection) return;
     
     setIsLoading(true);
@@ -43,7 +43,7 @@ const WalletBalance = () => {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [publicKey, connection]);
 
   useEffect(() => {
     if (connected && publicKey) {
@@ -63,7 +63,7 @@ const WalletBalance = () => {
         connection.removeAccountChangeListener(subscriptionId);
       };
     }
-  }, [connected, publicKey, connection]);
+  }, [connected, publicKey, connection, fetchBalance]);
 
   return (
     <span className="text-sm font-bold">

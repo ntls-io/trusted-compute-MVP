@@ -92,7 +92,7 @@ function LayoutClientInner({
     }
 
     if (isSignedIn) { // Clerk confirms user is signed in
-      const profileFetchErrorIs404 = isErrorProfile && (isErrorProfile as any).status === 404;
+      const profileFetchErrorIs404 = isErrorProfile && (isErrorProfile as Error & { status?: number }).status === 404;
       const profileLoadedButNoRoles = userProfile && roles.length === 0;
 
       // Condition 1: User needs to select roles.
@@ -147,7 +147,7 @@ function LayoutClientInner({
   }
 
   const needsRoleSelectionRedirect = isSignedIn && !isLoadingProfile &&
-    ((userProfile && roles.length === 0) || (!userProfile && isErrorProfile && (isErrorProfile as any).status === 404)) &&
+    ((userProfile && roles.length === 0) || (!userProfile && isErrorProfile && (isErrorProfile as Error & { status?: number }).status === 404)) &&
     pathname !== '/select-roles' && !pathname.startsWith('/sign-up');
 
   if (needsRoleSelectionRedirect) {
@@ -159,7 +159,7 @@ function LayoutClientInner({
     );
   }
   
-  if (isSignedIn && isErrorProfile && (isErrorProfile as any).status !== 404) {
+  if (isSignedIn && isErrorProfile && (isErrorProfile as Error & { status?: number }).status !== 404) {
     // Handle critical error fetching profile for an already signed-in user (not a 404)
     return (
         <div className="flex h-screen w-screen items-center justify-center bg-gray-100 p-4">

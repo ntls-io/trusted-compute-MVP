@@ -16,54 +16,63 @@ You should have received a copy of the GNU Affero General Public License
 along with this program. If not, see <https://www.gnu.org/licenses/>.  
 -->
 
-# Nautilus Trusted Compute MVP
+# Trusted Compute MVP
 
-This repository is organized into several sub-directories containing components of the Nautilus Trusted Compute MVP.
+A framework for privacy-preserving, verifiable computation over sensitive data, combining Intel SGX enclaves with Solana-based orchestration.
 
-## Quick Links
+## Architecture
 
-- [Full Documentation](https://ntls-io.github.io/trusted-compute-MVP/)
-- [SGX Server Setup](https://ntls-io.github.io/trusted-compute-MVP/installation/sgx-mvp/)
-- [Attestation Client Guide](https://ntls-io.github.io/trusted-compute-MVP/attestation/client-setup/)
-- [API Documentation](https://ntls-io.github.io/trusted-compute-MVP/api/overview/)
+- **Execution Service & Enclave** ([sgx-mvp](sgx-mvp/)): SGX enclave that executes WASM and Python workloads over sealed data, producing attested results.
+- **Front-end** ([ntc-web](ntc-web/)): Next.js application for managing data pools, digital rights tokens (DRTs), and enclave jobs.
+- **Smart Contract** ([drt-manager](drt-manager/)): Solana program governing DRT issuance and trusted compute orchestration.
+- **Oracle Node**: an on-demand chain-claim verifier, implemented as a self-contained router
+  inside the sibling `devops-acr` service. It verifies finalized Solana events and returns a
+  short-lived signed assertion; the enclave pins its public key by measurement. See
+  [Keys and Secrets](docs/deployment/keys-and-secrets.md).
 
-## Core Components
+## Deployment configuration and redacted endpoints
 
-### Execution Service & Enclave (/SGX-MVP)
-Secure WASM binary execution environment with data sealing/unsealing capabilities and oracle integration.
+This is a research MVP running against a real Azure subscription and Solana devnet. Two configuration values
+are deliberately **not committed**:
 
-### Front-end Next.js (/NTC-WEB)
-Next.js-based front-end for managing and interacting with Nautilus Trusted Compute.
+| Value | Where it lives |
+|---|---|
+| `ORACLE_URL` — the devops-acr endpoint hosting the oracle | `sgx-mvp/deploy.local.mk` (gitignored) and CI secrets |
+| `ORACLE_PUBKEY_HEX` — the oracle's Ed25519 public key | same |
 
-### Solana Smart Contract (/drt-manager)
-Solana blockchain integration for trusted compute verification and orchestration.
+**Why.** Neither is cryptographically secret — both are readable from any built enclave image
+(`docker run --rm --entrypoint cat <image> /app/sgx-mvp.manifest`) and the public key is served by the live
+`/oracle/v1/health` endpoint. They are withheld because the service has an open ingress on a real
+subscription: publishing the hostname invites scraping and abuse traffic that we get billed for. This is
+resource protection, not confidentiality.
 
-### Oracle Node (/TBD)
-Blockchain network validator that validates the state of the blockchain.
+**What that costs.** Both values are measured into the enclave's `MRENCLAVE`, so a third party cannot
+reproduce the pinned measurement in [`sgx-mvp/measurements.toml`](sgx-mvp/measurements.toml) from the commit
+alone — verifying a build requires obtaining them out of band. That is an accepted MVP trade-off; a
+production deployment should publish the endpoint and let anyone reproduce the measurement.
 
-For detailed component documentation, implementation details, and setup instructions, please visit our [documentation site](https://ntls-io.github.io/trusted-compute-MVP/).
+**Placeholders are not an option.** `sgx-mvp/deploy.mk` ships these empty rather than with stand-in values.
+A placeholder is still non-empty, so it passes the Makefile guard and produces a properly signed enclave
+measured against a host that does not resolve — every protected request then fails as an oracle timeout, far
+from the cause. Empty makes the build refuse outright. See
+[`docs/deployment/keys-and-secrets.md`](docs/deployment/keys-and-secrets.md).
 
-## 🔹 License Compliance & Automation
+## Documentation
 
-To ensure all files in the repository include the required license header, we provide a script to **automate license insertion**.
+- [Full Documentation](https://relational-network.github.io/trusted-compute-MVP/)
+- [SGX Server Setup](https://relational-network.github.io/trusted-compute-MVP/installation/sgx-mvp/)
+- [Attestation Client Guide](https://relational-network.io/trusted-compute-MVP/attestation/client-setup/)
+- [API Documentation](https://relational-network.github.io/trusted-compute-MVP/api/overview/)
 
-### **Adding License Headers Locally**
-Run the following script to **automatically add the Nautilus AGPL license** to all supported files:
+## License Compliance
+
+All files must carry a license header, enforced via CI. To add headers locally:
 
 ```bash
 ./add-license.sh
 ```
 
-This will: ✅ Add license headers to all source code files (`.ts`, `.js`, `.py`, `.rs`, etc.)
-
-* Add an HTML comment license block to .md files
-* Skip unnecessary directories (node_modules, target, dist, etc.)
-
-### GitHub License Check
-
-We also enforce license compliance via GitHub Actions. On every PR, a CI check will fail if files are missing a license header.
-
-To manually validate changed files before pushing, run:
+To check only changed files before pushing:
 
 ```bash
 git diff --name-only | xargs ./add-license.sh

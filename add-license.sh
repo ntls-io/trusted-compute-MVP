@@ -19,7 +19,7 @@
 # License File
 LICENSE_FILE="license-template.txt"
 LICENSE_TEXT="""# Nautilus Trusted Compute
-# Copyright (C) 2025 Nautilus
+# Copyright (C) 2026 Relational Network
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published
@@ -35,7 +35,7 @@ LICENSE_TEXT="""# Nautilus Trusted Compute
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 LICENSE_TEXT_MD="<!-- Nautilus Trusted Compute
-Copyright (C) 2025 Nautilus
+Copyright (C) 2026 Relational Network
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU Affero General Public License as published

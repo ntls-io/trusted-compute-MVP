@@ -18,12 +18,12 @@
 // app/pools/PoolsTable.tsx
 'use client';
 
-import { useState, useEffect, JSX } from 'react';
+import { useState, useEffect, useCallback, JSX } from 'react';
 import { useDrtProgram } from "@/lib/useDrtProgram";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { redeemDrt } from "@/lib/drtHelpers";
-import { PublicKey } from "@solana/web3.js";
-import { getAssociatedTokenAddress } from "@/lib/solanaToken";
+import { buildClaim, signClaim, walletSupportsSignMessage } from "@/lib/enclaveClaim";
+import { postToEnclave } from "@/lib/enclaveApi";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -41,8 +41,8 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import FilePicker from '@/components/FilePicker';
-import { SchemaPreview, validateJsonSchema } from '@/components/schemaUtils';
-import { ExternalLink, Shield, Upload, Code2, Eye, RefreshCcw, Check, AlertTriangle } from 'lucide-react';
+import { SchemaPreview, validateJsonSchema, JsonSchemaLike } from '@/components/schemaUtils';
+import { ExternalLink, Shield, Upload, Code2, RefreshCcw, Check, AlertTriangle } from 'lucide-react';
 import { ChevronDown, ChevronUp, ChevronsUpDown, Loader2 } from "lucide-react";
 import PoolAccount from "@/components/PoolAccount";
 
@@ -69,7 +69,7 @@ interface Pool {
   vaultAddress: string;
   feeVaultAddress: string;
   ownershipMintAddress: string;
-  schemaDefinition: JSON; 
+  schemaDefinition: JsonSchemaLike; 
   enclaveMeasurement?: EnclaveMeasurement;
   allowedDRTs: {
     drt: DRT;
@@ -310,7 +310,7 @@ const EnclaveDialog = ({ pool, onAttest }: { pool: Pool; onAttest: () => Promise
   );
 };
 
-const JoinPoolDialog = ({ pool, drtInstances, fetchUserData }: { pool: Pool; drtInstances: DRTInstance[]; fetchUserData: () => Promise<void> }) => {
+const JoinPoolDialog = ({ pool, drtInstances, fetchUserData, onAttest }: { pool: Pool; drtInstances: DRTInstance[]; fetchUserData: () => Promise<void>; onAttest: () => Promise<AttestationResult> }) => {
   const program = useDrtProgram();
   const wallet = useWallet();
   const [dataFile, setDataFile] = useState<File | null>(null);
@@ -403,6 +403,43 @@ const JoinPoolDialog = ({ pool, drtInstances, fetchUserData }: { pool: Pool; drt
       const drtInstance = appendDrts.find(drt => drt.id === selectedDrt);
       if (!drtInstance) throw new Error("Selected DRT not found");
 
+      // The enclave claim requires an additional wallet message signature;
+      // check support BEFORE burning the DRT.
+      if (!walletSupportsSignMessage(wallet)) {
+        throw new Error(
+          "Connected wallet does not support message signing (signMessage), which is required to authorize the enclave append. Please use a wallet that supports it."
+        );
+      }
+
+      const publicIp = pool.enclaveMeasurement?.publicIp;
+      if (!publicIp) throw new Error("Enclave public IP not available");
+
+      // Read and serialize the payload up front: the wallet signs its hash.
+      const dataReader = new FileReader();
+      const dataPromise = new Promise((resolve, reject) => {
+        dataReader.onload = (e) => {
+          try {
+            const data = JSON.parse(e.target?.result as string);
+            resolve(data);
+          } catch {
+            reject(new Error("Invalid JSON in data file"));
+          }
+        };
+        dataReader.onerror = () => reject(new Error("Failed to read data file"));
+        dataReader.readAsText(dataFile!);
+      });
+      const dataJson = await dataPromise;
+      const payload = JSON.stringify(dataJson);
+
+      // Attestation preflight before any redemption or upload.
+      updateProgress(1, "Verifying enclave attestation", "loading");
+      const attestation = await onAttest();
+      if (!attestation.success) {
+        throw new Error(
+          `Enclave attestation preflight failed: ${attestation.error || "measurement mismatch"}`
+        );
+      }
+
       updateProgress(1, "Redeeming Append DRT", "loading", "Please sign with your wallet");
       const { tx, ownershipTokenReceived } = await redeemDrt(
         program,
@@ -415,40 +452,28 @@ const JoinPoolDialog = ({ pool, drtInstances, fetchUserData }: { pool: Pool; drt
       if (!ownershipTokenReceived) throw new Error("Ownership token not received");
       updateProgress(2, "Append DRT redeemed, ownership token received", "success", `Tx: ${tx}`);
 
-      const dataReader = new FileReader();
-      const dataPromise = new Promise((resolve, reject) => {
-        dataReader.onload = (e) => {
-          try {
-            const data = JSON.parse(e.target?.result as string);
-            resolve(data);
-          } catch (err) {
-            reject(new Error("Invalid JSON in data file"));
-          }
-        };
-        dataReader.onerror = () => reject(new Error("Failed to read data file"));
-        dataReader.readAsText(dataFile!);
+      // Build and sign the chain claim binding this payload to the burn tx.
+      const claim = await buildClaim({
+        action: "append",
+        tx,
+        pool: pool.chainAddress,
+        claimant: wallet.publicKey.toBase58(),
+        payload,
+      });
+      const walletSignature = await signClaim(wallet, claim);
+
+      updateProgress(2, "Appending data to enclave", "loading", "Waiting for on-chain finality and oracle verification");
+      const result = await postToEnclave<string>("/api/append-data", {
+        publicIp,
+        claim,
+        wallet_signature: walletSignature,
+        payload,
       });
 
-      const dataJson = await dataPromise;
-      const publicIp = pool.enclaveMeasurement?.publicIp;
-      if (!publicIp) throw new Error("Enclave public IP not available");
+      if (result === "Data appended, sealed, and saved successfully") {
+        updateProgress(3, "Data appended successfully", "success", result);
 
-      updateProgress(2, "Appending data to enclave", "loading");
-      const response = await fetch("/api/append-data", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ publicIp, data: dataJson }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `Enclave error (Status ${response.status})`);
-      }
-
-      const result = await response.json();
-      if (result.result === "Data appended, sealed, and saved successfully") {
-        updateProgress(3, "Data appended successfully", "success", result.result);
-
+        // Off-chain DRT state flips to completed only after enclave success.
         await fetch('/api/update-drt-state', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -460,7 +485,7 @@ const JoinPoolDialog = ({ pool, drtInstances, fetchUserData }: { pool: Pool; drt
 
         await fetchUserData();
       } else {
-        throw new Error(`Unexpected enclave response: ${result.result}`);
+        throw new Error(`Unexpected enclave response: ${result}`);
       }
     } catch (error) {
       console.error("Join pool error:", error);
@@ -645,7 +670,6 @@ const getDrtTypeColor = (name: string): string => {
 };
 
 export function PoolsTable({ poolCreated }: PoolsTableProps) {
-  const program = useDrtProgram();
   const wallet = useWallet();
   const [search, setSearch] = useState('');
   const [pools, setPools] = useState<Pool[]>([]);
@@ -656,7 +680,7 @@ export function PoolsTable({ poolCreated }: PoolsTableProps) {
   const [sortDirection, setSortDirection] = useState<"asc" | "desc" | null>(null);
   const [apiError, setApiError] = useState<string | null>(null);
 
-  const fetchUserData = async () => {
+  const fetchUserData = useCallback(async () => {
     setLoading(true);
     try {
       // Always use the all-pools endpoint
@@ -698,11 +722,11 @@ export function PoolsTable({ poolCreated }: PoolsTableProps) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [wallet.connected, wallet.publicKey]);
 
   useEffect(() => {
     fetchUserData();
-  }, [poolCreated, wallet.connected, wallet.publicKey]); // Refetch when wallet connection changes
+  }, [poolCreated, wallet.connected, wallet.publicKey, fetchUserData]); // Refetch when wallet connection changes
 
   const handleAttestation = async (pool: Pool): Promise<AttestationResult> => {
     if (!pool.enclaveMeasurement || !pool.enclaveMeasurement.publicIp || !pool.enclaveMeasurement.actualName) {
@@ -942,7 +966,7 @@ export function PoolsTable({ poolCreated }: PoolsTableProps) {
                         Join Pool
                       </Button>
                     </DialogTrigger>
-                    <JoinPoolDialog pool={pool} drtInstances={drtInstances} fetchUserData={fetchUserData} />
+                    <JoinPoolDialog pool={pool} drtInstances={drtInstances} fetchUserData={fetchUserData} onAttest={() => handleAttestation(pool)} />
                   </Dialog>
                 </TableCell>
               </TableRow>

@@ -1,0 +1,79 @@
+# Nautilus Trusted Compute
+# Copyright (C) 2026 Relational Network
+#
+# Docker ignore for the sgx-mvp build context.
+#
+# The build context is THIS directory (sgx-mvp/), not docker/. See
+# docker/build.sh, which passes PROJECT_DIR as the context.
+#
+# RULE: only files that exist in the GitHub repo AND are required by the
+# Dockerfile COPY instructions may enter the build context. Everything else is
+# excluded here so that `docker build --no-cache` produces identical output
+# regardless of local edits or leftover artefacts.
+#
+# The Dockerfile COPYs exactly:
+#   rust-toolchain.toml  Cargo.toml  Cargo.lock  build.rs
+#   .cargo/  src/
+#   oracle-verify/  wasmi-impl/  python-rust-impl/  json-append/  github-download/
+#   docker/sgx-mvp.manifest.template  docker/restart_aesm.sh  docker/start.sh
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Version-control internals ────────────────────────────────────────────────
+.git/
+.gitignore
+
+# ── Build artefacts ──────────────────────────────────────────────────────────
+**/target/
+OUTPUT
+result-*
+
+# ── SGX artefacts (regenerated deterministically inside the container) ───────
+*.sig
+*.manifest
+*.manifest.sgx
+
+# ── Secrets / credentials (belt-and-braces; must never reach the context) ────
+keys/
+*.pem
+*.key
+.env
+.env.*
+
+# ── Runtime state ────────────────────────────────────────────────────────────
+data/
+temp/
+
+# ── Files present in the repo but NOT used by the Dockerfile ─────────────────
+# Keeping these out ensures the build is unaffected by host-side tooling.
+
+# Host-side build orchestration. docker build is invoked BY the Makefile, so
+# including it would let a Makefile edit change MRENCLAVE.
+Makefile
+deploy.mk
+
+# The pinned release contract, consulted by `make verify-mrenclave` and CI from
+# the host — never COPY'd into the image.
+measurements.toml
+
+# Attestation test client (C sources + mbedtls tarball), not needed in the image
+attest.c
+attest
+mbedtls/
+
+# API collection, docs
+postman/
+
+# Root-level dev manifest template (production uses docker/sgx-mvp.manifest.template)
+sgx-mvp.manifest.template
+
+# Build-helper script (runs on the host, not inside the container)
+docker/build.sh
+
+# Local development image (built separately by docker-compose.dev.yml)
+docker/Dockerfile.dev
+
+# SPDX text is not required at runtime
+LICENSE
+
+# ── Documentation ────────────────────────────────────────────────────────────
+*.md

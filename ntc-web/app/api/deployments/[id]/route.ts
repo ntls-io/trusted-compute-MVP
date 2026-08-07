@@ -66,7 +66,7 @@ export async function GET(
     }
 
     // Try to parse JSON; if that fails, assume it's still streaming.
-    let payload: any
+    let payload: unknown
     try {
       payload = JSON.parse(text)
     } catch {
@@ -77,16 +77,16 @@ export async function GET(
     // Success! Mirror Azure’s status code and body
     return NextResponse.json(payload, { status: azureRes.status })
 
-  } catch (err: any) {
+  } catch (err: unknown) {
     clearTimeout(timeoutId)
-     if (err.name === 'AbortError') {
+     if (err instanceof Error && err.name === 'AbortError') {
        return NextResponse.json({ status: 'pending' }, { status: 200 })
      }
     console.error('[proxy:/api/deployments] fetch error:', err)
     return NextResponse.json(
       {
         error: 'Failed to fetch from Azure TEE API',
-        details: err.message,
+        details: err instanceof Error ? err.message : 'Unknown error',
       },
       { status: 502 }
     )

@@ -18,10 +18,12 @@
 // app/pools/page.tsx
 "use client"
 
-import React, { useState, useEffect, JSX } from 'react'
+import React, { useState, useEffect, useCallback, JSX } from 'react'
 import { BN, AnchorProvider } from "@coral-xyz/anchor"
 import { useDrtProgram } from "@/lib/useDrtProgram"
-import { buildPoolCreationTx, formatDrtConfigs, derivePoolPdas, getFeeVaultPda } from "@/lib/drtHelpers"
+import { buildPoolCreationTx, formatDrtConfigs } from "@/lib/drtHelpers"
+import { buildClaim, signClaim, walletSupportsSignMessage, MAX_GITHUB_URL_LENGTH } from "@/lib/enclaveClaim"
+import { postToEnclave } from "@/lib/enclaveApi"
 import { useWallet } from "@solana/wallet-adapter-react"
 import { RefreshCcw, Check, AlertTriangle, Wallet, Copy } from "lucide-react"
 
@@ -33,10 +35,9 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Switch } from "@/components/ui/switch"
 import FilePicker from '@/components/FilePicker';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { SchemaPreview, validateJsonSchema } from '@/components/schemaUtils';
+import { SchemaPreview, validateJsonSchema, JsonSchemaLike } from '@/components/schemaUtils';
 import PoolsTable from './PoolsTable'
 
 /* ------------------------------------------------------------------
@@ -194,7 +195,7 @@ function DigitalRightsTable({
    Step 1: File Selection
 ------------------------------------------------------------------ */
 interface FileSelectionStepProps extends StepProps {
-  setSchemaDefinition: (schema: any) => void;
+  setSchemaDefinition: (schema: JsonSchemaLike) => void;
   setDataFile: (file: File | null) => void;
 }
 
@@ -234,13 +235,13 @@ function FileSelectionStep({
       
       if (result.success) {
         const schemaReader = new FileReader();
-        const schemaPromise = new Promise((resolve, reject) => {
+        const schemaPromise = new Promise<JsonSchemaLike>((resolve, reject) => {
           schemaReader.onload = (e) => {
             try {
               const parsed = JSON.parse(e.target?.result as string);
               console.log("Schema parsed:", parsed);
               resolve(parsed);
-            } catch (err) {
+            } catch {
               reject(new Error('Invalid JSON in schema file'));
             }
           };
@@ -433,13 +434,12 @@ interface PoolCreationStepProps extends StepProps {
   wComputeSelected: boolean;
   pyComputeSelected: boolean;
   setPoolCreated: (value: React.SetStateAction<boolean>) => void;
-  schemaDefinition: any;
+  schemaDefinition: JsonSchemaLike | null;
   dataFile: File | null;
 }
 
 function PoolCreationStep({
   isActive,
-  onNext,
   onPrev,
   appendSelected,
   wComputeSelected,
@@ -449,14 +449,15 @@ function PoolCreationStep({
   dataFile
 }: PoolCreationStepProps) {
   const program = useDrtProgram();
-  const { publicKey } = useWallet();
+  const wallet = useWallet();
+  const { publicKey } = wallet;
 
   const [poolName, setPoolName] = useState("");
   const [description, setDescription] = useState("");
   const [poolId, setPoolId] = useState(1);
   const [poolNameLocked, setPoolNameLocked] = useState(false);
   const [isCheckingName, setIsCheckingName] = useState(false);
-  const [skipVmCreation, setSkipVmCreation] = useState(false);
+  const [skipVmCreation] = useState(false);
   const [teeDeploymentId, setTeeDeploymentId] = useState<string | null>(null);
   const [teeStatus, setTeeStatus] = useState<string | null>(null);
   const [ownershipSupply, setOwnershipSupply] = useState(1000000);
@@ -533,16 +534,14 @@ function PoolCreationStep({
     }
   };
 
-  const checkTEEStatus = async (requestId: string) => {
+  const checkTEEStatus = useCallback(async (requestId: string) => {
     if (skipVmCreation) {
       console.log("Skipping TEE status check as VM creation is disabled");
       return { status: 'completed', public_ip: '127.0.0.1', vm_name: 'mock-vm' };
     }
     
     try {
-      let response;
-
-      response = await fetch(`/api/deployments/${requestId}`, {
+      const response = await fetch(`/api/deployments/${requestId}`, {
         cache: 'no-cache',
         headers: { 'Cache-Control': 'no-cache' },
       });
@@ -556,7 +555,7 @@ function PoolCreationStep({
       console.error('TEE status check error:', error);
       throw error;
     }
-  };
+  }, [skipVmCreation]);
 
   useEffect(() => {
     let interval: NodeJS.Timeout;
@@ -571,7 +570,7 @@ function PoolCreationStep({
       }, 10000);
     }
     return () => { if (interval) clearInterval(interval); };
-  }, [teeDeploymentId, teeStatus, skipVmCreation]);
+  }, [teeDeploymentId, teeStatus, skipVmCreation, checkTEEStatus]);
 
   const saveEnclaveMeasurement = async (
     poolId: string,
@@ -669,37 +668,77 @@ function PoolCreationStep({
       if (!poolName.trim()) throw new Error("Pool name is required");
       if (!description.trim()) throw new Error("Pool description is required");
       if (!poolNameLocked) throw new Error("Please lock the pool name before creating");
-  
+
+      // The enclave initialization claim needs a wallet message signature;
+      // check support before anything is created on-chain.
+      if (!skipVmCreation && !walletSupportsSignMessage(wallet)) {
+        throw new Error(
+          "Connected wallet does not support message signing (signMessage), which is required to initialize the enclave data pool."
+        );
+      }
+
+      // Pull the real code catalog so the on-chain DRT configs carry the
+      // actual GitHub URLs and SHA-256 hashes; compute DRTs with missing
+      // metadata are rejected rather than created (the enclave would refuse
+      // them anyway).
+      const catalogResponse = await fetch('/api/digital-rights');
+      if (!catalogResponse.ok) throw new Error("Failed to load the DRT code catalog");
+      const catalog: { name: string; githubUrl: string | null; hash: string | null }[] =
+        await catalogResponse.json();
+      const findCatalogEntry = (keyword: string) =>
+        catalog.find((entry) => entry.name.toLowerCase().includes(keyword));
+      const requireComputeMetadata = (drtType: string, keyword: string) => {
+        const entry = findCatalogEntry(keyword);
+        if (!entry?.githubUrl || !entry?.hash) {
+          throw new Error(
+            `Cannot create ${drtType}: the code catalog has no GitHub URL / SHA-256 hash for it. Compute DRTs must carry on-chain code metadata.`
+          );
+        }
+        if (
+          !entry.githubUrl.startsWith("https://github.com/") ||
+          entry.githubUrl.length > MAX_GITHUB_URL_LENGTH
+        ) {
+          throw new Error(`Cannot create ${drtType}: catalog GitHub URL is malformed or too long`);
+        }
+        if (!/^[0-9a-f]{64}$/.test(entry.hash)) {
+          throw new Error(`Cannot create ${drtType}: catalog code hash is not a 64-char SHA-256`);
+        }
+        return { githubUrl: entry.githubUrl, codeHash: entry.hash };
+      };
+
       // Prepare DRT configurations for the pool creation
       const drtConfigs = [];
-      
+
       if (appendSelected) {
         drtConfigs.push({
           drtType: "append",
           supply: new BN(appendSupply),
           cost: new BN(appendCost),
-          githubUrl: "https://github.com/nautilus-project/append",
-          codeHash: undefined // Changed from null to undefined to match TypeScript expectations
+          // Append is native to the platform; it carries no code reference.
+          githubUrl: undefined,
+          codeHash: undefined
         });
       }
-      
+
       if (wComputeSelected) {
+        const metadata = requireComputeMetadata("w_compute_median", "wasm");
         drtConfigs.push({
           drtType: "w_compute_median",
           supply: new BN(wComputeSupply),
           cost: new BN(wComputeCost),
-          githubUrl: "https://github.com/nautilus-project/w_compute_median",
-          codeHash: undefined // Changed from null to undefined
+          githubUrl: metadata.githubUrl,
+          codeHash: metadata.codeHash
         });
       }
-      
+
       if (pyComputeSelected) {
+        const metadata = requireComputeMetadata("py_compute_median", "python");
         drtConfigs.push({
           drtType: "py_compute_median",
           supply: new BN(pyComputeSupply),
           cost: new BN(pyComputeCost),
-          githubUrl: "https://github.com/nautilus-project/py_compute_median",
-          codeHash: undefined // Changed from null to undefined
+          githubUrl: metadata.githubUrl,
+          codeHash: metadata.codeHash
         });
       }
   
@@ -748,7 +787,6 @@ function PoolCreationStep({
       updateProgress(1, "Pool created (mints initialised & funded)", "success");
 
       const chainAddress   = pdas.poolPda.toBase58();
-      const feeVaultBump   = (await getFeeVaultPda(pdas.poolPda, program.programId))[1];      
   
       // If VM creation is enabled, wait for the TEE deployment to complete
       if (!skipVmCreation) {
@@ -786,7 +824,33 @@ function PoolCreationStep({
           }
         }
         updateProgress(2, "Enclave deployed successfully", 'success');
-  
+
+        if (!publicIp) throw new Error("Public IP not available from TEE deployment");
+
+        // Attestation preflight: verify the expected measurement before
+        // provisioning any data to the enclave.
+        updateProgress(3, "Verifying enclave attestation", "loading");
+        if (!measurements || !vmName) {
+          throw new Error("Enclave measurements or VM name unavailable; cannot attest before provisioning data");
+        }
+        const attestationResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/attestation`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            vm_name: vmName,
+            mrenclave: measurements.mrenclave,
+            mrsigner: measurements.mrsigner,
+            isvprodid: measurements.isvProdId,
+            isvsvn: measurements.isvSvn,
+            port: 443,
+          }),
+        });
+        const attestationData = attestationResponse.ok ? await attestationResponse.json() : null;
+        if (!attestationData?.success) {
+          throw new Error("Enclave attestation preflight failed; refusing to provision data");
+        }
+        updateProgress(3, "Enclave attestation verified", "success");
+
         // Create the data pool in the enclave
         updateProgress(3, "Creating new data pool in the enclave", "loading");
         const dataReader = new FileReader();
@@ -796,36 +860,41 @@ function PoolCreationStep({
               const data = JSON.parse(e.target?.result as string);
               console.log("Data file parsed for enclave:", data);
               resolve(data);
-            } catch (err) {
+            } catch {
               reject(new Error("Invalid JSON in data file"));
             }
           };
           dataReader.onerror = () => reject(new Error("Failed to read data file"));
           dataReader.readAsText(dataFile!);
         });
-  
+
         const dataJson = await dataPromise;
-  
-        if (!publicIp) throw new Error("Public IP not available from TEE deployment");
-  
-        const proxyResponse = await fetch("/api/create-data-pool", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ publicIp, data: dataJson }),
+
+        // The wallet signs a pool_initialize claim binding the creation tx,
+        // the pool PDA, and the exact schema+seed payload.
+        const payload = JSON.stringify({ schema: schemaDefinition, data: dataJson });
+        const claim = await buildClaim({
+          action: "pool_initialize",
+          tx: sig,
+          pool: chainAddress,
+          claimant: publicKey.toBase58(),
+          payload,
         });
-  
-        if (!proxyResponse.ok) {
-          const errorData = await proxyResponse.json();
-          throw new Error(`Failed to create data pool via proxy: ${errorData.error}`);
-        }
-  
-        const proxyResult = await proxyResponse.json();
-        console.log("Proxy response:", proxyResult);
-  
-        if (proxyResult.result === "Data pool created, sealed, and saved successfully") {
+        updateProgress(3, "Awaiting claim signature", "loading", "Please sign the enclave authorization message");
+        const walletSignature = await signClaim(wallet, claim);
+
+        updateProgress(3, "Creating data pool in the enclave", "loading", "Waiting for on-chain finality and oracle verification");
+        const result = await postToEnclave<string>("/api/create-data-pool", {
+          publicIp,
+          claim,
+          wallet_signature: walletSignature,
+          payload,
+        });
+
+        if (result === "Data pool created, sealed, and saved successfully") {
           updateProgress(3, "Data pool created in enclave", "success");
         } else {
-          throw new Error(`Unexpected response from enclave via proxy: ${proxyResult.result}`);
+          throw new Error(`Unexpected response from enclave via proxy: ${result}`);
         }
       }
   
@@ -882,9 +951,9 @@ function PoolCreationStep({
         throw new Error("Failed to save pool to database or missing pool ID");
       }
   
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Pool creation error:", error);
-      updateProgress(progress?.step || 0, `Error during pool creation: ${error.message}`, 'error', "Please check console for details");
+      updateProgress(progress?.step || 0, `Error during pool creation: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error', "Please check console for details");
       setAllInputsLocked(false);
     } finally {
       setIsSubmitting(false);
@@ -1159,7 +1228,7 @@ function PoolCreationStep({
 ------------------------------------------------------------------ */
 export default function Pools() {
   const [currentStep, setCurrentStep] = useState(1)
-  const [schemaDefinition, setSchemaDefinition] = useState<any>(null);
+  const [schemaDefinition, setSchemaDefinition] = useState<JsonSchemaLike | null>(null);
   const [dataFile, setDataFile] = useState<File | null>(null);
   const [appendSelected, setAppendSelected] = useState(false)
   const [wComputeSelected, setWComputeSelected] = useState(false)

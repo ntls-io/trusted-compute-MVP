@@ -17,81 +17,12 @@
  */
 
 // app/api/append-data/route.ts
-import { NextRequest, NextResponse } from 'next/server';
-import fetch from 'node-fetch';
-import https from 'https';
+//
+// Verified append: wallet-signed claim plus the exact JSON payload string
+// the claim's payload_sha256 commits to.
+import { NextRequest } from 'next/server';
+import { proxyProtectedRequest } from '@/lib/server/enclaveProxy';
 
 export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json().catch(() => null);
-    
-    if (!body) {
-      return NextResponse.json({ 
-        error: 'Invalid request body - must be valid JSON' 
-      }, { status: 400 });
-    }
-
-    const { publicIp, data } = body;
-
-    if (!publicIp || !data) {
-      return NextResponse.json({ 
-        error: 'Missing required fields',
-        required: ['publicIp', 'data'],
-        received: { publicIp: !!publicIp, data: !!data }
-      }, { status: 400 });
-    }
-
-    const url = `https://${publicIp}/append_data`;
-    
-    // Custom agent for handling self-signed certificates
-    const agent = new https.Agent({
-      rejectUnauthorized: false,
-    });
-
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ data }),
-      // @ts-ignore - Type mismatch between node-fetch and native fetch
-      agent,
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      return NextResponse.json({ 
-        error: `Enclave error (${response.status})`,
-        details: errorText
-      }, { status: response.status });
-    }
-
-    const responseText = await response.text();
-    
-    try {
-      // Try parsing as JSON first
-      const jsonResult = JSON.parse(responseText);
-      return NextResponse.json({ result: jsonResult });
-    } catch {
-      // If not JSON, check if it's the success message
-      if (responseText.includes("Data appended, sealed, and saved successfully")) {
-        return NextResponse.json({ 
-          result: "Data appended, sealed, and saved successfully" 
-        });
-      }
-      
-      // Otherwise, it's an unexpected response
-      return NextResponse.json({ 
-        error: 'Unexpected response format from enclave',
-        details: responseText
-      }, { status: 500 });
-    }
-
-  } catch (error) {
-    console.error('Proxy error:', error);
-    return NextResponse.json({ 
-      error: 'Failed to communicate with enclave',
-      details: error instanceof Error ? error.message : 'Unknown error'
-    }, { status: 500 });
-  }
+  return proxyProtectedRequest(req, '/append_data', { requirePayload: true });
 }

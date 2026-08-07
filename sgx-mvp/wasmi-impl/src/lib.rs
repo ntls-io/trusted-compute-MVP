@@ -122,7 +122,7 @@ pub fn wasm_execution(binary: &str, data: JsonValue, schema: JsonValue) -> Resul
         .map_err(|e| anyhow!("Failed to create memory: {}", e))?;
 
     linker
-        .define("env", "memory", memory.clone())
+        .define("env", "memory", memory)
         .map_err(|e| anyhow!("Failed to define memory in linker: {}", e))?;
 
     // Instantiate the module
@@ -164,7 +164,10 @@ pub fn wasm_execution(binary: &str, data: JsonValue, schema: JsonValue) -> Resul
     let current_memory_size = (memory.data_size(&store) * 65536) as u32; // Convert pages to bytes
     if total_memory_size > current_memory_size {
         let additional_bytes = total_memory_size - current_memory_size;
-        let additional_pages = ((additional_bytes + 0xFFFF) / 0x10000) as u32; // Round up to the next page
+        // Round up to the next 64 KiB page. div_ceil is exactly equivalent to
+        // the previous `(n + 0xFFFF) / 0x10000` and cannot overflow on the
+        // addition when additional_bytes is near the type's maximum.
+        let additional_pages = additional_bytes.div_ceil(0x10000);
         memory
             .grow(&mut store, additional_pages)
             .map_err(|e| anyhow!("Failed to grow memory: {}", e))?;

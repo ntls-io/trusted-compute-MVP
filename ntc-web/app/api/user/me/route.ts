@@ -22,7 +22,7 @@ import { currentUser } from '@clerk/nextjs/server';
 import { prisma } from '@/lib/prisma'; 
 import { Prisma, RoleName } from '@prisma/client'; // Import RoleName for type safety
 
-export async function GET(req: Request) {
+export async function GET() {
   try {
     const clerkUser = await currentUser();
 

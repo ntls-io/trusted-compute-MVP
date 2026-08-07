@@ -15,6 +15,16 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
+# =====================================================================
+# DEVELOPMENT Gramine manifest — native `make SGX=1` builds on an SGX dev VM.
+#
+# sgx.debug = true and SIGTERM injection are enabled here for debuggability,
+# and /etc is mounted from the host. Do NOT ship an enclave built from this
+# template: production Docker builds use docker/sgx-mvp.manifest.template,
+# which hardcodes sgx.debug = false and bakes DNS + the CA bundle into
+# MRENCLAVE so the host cannot substitute them.
+# =====================================================================
+
 # Rust manifest with Python
 
 ################################## GRAMINE ####################################
@@ -49,6 +59,15 @@ loader.env.PYTHONUNBUFFERED = "1"  # Ensures output is flushed immediately
 
 # For easier debugging — not strictly required to run this workload
 loader.env.RUST_BACKTRACE = "full"
+
+# Oracle verification trust anchors. These are measured into MRENCLAVE, so
+# the oracle public key is pinned by attestation: a host cannot swap the
+# oracle without changing the enclave measurement.
+loader.env.ORACLE_URL = "{{ oracle_url }}"
+loader.env.ORACLE_ED25519_PUBKEY_HEX = "{{ oracle_pubkey_hex }}"
+loader.env.EXPECTED_CLUSTER = "{{ solana_cluster }}"
+loader.env.EXPECTED_PROGRAM_ID = "{{ drt_program_id }}"
+loader.env.ORACLE_TIMEOUT_SECONDS = "15"
 
 ################################## SIGNALS ####################################
 
@@ -97,7 +116,11 @@ sys.enable_extra_runtime_domain_names_conf = true
 # - any threads and threadpools you might be starting
 # - helper threads internal to Gramine — see:
 #   https://gramine.readthedocs.io/en/stable/manifest-syntax.html#number-of-threads
-sgx.max_threads = {{ '1' if env.get('EDMM', '0') == '1' else '8' }}
+#
+# Must be a constant. This previously read the host's EDMM env var at render
+# time, which made the manifest — and therefore MRENCLAVE — depend on the
+# machine doing the build rather than on the commit.
+sgx.max_threads = 8
 
 ############################# SGX: TRUSTED FILES ###############################
 
@@ -111,7 +134,6 @@ sgx.trusted_files = [
   "file:/usr/bin/python3.8",  # Python executable
   "file:/usr/lib/python3.8/",  # Python standard libraries
   "file:/usr/lib/python3/dist-packages/",
-  "file:build.rs",
   "file:/etc/ssl/certs/ca-certificates.crt",
 ]
 

@@ -17,40 +17,12 @@
  */
 
 // app/api/create-data-pool/route.ts
-import { NextRequest, NextResponse } from 'next/server';
-import fetch from 'node-fetch'; // Import node-fetch
-import https from 'https';
+//
+// One-time pool initialization: wallet-signed PoolCreated claim plus the
+// exact payload string containing `schema` and seed `data`.
+import { NextRequest } from 'next/server';
+import { proxyProtectedRequest } from '@/lib/server/enclaveProxy';
 
 export async function POST(req: NextRequest) {
-  try {
-    const { publicIp, data } = await req.json();
-
-    if (!publicIp || !data) {
-      return NextResponse.json({ error: 'Missing publicIp or data' }, { status: 400 });
-    }
-
-    const url = `https://${publicIp}/create_data_pool`;
-
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ data }),
-      agent: new https.Agent({
-        rejectUnauthorized: false, // Ignore self-signed certificate
-      }),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      return NextResponse.json({ error: `Enclave error: ${errorText}` }, { status: response.status });
-    }
-
-    const result = await response.text();
-    return NextResponse.json({ result });
-  } catch (error) {
-    console.error('Proxy error:', error);
-    return NextResponse.json({ error: 'Failed to proxy request to enclave' }, { status: 500 });
-  }
+  return proxyProtectedRequest(req, '/create_data_pool', { requirePayload: true });
 }

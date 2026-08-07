@@ -20,7 +20,7 @@
 'use client';
 
 import { useState, useEffect, FormEvent } from 'react';
-import { useUser, SignedIn, SignedOut, SignInButton } from '@clerk/nextjs';
+import { useUser, Show, SignInButton } from '@clerk/nextjs';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useUserProfile } from '@/hooks/useUserProfile';
 
@@ -75,9 +75,9 @@ export default function SelectRolesPage() {
                 const fetchedRolesData: FetchedRole[] = await rolesResponse.json();
                 setAllAvailableRoles(fetchedRolesData);
 
-            } catch (fetchError: any) {
+            } catch (fetchError: unknown) {
                 console.error("Error loading page data for /select-roles:", fetchError);
-                setError(fetchError.message || "Could not load page data.");
+                setError(fetchError instanceof Error ? fetchError.message : "Could not load page data.");
             } finally {
                 setIsFetchingPageData(false);
             }
@@ -133,8 +133,8 @@ export default function SelectRolesPage() {
 
             const nextUrl = searchParams.get('next') || '/';
             setTimeout(() => router.push(nextUrl), 2000);
-        } catch (err: any) {
-            setError(err.message);
+        } catch (err: unknown) {
+            setError(err instanceof Error ? err.message : 'An unknown error occurred.');
         } finally {
             setIsSubmitting(false);
         }
@@ -149,13 +149,13 @@ export default function SelectRolesPage() {
 
     return (
         <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '20px', background: '#f7fafc' }}>
-            <SignedIn>
+            <Show when="signed-in">
                 <div style={{ background: 'white', padding: '30px', borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)', maxWidth: '550px', width: '100%' }}>
                      <h1 style={{ fontSize: '22px', fontWeight: '600', textAlign: 'center', marginBottom: '8px', color: '#1a202c' }}>
                         {user?.firstName ? `Manage Roles for ${user.firstName}` : 'Manage Your Roles'}
                     </h1>
                     <p style={{ textAlign: 'center', marginBottom: '25px', color: '#4a5568', fontSize: '15px' }}>
-                        Select or update your roles to best describe how you'll interact with Relational. You must select at least one.
+                        Select or update your roles to best describe how you&apos;ll interact with Relational. You must select at least one.
                     </p>
                     <form onSubmit={handleSubmit}>
                         {allAvailableRoles.length === 0 && !isFetchingPageData && <p className="text-center text-gray-500">No roles are currently available to select.</p>}
@@ -213,15 +213,15 @@ export default function SelectRolesPage() {
                         {successMessage && <p style={{ color: '#38a169', marginTop: '15px', textAlign: 'center', fontSize: '14px' }}>{successMessage}</p>}
                     </form>
                 </div>
-            </SignedIn>
-            <SignedOut>
+            </Show>
+            <Show when="signed-out">
                  <div style={{ textAlign: 'center', background: 'white', padding: '40px', borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
                     <p style={{ marginBottom: '20px' }}>Please sign in to select or manage your roles.</p>
                     <SignInButton mode="modal">
                         <button style={{ padding: '10px 20px', background: '#3182ce', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Sign In</button>
                     </SignInButton>
                 </div>
-            </SignedOut>
+            </Show>
         </div>
     );
 }

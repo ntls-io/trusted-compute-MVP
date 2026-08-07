@@ -17,6 +17,17 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 -->
 # SGX-MVP Directory
 
+> **Deployment, keys and reproducible builds**
+>
+> - [`docker/README.md`](docker/README.md) — the signed, deterministic production image and how MRENCLAVE is
+>   kept reproducible.
+> - [`../docs/deployment/keys-and-secrets.md`](../docs/deployment/keys-and-secrets.md) — every key the system
+>   needs, in dependency order.
+> - [`deploy.mk`](deploy.mk) — the oracle trust anchors measured into MRENCLAVE.
+>
+> The build **fails closed** without `ORACLE_PUBKEY_HEX`; see `deploy.mk`.
+
+
 This directory contains all the relevant SGX code for NTC-MVP.
 
 - `wasmi-impl` serves as the WebAssembly interpreter

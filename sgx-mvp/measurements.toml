@@ -1,0 +1,59 @@
+# Nautilus Trusted Compute
+# Copyright (C) 2026 Relational Network
+
+# Pinned enclave measurements — the release contract for sgx-mvp.
+#
+# `mr_enclave` is the primary measurement and the main CI release gate. CI
+# rebuilds the image on every push and fails if the built value differs from
+# the one recorded here. When a change to the enclave is intentional, update
+# this file IN THE SAME PR as the source change:
+#
+#   make docker-build && make docker-sigstruct
+#
+# and paste the printed [enclave] block below.
+#
+# WHAT FEEDS mr_enclave
+# ---------------------
+# The Rust binary, the Gramine manifest, and every trusted file — but also, for
+# this project specifically, the ORACLE TRUST ANCHORS from deploy.mk:
+#
+#   ORACLE_URL, ORACLE_PUBKEY_HEX, SOLANA_CLUSTER, DRT_PROGRAM_ID
+#
+# These are baked into the manifest as loader.env values, which is what makes
+# the oracle's public key pinned by attestation: a host cannot point the enclave
+# at a different oracle without changing this measurement. The consequence is
+# that ROTATING THE ORACLE SIGNING KEY CHANGES mr_enclave.
+#
+# CONSEQUENCE FOR SEALED STATE
+# ----------------------------
+# The encrypted /data mount is keyed by `_sgx_mrenclave`. Any change to
+# mr_enclave — including an oracle key rotation or a dependency bump — makes
+# existing sealed pool identity and the replay ledger UNREADABLE. There is no
+# migration path in this prototype; a measurement change means starting from a
+# fresh pool. See docs/deployment/keys-and-secrets.md.
+
+[build]
+base_image = "ubuntu:20.04@sha256:8feb4d8ca5354def3d8fce243717141ce31e2c428701f6682bd2fafe15388214"
+ubuntu_snapshot = "20260210T000000Z"
+gramine = "1.8"
+rust = "1.92.0"
+sigstruct_date = "0000-00-00"
+
+[enclave]
+# Pinned 2026-08-07 from `make docker-build && make docker-sigstruct`, and
+# reproduced byte-identically by a --no-cache rebuild.
+#
+# To change these: rebuild, re-run docker-sigstruct, and update this block in
+# the SAME PR as the source change. CI fails the build on any drift.
+mr_enclave = "8505253a3c35ad4ced3b56944d5216dc9d103b48f0b79d1cdd4160d3d4de538c"
+mr_signer = "95c165e1e00cab9cb209a6f0771f15189bf32166679812cebf722ecb2dcbd87c"
+isv_prod_id = 0
+isv_svn = 0
+debug_enclave = false
+
+# mr_enclave:    the primary enclave measurement and the main CI release gate.
+# mr_signer:     signer measurement derived from the RSA key used to sign the enclave.
+# isv_prod_id:   enclave product identifier carried in the SIGSTRUCT.
+# isv_svn:       enclave security version number carried in the SIGSTRUCT.
+# debug_enclave: whether the enclave was signed in debug mode. MUST be false for
+#                production builds; CI asserts it.

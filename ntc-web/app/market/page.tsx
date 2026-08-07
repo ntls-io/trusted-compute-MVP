@@ -53,7 +53,7 @@ export default function Market() {
     key: keyof MarketItem | null;
     direction: 'asc' | 'desc' | null;
   }>({ key: null, direction: null })
-  const [loading, setLoading] = useState(false)
+  const [loading] = useState(false)
 
   // Available digital rights
   const availableRights: DigitalRight[] = [

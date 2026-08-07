@@ -1,0 +1,292 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Relational Network
+
+# Enclave CI — build, sign and measure the sgx-mvp enclave.
+#
+# NO SGX HARDWARE IS NEEDED HERE. gramine-sgx-sign is ordinary RSA signing, so
+# a standard x86-64 runner can produce the image, MRENCLAVE and MRSIGNER. Only
+# *running* the enclave needs SGX.
+#
+# This workflow's ONLY output is a signed, measured image in GHCR. It does not
+# deploy anywhere: devops-acr provisions SGX VMs on demand and its bootstrap
+# pulls this image (settings.SGX_IMAGE). Publish here, then point SGX_IMAGE at
+# the digest this run prints.
+#
+# The release gate is measurements.toml: this workflow fails if the built
+# mr_enclave differs from the recorded one. That is the whole point of the
+# deterministic build — the oracle's public key is measured into MRENCLAVE, so
+# an unreviewed change to the measurement is an unreviewed change to who the
+# enclave trusts.
+#
+# Required repository SECRETS:
+#   ENCLAVE_SIGNING_KEY   RSA-3072 (exponent 3) private key, PEM. Sets MRSIGNER.
+#   ORACLE_URL            devops-acr base URL          } measured into
+#   ORACLE_PUBKEY_HEX     oracle Ed25519 public key    } MRENCLAVE
+#
+# For full SGX testing including RA-TLS attestation, run on an SGX VM:
+#   make SGX=1 && make show-measurements
+
+name: Enclave CI
+
+on:
+  push:
+    branches: [main, staging]
+    paths: ['sgx-mvp/**', '.github/workflows/enclave-ci.yml']
+  pull_request:
+    branches: [main, staging]
+    paths: ['sgx-mvp/**', '.github/workflows/enclave-ci.yml']
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  # Crates that build on a plain runner. python-rust-impl and the sgx-mvp
+  # binary link libpython3.8, which only exists in the Gramine build image, so
+  # they are compiled inside the Docker build rather than here.
+  CI_CRATES: >-
+    -p oracle-verify -p json-append -p wasmi-impl -p github-download
+
+defaults:
+  run:
+    working-directory: sgx-mvp
+
+jobs:
+  check:
+    name: Lint and Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Honours sgx-mvp/rust-toolchain.toml, the same pin the Docker build uses.
+      - name: Install Rust toolchain
+        run: rustup show && rustup component add rustfmt clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: sgx-mvp
+
+      # Formatting does not compile anything, so it can cover the whole tree.
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy ${{ env.CI_CRATES }} --all-targets -- -D warnings
+
+      - name: Tests
+        run: cargo test ${{ env.CI_CRATES }} --locked
+
+      # Cargo.lock is committed precisely so the dependency graph — and thus
+      # the binary and MRENCLAVE — cannot drift. --locked fails if it is stale.
+      - name: Cargo.lock is current
+        run: cargo metadata --locked --format-version 1 > /dev/null
+
+  security:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          working-directory: sgx-mvp
+
+  validate-config:
+    name: Validate Dockerfile and Scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lint Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: sgx-mvp/docker/Dockerfile
+          failure-threshold: warning
+
+      - name: Validate shell scripts
+        run: |
+          sh -n docker/start.sh
+          sh -n docker/restart_aesm.sh
+          bash -n docker/build.sh
+
+
+  build-enclave:
+    name: Build, Sign and Measure
+    runs-on: ubuntu-latest
+    needs: [check, security, validate-config]
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/relational-network/sgx-mvp
+    outputs:
+      mr_enclave: ${{ steps.measure.outputs.mr_enclave }}
+      mr_signer: ${{ steps.measure.outputs.mr_signer }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # The oracle trust anchors are measured into MRENCLAVE and are kept out
+      # of the repository, so an enclave cannot be built before the oracle is
+      # deployed and its public key known. Warn and stop rather than fail: a
+      # red build here would be reporting "not bootstrapped yet", not a defect.
+      - name: Check oracle trust anchors are configured
+        id: anchors
+        env:
+          ORACLE_URL: ${{ secrets.ORACLE_URL }}
+          ORACLE_PUBKEY_HEX: ${{ secrets.ORACLE_PUBKEY_HEX }}
+        run: |
+          if [ -z "${ORACLE_URL}" ] || ! printf '%s' "${ORACLE_PUBKEY_HEX}" | grep -Eq '^[0-9a-f]{64}$'; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::ORACLE_URL / ORACLE_PUBKEY_HEX secrets are not set — skipping the enclave build."
+            {
+              echo "## Enclave build skipped"
+              echo ""
+              echo "The oracle trust anchors are measured into MRENCLAVE, so the enclave cannot be"
+              echo "built until the oracle is deployed and its public key is known:"
+              echo ""
+              echo '1. Deploy devops-acr (its workflow provisions `ORACLE_SIGNING_KEY_HEX`).'
+              echo '2. `curl -s "$ORACLE_URL/oracle/v1/health" | jq -r .oracle_pubkey`'
+              echo '3. Store it as the `ORACLE_PUBKEY_HEX` secret here, and `ORACLE_URL` alongside it.'
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Prepare signing key
+        if: steps.anchors.outputs.configured == 'true'
+        env:
+          ENCLAVE_SIGNING_KEY: ${{ secrets.ENCLAVE_SIGNING_KEY }}
+        run: |
+          umask 077
+          printenv ENCLAVE_SIGNING_KEY > "$RUNNER_TEMP/enclave-key.pem"
+
+      # SGX SIGSTRUCT requires RSA-3072 with public exponent 3. Any other key
+      # fails deep inside gramine-sgx-sign with an opaque error, so check here.
+      - name: Validate signing key
+        if: steps.anchors.outputs.configured == 'true'
+        run: |
+          KEY="$RUNNER_TEMP/enclave-key.pem"
+          if ! openssl rsa -in "$KEY" -check -noout 2>/dev/null; then
+            echo "::error::ENCLAVE_SIGNING_KEY is not a valid RSA private key"
+            exit 1
+          fi
+          KEY_INFO=$(openssl rsa -in "$KEY" -noout -text 2>/dev/null)
+          BIT_LEN=$(echo "$KEY_INFO" | head -1 | sed 's/[^0-9]*//' | cut -d' ' -f1)
+          EXPONENT=$(echo "$KEY_INFO" | grep publicExponent | sed 's/.*: \([0-9]*\).*/\1/')
+          [ "$BIT_LEN" = "3072" ] || { echo "::error::Signing key must be 3072-bit RSA, got ${BIT_LEN}"; exit 1; }
+          [ "$EXPONENT" = "3" ]   || { echo "::error::Signing key must have exponent 3, got ${EXPONENT}"; exit 1; }
+          echo "Valid 3072-bit RSA key with exponent 3"
+
+      - name: Log in to GHCR
+        if: steps.anchors.outputs.configured == 'true' && github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and sign
+        if: steps.anchors.outputs.configured == 'true'
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: sgx-mvp
+          file: sgx-mvp/docker/Dockerfile
+          platforms: linux/amd64
+          push: ${{ github.event_name == 'push' }}
+          load: true
+          tags: |
+            ${{ env.IMAGE }}:sha-${{ github.sha }}
+            ${{ (github.ref == 'refs/heads/main' && format('{0}:main-latest', env.IMAGE)) || '' }}
+          build-args: |
+            ORACLE_URL=${{ secrets.ORACLE_URL }}
+            ORACLE_PUBKEY_HEX=${{ secrets.ORACLE_PUBKEY_HEX }}
+          cache-from: type=gha,scope=sgx-mvp
+          cache-to: type=gha,scope=sgx-mvp,mode=max
+          secret-files: |
+            sgx-key=${{ runner.temp }}/enclave-key.pem
+
+      - name: Extract measurements
+        if: steps.anchors.outputs.configured == 'true'
+        id: measure
+        run: |
+          docker run --rm --entrypoint gramine-sgx-sigstruct-view \
+            "${IMAGE}:sha-${{ github.sha }}" /app/sgx-mvp.sig \
+            | tee "$RUNNER_TEMP/sigstruct.txt"
+
+          MR_ENCLAVE=$(awk '/mr_enclave:/ {print $2; exit}' "$RUNNER_TEMP/sigstruct.txt")
+          MR_SIGNER=$(awk '/mr_signer:/  {print $2; exit}' "$RUNNER_TEMP/sigstruct.txt")
+          echo "mr_enclave=${MR_ENCLAVE}" >> "$GITHUB_OUTPUT"
+          echo "mr_signer=${MR_SIGNER}"   >> "$GITHUB_OUTPUT"
+
+          {
+            echo "## Enclave Measurements"
+            echo '```text'
+            cat "$RUNNER_TEMP/sigstruct.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Assert production enclave settings
+        if: steps.anchors.outputs.configured == 'true'
+        run: |
+          S="$RUNNER_TEMP/sigstruct.txt"
+          DEBUG_ENCLAVE=$(awk '/debug_enclave:/ {print $2; exit}' "$S")
+          ISV_PROD_ID=$(awk '/isv_prod_id:/ {print $2; exit}' "$S")
+          ISV_SVN=$(awk '/isv_svn:/ {print $2; exit}' "$S")
+
+          # A debug enclave's memory can be read by the host, which voids the
+          # confidentiality the whole design rests on.
+          [ "$DEBUG_ENCLAVE" = "False" ] || { echo "::error::Production build must not be a debug enclave (got $DEBUG_ENCLAVE)"; exit 1; }
+          [ "$ISV_PROD_ID" = "0" ] || { echo "::error::Expected isv_prod_id=0, got $ISV_PROD_ID"; exit 1; }
+          [ "$ISV_SVN" = "0" ]     || { echo "::error::Expected isv_svn=0, got $ISV_SVN"; exit 1; }
+          echo "debug_enclave=False, isv_prod_id=0, isv_svn=0"
+
+      # The release gate.
+      - name: Verify MRENCLAVE matches measurements.toml
+        if: steps.anchors.outputs.configured == 'true'
+        run: |
+          BUILT="${{ steps.measure.outputs.mr_enclave }}"
+          EXPECTED=$(sed -n 's/^mr_enclave = "\(.*\)"$/\1/p' measurements.toml | head -1)
+
+          echo "Built:    $BUILT"
+          echo "Expected: $EXPECTED  (measurements.toml)"
+
+          if ! printf '%s\n' "$EXPECTED" | grep -Eq '^[0-9a-f]{64}$'; then
+            echo "::warning::measurements.toml has no pinned mr_enclave yet. Record ${BUILT} before the first release."
+            exit 0
+          fi
+
+          if [ "$BUILT" != "$EXPECTED" ]; then
+            echo "::error::MRENCLAVE changed!"
+            echo "::error::Built:    $BUILT"
+            echo "::error::Expected: $EXPECTED"
+            echo "If intentional, update measurements.toml in the same PR."
+            echo "Remember this also invalidates all sealed enclave state."
+            exit 1
+          fi
+          echo "MRENCLAVE matches measurements.toml"
+
+      - name: Record image digest
+        if: steps.anchors.outputs.configured == 'true' && github.event_name == 'push'
+        run: |
+          DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "${IMAGE}:sha-${{ github.sha }}" | cut -d@ -f2)
+          {
+            echo "## Container Image"
+            echo '```'
+            echo "Tag:    ${IMAGE}:sha-${{ github.sha }}"
+            echo "Digest: ${DIGEST}"
+            echo "Deploy: ${IMAGE}@${DIGEST}"
+            echo '```'
+            echo ""
+            echo "> **Deploy by digest, not by tag.** A measurement is only meaningful"
+            echo "> alongside the exact image content that produced it; a mutable tag can"
+            echo "> be repointed underneath a recorded MRENCLAVE."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Shred signing key
+        if: always()
+        run: shred -u "$RUNNER_TEMP/enclave-key.pem" 2>/dev/null || true
+

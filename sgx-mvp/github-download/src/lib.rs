@@ -27,7 +27,6 @@ pub fn verify_and_download_python_github(
     save_path: &str,
     expected_hash: &str,
 ) -> Result<()> {
-
     // Convert the GitHub URL to the raw URL
     let raw_url = github_url
         .replace("https://github.com", "https://raw.githubusercontent.com")
@@ -85,7 +84,6 @@ pub fn verify_and_download_wasm(
     save_path: &str,
     expected_hash: &str,
 ) -> Result<()> {
-
     // Convert the GitHub URL to the raw URL
     let raw_url = github_url
         .replace("https://github.com", "https://raw.githubusercontent.com")
@@ -106,7 +104,7 @@ pub fn verify_and_download_wasm(
 
     // Fetch the script
     let response = client
-        .get(&raw_url.clone())
+        .get(raw_url.clone())
         .send()
         .map_err(|e| anyhow!("HTTP GET request failed: {}", e))?
         .bytes()

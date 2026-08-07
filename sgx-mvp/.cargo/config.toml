@@ -16,4 +16,28 @@
 
 # Emit the .d file with paths relative to the project directory, so that Make
 # understands that they refer to the same target that we wrote in the Makefile.
-build.dep-info-basedir = "."
+[build]
+dep-info-basedir = "."
+
+# Host-only development aliases. The enclave binary links libpython3.8, which
+# does not exist outside the Gramine build environment, so `cargo build` at the
+# workspace root fails on a dev machine. These target the crates that DO build
+# anywhere — chiefly `oracle-verify`, which carries the claim/JWS/replay logic.
+#
+#   make dev-check | dev-build | dev-test
+[alias]
+dev-check = "check -p oracle-verify"
+dev-build = "build -p oracle-verify"
+dev-test = "test -p oracle-verify"
+
+# Deterministic release profile. MRENCLAVE covers the compiled binary, so any
+# nondeterminism in codegen changes the measurement.
+#
+# codegen-units = 1 is REQUIRED, not an optimisation: parallel codegen within a
+# single crate is not deterministic. docker/Dockerfile also sets these via
+# CARGO_PROFILE_RELEASE_* env vars, which win over this file — both are kept in
+# sync deliberately so native `make` builds match Docker builds.
+[profile.release]
+codegen-units = 1
+debug = 0
+strip = "symbols"

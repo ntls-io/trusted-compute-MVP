@@ -30,7 +30,7 @@ interface ValidationResult {
 }
 
 interface SchemaPreviewProps {
-  schema?: JSON;
+  schema?: JsonSchemaLike;
   schemaFile?: File | null;
 }
 
@@ -39,6 +39,17 @@ interface SchemaColumn {
   type: string;
   required: boolean;
   items?: { type: string };
+}
+
+export interface JsonSchemaProperty {
+  type: string;
+  items?: { type: string };
+}
+
+export interface JsonSchemaLike {
+  type?: string;
+  properties?: Record<string, JsonSchemaProperty>;
+  required?: string[];
 }
 
 /**
@@ -63,7 +74,7 @@ export async function validateJsonSchema(
     }
 
     return validateDataAgainstSchema(data, schema);
-  } catch (error) {
+  } catch {
     return {
       success: false,
       error: 'Failed to validate schema or data. Ensure both are valid JSON files.',
@@ -74,7 +85,7 @@ export async function validateJsonSchema(
 /**
  * Validates data against a schema.
  */
-function validateDataAgainstSchema(data: any, schema: any): ValidationResult {
+function validateDataAgainstSchema(data: Record<string, unknown>, schema: JsonSchemaLike): ValidationResult {
   if (schema.type === 'object') {
     // Validate object properties
     if (!schema.properties || typeof schema.properties !== 'object') {
@@ -103,17 +114,17 @@ function validateDataAgainstSchema(data: any, schema: any): ValidationResult {
  */
 export const SchemaPreview = ({ schema, schemaFile }: SchemaPreviewProps) => {
   const [open, setOpen] = useState(false);
-  const [parsedSchema, setParsedSchema] = useState<any>(null);
+  const [parsedSchema, setParsedSchema] = useState<JsonSchemaLike | null>(null);
   const [columns, setColumns] = useState<SchemaColumn[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  const processSchema = (schemaData: any) => {
+  const processSchema = (schemaData: JsonSchemaLike) => {
     try {
       setParsedSchema(schemaData);
 
       // Extract schema columns
       const schemaColumns: SchemaColumn[] = Object.entries(schemaData.properties || {}).map(
-        ([name, prop]: [string, any]) => ({
+        ([name, prop]: [string, JsonSchemaProperty]) => ({
           name,
           type: prop.type,
           required: (schemaData.required || []).includes(name),
@@ -121,7 +132,7 @@ export const SchemaPreview = ({ schema, schemaFile }: SchemaPreviewProps) => {
         })
       );
       setColumns(schemaColumns);
-    } catch (err) {
+    } catch {
       setError('Failed to process schema.');
     }
   };
@@ -134,7 +145,7 @@ export const SchemaPreview = ({ schema, schemaFile }: SchemaPreviewProps) => {
         const text = await schemaFile.text();
         const parsedData = JSON.parse(text);
         processSchema(parsedData);
-      } catch (err) {
+      } catch {
         setError('Failed to parse schema file.');
       }
     }

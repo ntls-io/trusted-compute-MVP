@@ -34,9 +34,10 @@ import { SolflareWalletAdapter } from "@solana/wallet-adapter-solflare";
 
 // Default styles
 import "@solana/wallet-adapter-react-ui/styles.css";
+import { SOLANA_ENDPOINT } from "@/lib/config";
 
 import LayoutClient from "./LayoutClient";
-import { SignedIn, SignedOut, RedirectToSignIn } from "@clerk/nextjs";
+import { Show, RedirectToSignIn } from "@clerk/nextjs";
 import { usePathname } from "next/navigation";
 
 const inter = Inter({ subsets: ["latin"] });
@@ -46,8 +47,11 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
+  // Cluster comes from lib/config.ts: this is the RPC the whole app uses via
+  // ConnectionProvider, and it must match the cluster named in the
+  // wallet-signed chain claim that the enclave verifies.
   const network = WalletAdapterNetwork.Devnet;
-  const endpoint = useMemo(() => clusterApiUrl(network), [network]);
+  const endpoint = useMemo(() => SOLANA_ENDPOINT, []);
   const wallets = useMemo(
     () => [
       new PhantomWalletAdapter(), 
@@ -71,12 +75,12 @@ export default function RootLayout({
                     children
                   ) : (
                     <>
-                      <SignedIn>
+                      <Show when="signed-in">
                         <LayoutClient>{children}</LayoutClient>
-                      </SignedIn>
-                      <SignedOut>
+                      </Show>
+                      <Show when="signed-out">
                         <RedirectToSignIn />
-                      </SignedOut>
+                      </Show>
                     </>
                   )}
                 </div>

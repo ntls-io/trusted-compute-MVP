@@ -1,0 +1,124 @@
+# syntax=docker/dockerfile:1
+
+# Nautilus Trusted Compute
+# Copyright (C) 2026 Relational Network
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published
+# by the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# ============================================================================
+# DEVELOPMENT IMAGE — NO SGX, NO ATTESTATION, NO SEALING.
+#
+# Runs the enclave binary directly so the chain -> oracle -> enclave path can be
+# exercised on hardware without SGX. Use docker/Dockerfile for anything real.
+#
+# WHY NOT gramine-direct?
+#   The production manifest mounts /data as
+#     { type = "encrypted", key_name = "_sgx_mrenclave" }
+#   and that key only exists inside a real enclave. gramine-direct cannot mount
+#   it, so it cannot run this application at all. Running the binary directly is
+#   the only workable non-SGX path, and it exercises the identical Rust code —
+#   claim verification, oracle JWS checking, the replay ledger and execution.
+#
+# WHAT THIS DOES NOT COVER (needs real SGX hardware):
+#   - sealing: DATA_DIR here is PLAINTEXT on an ordinary volume
+#   - MRENCLAVE-keyed encryption and measurement
+#   - RA-TLS attestation: the certificate below is a plain self-signed cert
+#     carrying no SGX quote, so an attestation preflight will correctly fail
+#
+# The oracle trust anchors arrive as ordinary container environment variables
+# rather than a measured manifest, which means a dev enclave trusts whatever
+# oracle it is told to. That is precisely the property SGX provides and this
+# image does not — never expose it to anything but local development.
+# ============================================================================
+
+FROM --platform=linux/amd64 ubuntu:20.04 AS builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+# clang, not gcc-9: aws-lc-sys (via rustls) refuses to build with gcc-9 over
+# https://gcc.gnu.org/bugzilla/show_bug.cgi?id=95189
+ENV CC=clang
+ENV CXX=clang++
+# python3.8-dev provides /usr/bin/python3.8 but no `python3` alias, which
+# pyo3-ffi's build script needs to be told about explicitly.
+ENV PYO3_PYTHON=/usr/bin/python3.8
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates curl build-essential clang pkg-config libssl-dev \
+    python3.8-dev libffi-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+ARG RUST_TOOLCHAIN=1.92.0
+ENV CARGO_HOME=/opt/cargo RUSTUP_HOME=/opt/rustup PATH=/opt/cargo/bin:$PATH
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+    | sh -s -- -y --profile minimal --default-toolchain ${RUST_TOOLCHAIN}
+
+WORKDIR /build
+COPY rust-toolchain.toml Cargo.toml Cargo.lock build.rs ./
+COPY .cargo ./.cargo
+COPY src ./src
+COPY oracle-verify ./oracle-verify
+COPY wasmi-impl ./wasmi-impl
+COPY python-rust-impl ./python-rust-impl
+COPY json-append ./json-append
+COPY github-download ./github-download
+
+RUN cargo build --release --locked
+
+# ---------------------------------------------------------------------------
+FROM --platform=linux/amd64 ubuntu:20.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates openssl socat \
+    python3.8 libpython3.8 python3-numpy python3-scipy \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /build/target/release/sgx-mvp /app/sgx-mvp
+
+# main.rs reads the TLS certificate and key from these exact paths, which
+# gramine-ratls would normally have written. configure_ratls() only parses a PEM
+# certificate and an EC private key — it performs no quote validation — so a
+# plain self-signed EC certificate satisfies it and no Rust changes are needed.
+RUN printf '#!/bin/sh\n\
+set -eu\n\
+\n\
+if [ ! -f /tmp/tlscert.pem ]; then\n\
+    echo "[dev] generating self-signed EC certificate (NO SGX QUOTE)"\n\
+    openssl ecparam -name prime256v1 -genkey -noout -out /tmp/tlskey.pem 2>/dev/null\n\
+    openssl req -new -x509 -key /tmp/tlskey.pem -out /tmp/tlscert.pem \\\n\
+        -days 365 -subj "/CN=sgx-mvp-dev" 2>/dev/null\n\
+fi\n\
+\n\
+mkdir -p "${DATA_DIR:-/data}"\n\
+\n\
+echo "[dev] ================= DEVELOPMENT MODE ================="\n\
+echo "[dev] No SGX. State in ${DATA_DIR:-/data} is PLAINTEXT, not sealed."\n\
+echo "[dev] TLS certificate carries no attestation evidence."\n\
+echo "[dev] oracle:  ${ORACLE_URL:-<unset>}"\n\
+echo "[dev] cluster: ${EXPECTED_CLUSTER:-<unset>}  program: ${EXPECTED_PROGRAM_ID:-<unset>}"\n\
+echo "[dev] ===================================================="\n\
+\n\
+# The server binds 127.0.0.1:8080; expose it on 8081 exactly as production does.\n\
+socat TCP-LISTEN:8081,fork,reuseaddr TCP:127.0.0.1:8080 &\n\
+\n\
+exec /app/sgx-mvp\n' > /start-dev.sh && chmod +x /start-dev.sh
+
+ENV DATA_DIR=/data
+ENV RUST_BACKTRACE=full
+ENV PYTHONHOME=/usr
+ENV PYTHONPATH=/usr/lib/python3.8:/usr/lib/python3/dist-packages/
+ENV PYTHONUNBUFFERED=1
+
+EXPOSE 8081
+ENTRYPOINT ["/start-dev.sh"]

@@ -17,13 +17,15 @@
  */
 
 // lib/solanaConnection.ts
-import { Connection, clusterApiUrl } from "@solana/web3.js";
+import { Connection } from "@solana/web3.js";
 import { useConnection } from "@solana/wallet-adapter-react";
 import { create } from 'zustand';
 
-// Connection configuration
-export const SOLANA_NETWORK = "devnet";
-export const SOLANA_ENDPOINT = clusterApiUrl(SOLANA_NETWORK);
+// Connection configuration. Derived from lib/config.ts so the cluster used for
+// RPC cannot drift from the cluster named in the wallet-signed chain claim.
+import { SOLANA_CLUSTER, SOLANA_ENDPOINT } from "@/lib/config";
+export const SOLANA_NETWORK = SOLANA_CLUSTER;
+export { SOLANA_ENDPOINT };
 
 // Create a single connection instance
 export const connection = new Connection(SOLANA_ENDPOINT, "processed");

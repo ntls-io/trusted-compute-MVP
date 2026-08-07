@@ -130,11 +130,11 @@ export async function POST(request: NextRequest) {
       pool: safePool 
     }, { status: 201 });
     
-} catch (error: any) {
+} catch (error: unknown) {
     console.error("Error creating pool:", error);
     return NextResponse.json({ 
       error: "Internal server error",
-      details: error?.message || "No error message available"
+      details: error instanceof Error ? error.message : "No error message available"
     }, { status: 500 });
   } finally {
     await prisma.$disconnect();

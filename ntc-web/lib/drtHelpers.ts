@@ -36,17 +36,85 @@ import {
   Transaction
 } from "@solana/web3.js";
 
+import { SOLANA_ENDPOINT } from "@/lib/config";
+
 // Constants for retry logic and network configuration
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 1000; // 1 second delay between retries
-const DEVNET_URL = clusterApiUrl('devnet');
+const DEVNET_URL = SOLANA_ENDPOINT;
 const COMMITMENT = 'confirmed';
+
+// Minimal wallet shape needed by the helpers below
+interface WalletLike {
+  publicKey: PublicKey | null;
+}
+
+// Raw on-chain DRT/pool account shapes (Anchor account fetch results aren't
+// strongly typed from the raw IDL here, so we describe the fields we use).
+interface RawDrtAccount {
+  drtType?: string;
+  drt_type?: string;
+  mint: PublicKey;
+  supply?: number | { toNumber(): number };
+  cost?: number | { toNumber(): number };
+  githubUrl?: string;
+  github_url?: string;
+  codeHash?: string;
+  code_hash?: string;
+  isMinted?: boolean;
+  is_minted?: boolean;
+}
+
+interface RawPoolAccount {
+  owner?: PublicKey;
+  name?: string;
+  bump?: number;
+  ownershipMint: PublicKey;
+  drts: RawDrtAccount[];
+}
+
+function getPoolAccounts(program: anchor.Program) {
+  return program.account as unknown as {
+    pool: { fetch(pubkey: PublicKey): Promise<RawPoolAccount> };
+  };
+}
 
 // Helper to create connection with proper configuration
 export const getConnection = () => new Connection(DEVNET_URL, {
   commitment: COMMITMENT,
   confirmTransactionInitialTimeout: 60000
 });
+
+// On-chain code identity for a DRT. The wallet-signed enclave claim must
+// carry these values from chain state, not from the off-chain database.
+export interface OnChainDrtMetadata {
+  githubUrl: string | null;
+  codeHash: string | null;
+}
+
+/**
+ * Read a DRT's GitHub URL and code hash from the on-chain pool account.
+ * Throws if the DRT type is not configured on the pool.
+ */
+export async function getOnChainDrtMetadata(
+  program: anchor.Program,
+  poolAddress: string,
+  drtType: string
+): Promise<OnChainDrtMetadata> {
+  const poolAccount = await getPoolAccounts(program).pool.fetch(
+    new PublicKey(poolAddress)
+  );
+  const drtConfig = poolAccount.drts.find(
+    (drt: RawDrtAccount) => drt.drtType === drtType || drt.drt_type === drtType
+  );
+  if (!drtConfig) {
+    throw new Error(`DRT type '${drtType}' not found in on-chain pool state`);
+  }
+  return {
+    githubUrl: drtConfig.githubUrl ?? drtConfig.github_url ?? null,
+    codeHash: drtConfig.codeHash ?? drtConfig.code_hash ?? null,
+  };
+}
 
 export function getPoolPda(
   owner: PublicKey,
@@ -268,7 +336,7 @@ export async function createPoolWithDrts(
         try {
           await provider.connection.getTokenAccountBalance(vaultTokenAccount);
           updateStatus?.(`Vault token account already exists for ${drtType}`);
-        } catch (e) {
+        } catch {
           // Account doesn't exist, create it
           updateStatus?.(`Creating new vault token account for ${drtType}...`);
           
@@ -343,7 +411,7 @@ export async function createPoolWithDrts(
  */
 export async function buyDrt(
   program: anchor.Program,
-  wallet: any,
+  wallet: WalletLike,
   poolAddress: string,
   drtType: string,
   quantity = 1,
@@ -351,15 +419,16 @@ export async function buyDrt(
 ): Promise<string> {
 
   if (quantity < 1) throw new Error("quantity must be ≥ 1");
+  if (!wallet.publicKey) throw new Error("Wallet not connected");
 
   const poolPubkey = new PublicKey(poolAddress);
   
   // Fetch pool account to get DRT information
   updateStatus?.("Fetching pool data...");
-  const poolAccount = await (program.account as any).pool.fetch(poolPubkey);
+  const poolAccount = await getPoolAccounts(program).pool.fetch(poolPubkey);
   
   // Find the DRT config
-  const drtConfig = poolAccount.drts.find((drt: any) => 
+  const drtConfig = poolAccount.drts.find((drt: RawDrtAccount) => 
     drt.drtType === drtType || drt.drt_type === drtType
   );
   
@@ -436,20 +505,21 @@ export async function buyDrt(
  */
 export async function redeemDrt(
   program: anchor.Program,
-  wallet: any,
+  wallet: WalletLike,
   poolAddress: string,
   drtType: string,
   updateStatus?: (status: string) => void
 ): Promise<{ tx: string; ownershipTokenReceived: boolean }> {
+  if (!wallet.publicKey) throw new Error("Wallet not connected");
   const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
   const poolPubkey = new PublicKey(poolAddress);
   
   // Fetch pool account
   updateStatus?.("Fetching pool data...");
-  const poolAccount = await (program.account as any).pool.fetch(poolPubkey);
+  const poolAccount = await getPoolAccounts(program).pool.fetch(poolPubkey);
   
   // Find the DRT config
-  const drtConfig = poolAccount.drts.find((drt: any) => 
+  const drtConfig = poolAccount.drts.find((drt: RawDrtAccount) => 
     drt.drtType === drtType || drt.drt_type === drtType
   );
   
@@ -519,17 +589,18 @@ export async function redeemDrt(
  */
 export async function redeemFees(
   program: anchor.Program,
-  wallet: any,
+  wallet: WalletLike,
   poolAddress: string,
   amount: BN,
   updateStatus?: (status: string) => void
 ): Promise<string> {
+  if (!wallet.publicKey) throw new Error("Wallet not connected");
   const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
   const poolPubkey = new PublicKey(poolAddress);
   
   // Fetch pool account
   updateStatus?.("Fetching pool data...");
-  const poolAccount = await (program.account as any).pool.fetch(poolPubkey);
+  const poolAccount = await getPoolAccounts(program).pool.fetch(poolPubkey);
   const ownershipMint = poolAccount.ownershipMint;
   
   // Find fee vault and its bump
@@ -597,16 +668,16 @@ export async function fetchAvailableDRTs(
   const connection = (program.provider as AnchorProvider).connection;
   
   // Fetch pool account
-  const poolAccount = await (program.account as any).pool.fetch(poolPubkey);
+  const poolAccount = await getPoolAccounts(program).pool.fetch(poolPubkey);
   const availableDRTs = [];
   
   // Process each DRT in the pool
   for (const drt of poolAccount.drts) {
-    const drtType = drt.drtType || drt.drt_type;
+    const drtType = drt.drtType || drt.drt_type || '';
     const drtMint = drt.mint;
     const supply = Number(drt.supply);
     const cost = Number(drt.cost) / 1_000_000_000; // Convert lamports to SOL
-    const isMinted = drt.isMinted || drt.is_minted;
+    const isMinted = drt.isMinted || drt.is_minted || false;
     const githubUrl = drt.githubUrl || drt.github_url;
     const codeHash = drt.codeHash || drt.code_hash;
     
