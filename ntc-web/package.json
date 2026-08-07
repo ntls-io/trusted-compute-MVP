@@ -15,9 +15,6 @@
     "postinstall": "prisma generate",
     "vercel-build": "prisma generate && prisma db push --accept-data-loss && prisma db seed && SKIP_LINTING=true next build"
   },
-  "prisma": {
-    "seed": "tsx --tsconfig tsconfig.seed.json prisma/seed.ts"
-  },
   "dependencies": {
     "@clerk/nextjs": "^7.5.18",
     "@coral-xyz/anchor": "^0.30.1",
