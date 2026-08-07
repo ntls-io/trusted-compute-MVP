@@ -1,0 +1,57 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Relational Network
+#
+# systemd unit for the sgx-mvp SGX enclave (Docker).
+#
+# The image is pre-signed at build time by enclave-ci.yml, so no signing key is
+# needed on this VM. ENCLAVE_IMAGE_TAG is written to /opt/sgx-mvp/.env by the
+# CD pipeline and pins the exact image that produced the recorded MRENCLAVE.
+#
+# Installation (the CD pipeline does this automatically):
+#   sudo cp enclave.service /etc/systemd/system/enclave.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now enclave
+#
+# Logs:
+#   sudo journalctl -u enclave -f
+
+[Unit]
+Description=Relational sgx-mvp SGX Enclave (Docker)
+After=docker.service aesmd.service network-online.target
+Requires=docker.service
+Wants=aesmd.service network-online.target
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=10
+StartLimitInterval=300
+StartLimitBurst=5
+TimeoutStartSec=120
+EnvironmentFile=/opt/sgx-mvp/.env
+
+ExecStartPre=-/usr/bin/docker stop enclave
+ExecStartPre=-/usr/bin/docker rm enclave
+
+# -v /opt/sgx-mvp/data:/data is load-bearing, not incidental. It holds the
+# sealed pool identity and the replay ledger. Without it those live in the
+# container's writable layer and are destroyed whenever the container is
+# replaced — which is every deploy. The enclave drops to UID/GID 10001 before
+# starting gramine-sgx, so the host directory must be owned by that user.
+#
+# Port 8081 is the socat forwarder in start.sh; the Rust server itself binds
+# 127.0.0.1:8080 inside the enclave.
+ExecStart=/usr/bin/docker run --rm --name enclave \
+    -p 443:8081 \
+    --device /dev/sgx_enclave \
+    --device /dev/sgx_provision \
+    -v /opt/sgx-mvp/data:/data \
+    ghcr.io/relational-network/sgx-mvp:${ENCLAVE_IMAGE_TAG}
+
+ExecStop=/usr/bin/docker stop -t 30 enclave
+
+# Non-fatal: observability only.
+ExecStartPost=/bin/bash -c 'for i in {1..60}; do sleep 2; curl -sfk https://127.0.0.1:8081/health && exit 0; done; echo "enclave health check did not respond within 120s (non-fatal)"'
+
+[Install]
+WantedBy=multi-user.target

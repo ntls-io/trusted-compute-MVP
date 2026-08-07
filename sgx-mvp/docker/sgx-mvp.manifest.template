@@ -1,0 +1,142 @@
+# Nautilus Trusted Compute
+# Copyright (C) 2026 Relational Network
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published
+# by the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# =====================================================================
+# PRODUCTION Gramine manifest — used by Docker builds only.
+#
+# sgx.debug = false is hardcoded. DNS and the CA bundle are baked into the
+# image and measured into MRENCLAVE, so the host cannot substitute them.
+# For local SGX development on the dev VM, see ../sgx-mvp.manifest.template.
+#
+# Everything in this file feeds MRENCLAVE. Changing any value — including the
+# oracle URL and public key below — produces a new measurement, which must be
+# recorded in ../measurements.toml in the same PR.
+# =====================================================================
+
+################################## GRAMINE ####################################
+
+loader.argv = [
+    "gramine-ratls",
+    "/tmp/tlscert.pem",    # Path for the RA-TLS certificate
+    "/tmp/tlskey.pem",     # Path for the private key
+    "{{ self_exe }}"       # Rust application to execute after the cert is created
+]
+
+libos.entrypoint = "{{ entrypoint }}"
+
+loader.log_level = "{{ log_level }}"
+
+loader.env.LD_LIBRARY_PATH = "/lib:{{ arch_libdir }}"
+
+# See https://gramine.readthedocs.io/en/stable/performance.html#glibc-malloc-tuning
+loader.env.MALLOC_ARENA_MAX = "1"
+
+loader.env.RUST_BACKTRACE = "full"
+
+################################# PYTHON ######################################
+
+loader.env.PYTHONHOME = "/usr"
+loader.env.PYTHONPATH = "/usr/lib/python3.8:/usr/lib/python3/dist-packages/"
+loader.env.PYTHONUNBUFFERED = "1"
+
+# Never write .pyc at runtime. Bytecode caches are generated deterministically
+# at image build time (compileall --invalidation-mode unchecked-hash) and
+# measured into MRENCLAVE; a runtime write would be an unmeasured file.
+loader.env.PYTHONDONTWRITEBYTECODE = "1"
+
+# Fixed hash seed so dict/set iteration order inside the interpreter cannot
+# vary between runs of the same measured image.
+loader.env.PYTHONHASHSEED = "0"
+
+############################ ORACLE TRUST ANCHORS #############################
+
+# These are measured into MRENCLAVE, so the oracle public key is pinned by
+# attestation: a host cannot swap the oracle without changing the enclave
+# measurement. Supplied by the Makefile / Docker build args from deploy.mk.
+loader.env.ORACLE_URL = "{{ oracle_url }}"
+loader.env.ORACLE_ED25519_PUBKEY_HEX = "{{ oracle_pubkey_hex }}"
+loader.env.EXPECTED_CLUSTER = "{{ solana_cluster }}"
+loader.env.EXPECTED_PROGRAM_ID = "{{ drt_program_id }}"
+loader.env.ORACLE_TIMEOUT_SECONDS = "15"
+
+################################# MOUNT FS ####################################
+
+fs.mounts = [
+  { path = "/lib", uri = "file:{{ gramine.runtimedir() }}" },
+  { path = "{{ arch_libdir }}", uri = "file:{{ arch_libdir }}" },
+  # tmpfs for the RA-TLS cert/key that gramine-ratls generates at startup.
+  { type = "tmpfs", path = "/tmp" },
+  { path = "{{ entrypoint }}", uri = "file:{{ entrypoint }}" },
+  # Application directory (self_exe binary).
+  { path = "{{ app_dir }}", uri = "file:{{ app_dir }}" },
+  # Python interpreter and libraries.
+  { path = "/usr", uri = "file:/usr" },
+  { path = "/usr/lib/python3.8", uri = "file:/usr/lib/python3.8" },
+
+  # ===== DNS & CA (baked into the image, measured into MRENCLAVE) =====
+  # Static files shipped in the image — the host cannot substitute them at
+  # runtime. Public resolvers because Docker's internal 127.0.0.11 DNS is a
+  # userspace proxy that is NOT reachable from inside a Gramine SGX enclave.
+  { path = "/etc/resolv.conf", uri = "file:{{ app_dir }}/dns/resolv.conf" },
+  { path = "/etc/hosts", uri = "file:{{ app_dir }}/dns/hosts" },
+  { path = "/etc/nsswitch.conf", uri = "file:{{ app_dir }}/dns/nsswitch.conf" },
+  # CA bundle for outbound TLS from the enclave: the oracle assertion request
+  # to ORACLE_URL, and GitHub artifact downloads before Python/WASM execution.
+  { path = "/etc/ssl/certs/ca-certificates.crt", uri = "file:{{ app_dir }}/ca-certificates.crt" },
+
+  # ===== ENCRYPTED PERSISTENT STORAGE =====
+  # Sealed pool identity and the replay ledger. Keyed by _sgx_mrenclave, so a
+  # measurement change makes existing sealed state unreadable — see
+  # ../measurements.toml and the rotation notes in the keys documentation.
+  { path = "/data", uri = "file:{{ data_dir }}", type = "encrypted", key_name = "_sgx_mrenclave" },
+]
+
+############################### SGX: GENERAL ##################################
+
+# Production enclave: debugging disabled. CI asserts debug_enclave = False.
+sgx.debug = false
+sgx.enclave_size = "4G"
+sgx.remote_attestation = "{{ ra_type }}"
+
+sgx.isvprodid = {{ isvprodid }}
+sgx.isvsvn    = {{ isvsvn }}
+
+# Constant, never derived from the host environment: the manifest must depend
+# only on the commit, not on the machine performing the build.
+#
+# Accounts for the main thread, actix worker threads, and Gramine's internal
+# helper threads.
+sgx.max_threads = 8
+
+############################# SGX: TRUSTED FILES ###############################
+
+# Trusted files are measured into MRENCLAVE. The Dockerfile REWRITES this list
+# at build time with an LC_ALL=C sorted, deduplicated enumeration of the
+# Gramine runtime, arch_libdir, and the Python trees, so MRENCLAVE does not
+# depend on filesystem traversal order. The entries below are the seed list.
+sgx.trusted_files = [
+  "file:{{ entrypoint }}",
+  "file:{{ self_exe }}",
+  "file:{{ gramine.runtimedir() }}/",
+  "file:{{ arch_libdir }}/",
+  "file:/usr/bin/python3.8",
+  "file:/usr/lib/python3.8/",
+  "file:/usr/lib/python3/dist-packages/",
+  "file:{{ app_dir }}/dns/resolv.conf",
+  "file:{{ app_dir }}/dns/hosts",
+  "file:{{ app_dir }}/dns/nsswitch.conf",
+  "file:{{ app_dir }}/ca-certificates.crt",
+]

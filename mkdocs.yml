@@ -106,6 +106,8 @@ nav:
   - Installation:
     - SGX MVP Installation Guide: installation/sgx-mvp.md
     - Docker Deployment: installation/docker-deployment.md
+  - Deployment:
+    - Keys and Secrets: deployment/keys-and-secrets.md
   - API Documentation:
     - Overview: api/overview.md
     - Endpoints:

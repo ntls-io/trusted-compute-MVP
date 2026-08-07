@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Relational Network
+#
+# Runs health-check.service every 5 minutes.
+#
+# The CD pipeline stops this timer and drops /opt/sgx-mvp/.deploying while a
+# deploy is in progress, so the checker does not "recover" a container that is
+# deliberately being replaced.
+
+[Unit]
+Description=Run the sgx-mvp enclave health check every 5 minutes
+Requires=health-check.service
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

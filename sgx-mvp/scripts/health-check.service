@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Relational Network
+#
+# One-shot health check for the sgx-mvp enclave. Driven by health-check.timer.
+
+[Unit]
+Description=sgx-mvp enclave health check
+After=enclave.service
+Wants=enclave.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/sgx-mvp/scripts/health-check.sh

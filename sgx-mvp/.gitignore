@@ -18,7 +18,16 @@
 /target
 /OUTPUT
 /result-*
-/Cargo.lock
+
+# Deployment identity (oracle URL + public key). Deliberately not committed;
+# deploy.mk is the committed template that documents it. NOTE: these values are
+# measured into MRENCLAVE, so anyone rebuilding to verify a measurement needs
+# them out of band. See docker/README.md.
+/deploy.local.mk
+
+# Cargo.lock IS committed. It pins the exact dependency graph, which is a
+# prerequisite for a reproducible binary and therefore a reproducible
+# MRENCLAVE. See measurements.toml and docker/README.md.
 
 sgx-mvp.sig
 sgx-mvp.manifest

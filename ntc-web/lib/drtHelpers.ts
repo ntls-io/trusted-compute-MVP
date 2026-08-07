@@ -36,10 +36,12 @@ import {
   Transaction
 } from "@solana/web3.js";
 
+import { SOLANA_ENDPOINT } from "@/lib/config";
+
 // Constants for retry logic and network configuration
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 1000; // 1 second delay between retries
-const DEVNET_URL = clusterApiUrl('devnet');
+const DEVNET_URL = SOLANA_ENDPOINT;
 const COMMITMENT = 'confirmed';
 
 // Minimal wallet shape needed by the helpers below
@@ -82,6 +84,37 @@ export const getConnection = () => new Connection(DEVNET_URL, {
   commitment: COMMITMENT,
   confirmTransactionInitialTimeout: 60000
 });
+
+// On-chain code identity for a DRT. The wallet-signed enclave claim must
+// carry these values from chain state, not from the off-chain database.
+export interface OnChainDrtMetadata {
+  githubUrl: string | null;
+  codeHash: string | null;
+}
+
+/**
+ * Read a DRT's GitHub URL and code hash from the on-chain pool account.
+ * Throws if the DRT type is not configured on the pool.
+ */
+export async function getOnChainDrtMetadata(
+  program: anchor.Program,
+  poolAddress: string,
+  drtType: string
+): Promise<OnChainDrtMetadata> {
+  const poolAccount = await getPoolAccounts(program).pool.fetch(
+    new PublicKey(poolAddress)
+  );
+  const drtConfig = poolAccount.drts.find(
+    (drt: RawDrtAccount) => drt.drtType === drtType || drt.drt_type === drtType
+  );
+  if (!drtConfig) {
+    throw new Error(`DRT type '${drtType}' not found in on-chain pool state`);
+  }
+  return {
+    githubUrl: drtConfig.githubUrl ?? drtConfig.github_url ?? null,
+    codeHash: drtConfig.codeHash ?? drtConfig.code_hash ?? null,
+  };
+}
 
 export function getPoolPda(
   owner: PublicKey,

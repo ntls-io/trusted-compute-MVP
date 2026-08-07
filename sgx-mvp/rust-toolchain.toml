@@ -1,0 +1,15 @@
+# Nautilus Trusted Compute
+# Copyright (C) 2026 Relational Network
+#
+# Pins the exact Rust toolchain for both native `make` and Docker builds.
+# This is critical for MRENCLAVE reproducibility — same Rust version → same
+# binary → same measurement.
+#
+# To update: change the channel here, update the matching `ARG RUST_TOOLCHAIN`
+# in docker/Dockerfile and `rust = ` in measurements.toml, rebuild, and record
+# the new mr_enclave in measurements.toml in the same PR.
+
+[toolchain]
+channel = "1.92.0"
+profile = "minimal"
+components = ["rustfmt", "clippy"]

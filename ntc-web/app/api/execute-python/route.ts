@@ -17,40 +17,13 @@
  */
 
 // app/api/execute-python/route.ts
-import { NextRequest, NextResponse } from 'next/server';
-import fetch from 'node-fetch';
-import https from 'https';
+//
+// Verified Python execution: wallet-signed claim only. The script's GitHub
+// URL and code hash come from the oracle-verified on-chain redemption,
+// never from the client.
+import { NextRequest } from 'next/server';
+import { proxyProtectedRequest } from '@/lib/server/enclaveProxy';
 
 export async function POST(req: NextRequest) {
-  try {
-    const { publicIp, github_url, expected_hash } = await req.json();
-
-    if (!publicIp || !github_url || !expected_hash) {
-      return NextResponse.json({ error: 'Missing publicIp, github_url, or expected_hash' }, { status: 400 });
-    }
-
-    const url = `https://${publicIp}/execute_python`;
-
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ github_url, expected_hash }),
-      agent: new https.Agent({
-        rejectUnauthorized: false, // Ignore self-signed certificate
-      }),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      return NextResponse.json({ error: `Enclave error: ${errorText}` }, { status: response.status });
-    }
-
-    const result = await response.json(); // Expecting JSON output from Python execution
-    return NextResponse.json({ result });
-  } catch (error) {
-    console.error('Proxy error:', error);
-    return NextResponse.json({ error: 'Failed to proxy request to enclave' }, { status: 500 });
-  }
+  return proxyProtectedRequest(req, '/execute_python', { requirePayload: false });
 }

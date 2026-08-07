@@ -1,0 +1,259 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Relational Network
+
+# Enclave CD — deploy the pre-built, pre-signed enclave image to the SGX VM.
+#
+# No building or signing happens here. The image was signed at build time in
+# enclave-ci.yml, so MRENCLAVE and MRSIGNER are already fixed and the signing
+# key never reaches the VM. The VM needs only Docker and SGX hardware.
+#
+# Called by enclave-ci.yml via workflow_call so the CD definition always comes
+# from the same commit as the CI that produced the image.
+#
+# Required SECRETS:
+#   SGX_VM_HOST, SGX_VM_USER, SGX_VM_SSH_KEY
+# Optional:
+#   SGX_VM_HEALTH_URL  public URL for the post-deploy check (default: skipped)
+
+name: Enclave CD
+
+on:
+  workflow_call:
+    inputs:
+      commit_sha:
+        description: 'Commit to deploy (image tag is sha-<commit>)'
+        required: true
+        type: string
+      mr_enclave:
+        description: 'MRENCLAVE of the built image'
+        required: false
+        type: string
+      mr_signer:
+        description: 'MRSIGNER of the built image'
+        required: false
+        type: string
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Image tag to deploy (e.g. sha-abc123). Empty uses staging-latest.'
+        required: false
+        type: string
+
+# Two concurrent deploys would fight over the container and the sealed /data.
+concurrency:
+  group: sgx-enclave-deploy
+  cancel-in-progress: false
+
+env:
+  IMAGE_NAME: ghcr.io/relational-network/sgx-mvp
+
+jobs:
+  check-vm-online:
+    name: Check SGX VM is reachable
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SGX_VM_SSH_KEY }}" > ~/.ssh/sgx_key
+          chmod 600 ~/.ssh/sgx_key
+
+      - name: Check SSH connectivity
+        timeout-minutes: 2
+        run: |
+          ssh -o ConnectTimeout=30 -o StrictHostKeyChecking=no -i ~/.ssh/sgx_key \
+            "${{ secrets.SGX_VM_USER }}@${{ secrets.SGX_VM_HOST }}" \
+            'echo "VM is online"' || {
+              echo "::error::SGX VM is not reachable. Is it running?"
+              exit 1
+            }
+
+  deploy:
+    name: Deploy pre-built image
+    runs-on: ubuntu-latest
+    needs: check-vm-online
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha || github.sha }}
+
+      - name: Copy service units to the VM
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SGX_VM_HOST }}
+          username: ${{ secrets.SGX_VM_USER }}
+          key: ${{ secrets.SGX_VM_SSH_KEY }}
+          source: sgx-mvp/scripts/
+          target: /tmp/
+
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMMIT_SHA: ${{ inputs.commit_sha || github.sha }}
+          MANUAL_TAG: ${{ inputs.image_tag || '' }}
+          EXPECTED_MRENCLAVE: ${{ inputs.mr_enclave }}
+          EXPECTED_MRSIGNER: ${{ inputs.mr_signer }}
+        with:
+          host: ${{ secrets.SGX_VM_HOST }}
+          username: ${{ secrets.SGX_VM_USER }}
+          key: ${{ secrets.SGX_VM_SSH_KEY }}
+          command_timeout: 15m
+          envs: GHCR_TOKEN,COMMIT_SHA,MANUAL_TAG,EXPECTED_MRENCLAVE,EXPECTED_MRSIGNER
+          script: |
+            set -e
+
+            ENV_FILE=/opt/sgx-mvp/.env
+            IMAGE_NAME=ghcr.io/relational-network/sgx-mvp
+
+            cleanup() {
+                echo "=== Cleanup: re-enabling health-check timer ==="
+                sudo systemctl start health-check.timer 2>/dev/null || true
+                sudo rm -f /opt/sgx-mvp/.deploying
+            }
+            trap cleanup EXIT
+
+            if [ -n "$MANUAL_TAG" ]; then
+                IMAGE="${IMAGE_NAME}:${MANUAL_TAG}"
+            elif [ -n "$COMMIT_SHA" ]; then
+                IMAGE="${IMAGE_NAME}:sha-${COMMIT_SHA}"
+            else
+                IMAGE="${IMAGE_NAME}:staging-latest"
+            fi
+            echo "Deploying $IMAGE"
+
+            # Both device naming schemes are in use depending on driver/VM image.
+            if [ ! -e /dev/sgx/enclave ] && [ ! -e /dev/sgx_enclave ]; then
+                echo "ERROR: no SGX device found on this host"
+                exit 1
+            fi
+
+            sudo mkdir -p /opt/sgx-mvp
+            sudo touch "$ENV_FILE"
+
+            echo "=== Suspending health-check during deployment ==="
+            sudo systemctl stop health-check.timer 2>/dev/null || true
+            sudo touch /opt/sgx-mvp/.deploying
+
+            echo "=== Pulling pre-built image ==="
+            echo "$GHCR_TOKEN" | sudo docker login ghcr.io -u "${GITHUB_ACTOR:-github}" --password-stdin
+            sudo docker pull "$IMAGE" || {
+                echo "::error::Failed to pull $IMAGE — did enclave-ci.yml push it?"
+                exit 1
+            }
+
+            echo "=== Measurements from the pulled image ==="
+            sudo docker run --rm --entrypoint gramine-sgx-sigstruct-view \
+                "$IMAGE" /app/sgx-mvp.sig > /tmp/measurements.txt
+            cat /tmp/measurements.txt
+
+            MRENCLAVE=$(grep "mr_enclave:" /tmp/measurements.txt | awk '{print $2}' | head -1)
+            MRSIGNER=$(grep "mr_signer:"  /tmp/measurements.txt | awk '{print $2}' | head -1)
+
+            # The image must be exactly what CI measured. A mismatch means the
+            # tag was repointed between build and deploy.
+            if [ -n "$EXPECTED_MRENCLAVE" ] && [ "$MRENCLAVE" != "$EXPECTED_MRENCLAVE" ]; then
+                echo "::error::Pulled image MRENCLAVE does not match the CI build!"
+                echo "::error::Pulled: $MRENCLAVE"
+                echo "::error::CI:     $EXPECTED_MRENCLAVE"
+                exit 1
+            fi
+
+            # A changed MRSIGNER means the enclave was signed with a different
+            # key. Every client pinning the old MRSIGNER would reject it, so
+            # stop rather than silently swap the identity.
+            PREV_MRSIGNER=$(grep "^EXPECTED_MRSIGNER=" "$ENV_FILE" 2>/dev/null | cut -d= -f2)
+            if [ -n "$PREV_MRSIGNER" ] && [ "$PREV_MRSIGNER" != "$MRSIGNER" ]; then
+                echo "::error::MRSIGNER CHANGED — the enclave was signed with a different key."
+                echo "::error::Old: $PREV_MRSIGNER"
+                echo "::error::New: $MRSIGNER"
+                echo "If intentional, update EXPECTED_MRSIGNER in $ENV_FILE manually."
+                exit 1
+            fi
+
+            echo "=== Recording measurements and image tag ==="
+            IMAGE_TAG="${IMAGE#${IMAGE_NAME}:}"
+            for kv in "ENCLAVE_IMAGE_TAG=${IMAGE_TAG}" \
+                      "EXPECTED_MRENCLAVE=${MRENCLAVE}" \
+                      "EXPECTED_MRSIGNER=${MRSIGNER}"; do
+                key="${kv%%=*}"
+                if grep -q "^${key}=" "$ENV_FILE"; then
+                    sudo sed -i "s|^${key}=.*|${kv}|" "$ENV_FILE"
+                else
+                    echo "${kv}" | sudo tee -a "$ENV_FILE" > /dev/null
+                fi
+            done
+
+            echo "=== Installing changed service units ==="
+            for unit in enclave.service health-check.service health-check.timer; do
+                if [ -f "/tmp/sgx-mvp/scripts/$unit" ] && \
+                   ! diff -q "/tmp/sgx-mvp/scripts/$unit" "/etc/systemd/system/$unit" >/dev/null 2>&1; then
+                    echo "installing $unit"
+                    sudo cp "/tmp/sgx-mvp/scripts/$unit" "/etc/systemd/system/$unit"
+                    sudo chmod 644 "/etc/systemd/system/$unit"
+                fi
+            done
+            if [ -f /tmp/sgx-mvp/scripts/health-check.sh ]; then
+                sudo mkdir -p /opt/sgx-mvp/scripts
+                sudo cp /tmp/sgx-mvp/scripts/health-check.sh /opt/sgx-mvp/scripts/health-check.sh
+                sudo chmod +x /opt/sgx-mvp/scripts/health-check.sh
+            fi
+            rm -rf /tmp/sgx-mvp
+            sudo systemctl daemon-reload
+
+            # Pre-create the sealed-state directory with the image's runtime
+            # UID/GID (10001), which start.sh drops to before gramine-sgx.
+            sudo install -d -m 0750 -o 10001 -g 10001 /opt/sgx-mvp/data
+
+            echo "=== Restarting enclave ==="
+            sudo systemctl stop enclave 2>/dev/null || true
+            sudo docker rm -f enclave 2>/dev/null || true
+            sudo systemctl enable enclave 2>/dev/null || true
+            sudo systemctl start enclave
+            sleep 15
+
+            RUNNING_IMAGE=$(sudo docker inspect enclave --format '{{.Config.Image}}' 2>/dev/null || echo NONE)
+            if [ "$RUNNING_IMAGE" != "$IMAGE" ]; then
+                echo "::error::Wrong image running: expected $IMAGE, got $RUNNING_IMAGE"
+                sudo journalctl -u enclave --no-pager -n 50
+                exit 1
+            fi
+            echo "Correct image running"
+
+            echo "=== Health check ==="
+            for i in 1 2 3 4 5 6; do
+                if curl -sfk --max-time 10 https://127.0.0.1:8081/health; then
+                    echo ""
+                    echo "Enclave is healthy"
+                    break
+                fi
+                echo "waiting for enclave... ($i/6)"
+                sleep 10
+            done
+            curl -sfk --max-time 10 https://127.0.0.1:8081/health > /dev/null || {
+                echo "::error::Enclave health check failed"
+                sudo journalctl -u enclave --no-pager -n 50
+                exit 1
+            }
+
+            sudo docker image prune -f
+
+            echo "=============================================="
+            echo "  Deployment complete"
+            echo "  MRENCLAVE: $MRENCLAVE"
+            echo "  MRSIGNER:  $MRSIGNER"
+            echo "  Image:     $IMAGE"
+            echo "=============================================="
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## Enclave deployment"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Image | \`${IMAGE_NAME}:sha-${{ inputs.commit_sha || github.sha }}\` |"
+            echo "| MRENCLAVE | \`${{ inputs.mr_enclave }}\` |"
+            echo "| MRSIGNER | \`${{ inputs.mr_signer }}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"

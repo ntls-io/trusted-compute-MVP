@@ -25,7 +25,10 @@ A framework for privacy-preserving, verifiable computation over sensitive data, 
 - **Execution Service & Enclave** ([sgx-mvp](sgx-mvp/)): SGX enclave that executes WASM and Python workloads over sealed data, producing attested results.
 - **Front-end** ([ntc-web](ntc-web/)): Next.js application for managing data pools, digital rights tokens (DRTs), and enclave jobs.
 - **Smart Contract** ([drt-manager](drt-manager/)): Solana program governing DRT issuance and trusted compute orchestration.
-- **Oracle Node**: TBD.
+- **Oracle Node**: an on-demand chain-claim verifier, implemented as a self-contained router
+  inside the sibling `devops-acr` service. It verifies finalized Solana events and returns a
+  short-lived signed assertion; the enclave pins its public key by measurement. See
+  [Keys and Secrets](docs/deployment/keys-and-secrets.md).
 
 ## Documentation
 

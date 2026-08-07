@@ -17,40 +17,13 @@
  */
 
 // app/api/execute-wasm/route.ts
-import { NextRequest, NextResponse } from 'next/server';
-import fetch from 'node-fetch';
-import https from 'https';
+//
+// Verified WASM execution: wallet-signed claim only. The binary's GitHub
+// URL/hash come from the oracle-verified on-chain redemption and the schema
+// from the enclave's sealed pool identity, never from the client.
+import { NextRequest } from 'next/server';
+import { proxyProtectedRequest } from '@/lib/server/enclaveProxy';
 
 export async function POST(req: NextRequest) {
-  try {
-    const { publicIp, github_url, expected_hash, json_schema } = await req.json();
-
-    if (!publicIp || !github_url || !expected_hash || !json_schema) {
-      return NextResponse.json({ error: 'Missing publicIp, github_url, expected_hash, or json_schema' }, { status: 400 });
-    }
-
-    const url = `https://${publicIp}/execute_wasm`;
-
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ github_url, expected_hash, json_schema }),
-      agent: new https.Agent({
-        rejectUnauthorized: false, // Ignore self-signed certificate
-      }),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      return NextResponse.json({ error: `Enclave error: ${errorText}` }, { status: response.status });
-    }
-
-    const result = await response.json(); // Expecting JSON output from WASM execution
-    return NextResponse.json({ result });
-  } catch (error) {
-    console.error('Proxy error:', error);
-    return NextResponse.json({ error: 'Failed to proxy request to enclave' }, { status: 500 });
-  }
+  return proxyProtectedRequest(req, '/execute_wasm', { requirePayload: false });
 }

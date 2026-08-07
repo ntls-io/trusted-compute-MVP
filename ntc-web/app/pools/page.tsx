@@ -22,6 +22,8 @@ import React, { useState, useEffect, useCallback, JSX } from 'react'
 import { BN, AnchorProvider } from "@coral-xyz/anchor"
 import { useDrtProgram } from "@/lib/useDrtProgram"
 import { buildPoolCreationTx, formatDrtConfigs } from "@/lib/drtHelpers"
+import { buildClaim, signClaim, walletSupportsSignMessage, MAX_GITHUB_URL_LENGTH } from "@/lib/enclaveClaim"
+import { postToEnclave } from "@/lib/enclaveApi"
 import { useWallet } from "@solana/wallet-adapter-react"
 import { RefreshCcw, Check, AlertTriangle, Wallet, Copy } from "lucide-react"
 
@@ -447,7 +449,8 @@ function PoolCreationStep({
   dataFile
 }: PoolCreationStepProps) {
   const program = useDrtProgram();
-  const { publicKey } = useWallet();
+  const wallet = useWallet();
+  const { publicKey } = wallet;
 
   const [poolName, setPoolName] = useState("");
   const [description, setDescription] = useState("");
@@ -665,37 +668,77 @@ function PoolCreationStep({
       if (!poolName.trim()) throw new Error("Pool name is required");
       if (!description.trim()) throw new Error("Pool description is required");
       if (!poolNameLocked) throw new Error("Please lock the pool name before creating");
-  
+
+      // The enclave initialization claim needs a wallet message signature;
+      // check support before anything is created on-chain.
+      if (!skipVmCreation && !walletSupportsSignMessage(wallet)) {
+        throw new Error(
+          "Connected wallet does not support message signing (signMessage), which is required to initialize the enclave data pool."
+        );
+      }
+
+      // Pull the real code catalog so the on-chain DRT configs carry the
+      // actual GitHub URLs and SHA-256 hashes; compute DRTs with missing
+      // metadata are rejected rather than created (the enclave would refuse
+      // them anyway).
+      const catalogResponse = await fetch('/api/digital-rights');
+      if (!catalogResponse.ok) throw new Error("Failed to load the DRT code catalog");
+      const catalog: { name: string; githubUrl: string | null; hash: string | null }[] =
+        await catalogResponse.json();
+      const findCatalogEntry = (keyword: string) =>
+        catalog.find((entry) => entry.name.toLowerCase().includes(keyword));
+      const requireComputeMetadata = (drtType: string, keyword: string) => {
+        const entry = findCatalogEntry(keyword);
+        if (!entry?.githubUrl || !entry?.hash) {
+          throw new Error(
+            `Cannot create ${drtType}: the code catalog has no GitHub URL / SHA-256 hash for it. Compute DRTs must carry on-chain code metadata.`
+          );
+        }
+        if (
+          !entry.githubUrl.startsWith("https://github.com/") ||
+          entry.githubUrl.length > MAX_GITHUB_URL_LENGTH
+        ) {
+          throw new Error(`Cannot create ${drtType}: catalog GitHub URL is malformed or too long`);
+        }
+        if (!/^[0-9a-f]{64}$/.test(entry.hash)) {
+          throw new Error(`Cannot create ${drtType}: catalog code hash is not a 64-char SHA-256`);
+        }
+        return { githubUrl: entry.githubUrl, codeHash: entry.hash };
+      };
+
       // Prepare DRT configurations for the pool creation
       const drtConfigs = [];
-      
+
       if (appendSelected) {
         drtConfigs.push({
           drtType: "append",
           supply: new BN(appendSupply),
           cost: new BN(appendCost),
-          githubUrl: "https://github.com/nautilus-project/append",
-          codeHash: undefined // Changed from null to undefined to match TypeScript expectations
+          // Append is native to the platform; it carries no code reference.
+          githubUrl: undefined,
+          codeHash: undefined
         });
       }
-      
+
       if (wComputeSelected) {
+        const metadata = requireComputeMetadata("w_compute_median", "wasm");
         drtConfigs.push({
           drtType: "w_compute_median",
           supply: new BN(wComputeSupply),
           cost: new BN(wComputeCost),
-          githubUrl: "https://github.com/nautilus-project/w_compute_median",
-          codeHash: undefined // Changed from null to undefined
+          githubUrl: metadata.githubUrl,
+          codeHash: metadata.codeHash
         });
       }
-      
+
       if (pyComputeSelected) {
+        const metadata = requireComputeMetadata("py_compute_median", "python");
         drtConfigs.push({
           drtType: "py_compute_median",
           supply: new BN(pyComputeSupply),
           cost: new BN(pyComputeCost),
-          githubUrl: "https://github.com/nautilus-project/py_compute_median",
-          codeHash: undefined // Changed from null to undefined
+          githubUrl: metadata.githubUrl,
+          codeHash: metadata.codeHash
         });
       }
   
@@ -781,7 +824,33 @@ function PoolCreationStep({
           }
         }
         updateProgress(2, "Enclave deployed successfully", 'success');
-  
+
+        if (!publicIp) throw new Error("Public IP not available from TEE deployment");
+
+        // Attestation preflight: verify the expected measurement before
+        // provisioning any data to the enclave.
+        updateProgress(3, "Verifying enclave attestation", "loading");
+        if (!measurements || !vmName) {
+          throw new Error("Enclave measurements or VM name unavailable; cannot attest before provisioning data");
+        }
+        const attestationResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/attestation`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            vm_name: vmName,
+            mrenclave: measurements.mrenclave,
+            mrsigner: measurements.mrsigner,
+            isvprodid: measurements.isvProdId,
+            isvsvn: measurements.isvSvn,
+            port: 443,
+          }),
+        });
+        const attestationData = attestationResponse.ok ? await attestationResponse.json() : null;
+        if (!attestationData?.success) {
+          throw new Error("Enclave attestation preflight failed; refusing to provision data");
+        }
+        updateProgress(3, "Enclave attestation verified", "success");
+
         // Create the data pool in the enclave
         updateProgress(3, "Creating new data pool in the enclave", "loading");
         const dataReader = new FileReader();
@@ -798,29 +867,34 @@ function PoolCreationStep({
           dataReader.onerror = () => reject(new Error("Failed to read data file"));
           dataReader.readAsText(dataFile!);
         });
-  
+
         const dataJson = await dataPromise;
-  
-        if (!publicIp) throw new Error("Public IP not available from TEE deployment");
-  
-        const proxyResponse = await fetch("/api/create-data-pool", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ publicIp, data: dataJson }),
+
+        // The wallet signs a pool_initialize claim binding the creation tx,
+        // the pool PDA, and the exact schema+seed payload.
+        const payload = JSON.stringify({ schema: schemaDefinition, data: dataJson });
+        const claim = await buildClaim({
+          action: "pool_initialize",
+          tx: sig,
+          pool: chainAddress,
+          claimant: publicKey.toBase58(),
+          payload,
         });
-  
-        if (!proxyResponse.ok) {
-          const errorData = await proxyResponse.json();
-          throw new Error(`Failed to create data pool via proxy: ${errorData.error}`);
-        }
-  
-        const proxyResult = await proxyResponse.json();
-        console.log("Proxy response:", proxyResult);
-  
-        if (proxyResult.result === "Data pool created, sealed, and saved successfully") {
+        updateProgress(3, "Awaiting claim signature", "loading", "Please sign the enclave authorization message");
+        const walletSignature = await signClaim(wallet, claim);
+
+        updateProgress(3, "Creating data pool in the enclave", "loading", "Waiting for on-chain finality and oracle verification");
+        const result = await postToEnclave<string>("/api/create-data-pool", {
+          publicIp,
+          claim,
+          wallet_signature: walletSignature,
+          payload,
+        });
+
+        if (result === "Data pool created, sealed, and saved successfully") {
           updateProgress(3, "Data pool created in enclave", "success");
         } else {
-          throw new Error(`Unexpected response from enclave via proxy: ${proxyResult.result}`);
+          throw new Error(`Unexpected response from enclave via proxy: ${result}`);
         }
       }
   
