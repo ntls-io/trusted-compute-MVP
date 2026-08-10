@@ -1,0 +1,5 @@
+node_modules/
+package-lock.json
+# Written by azure-smoke-test.ts run 1 and replayed by the RESTARTED=1 run;
+# contains ephemeral keys for a single smoke run, not a durable secret.
+.smoke-state.json

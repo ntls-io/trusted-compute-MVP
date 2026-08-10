@@ -177,9 +177,9 @@ solana airdrop 2 --url devnet
 
 The single source of truth is the committed IDL (`ntc-web/lib/idl/drt_manager.json`, field `address`).
 `ntc-web/lib/config.ts` reads it from there, and the oracle and enclave carry matching defaults. There is
-deliberately **no environment variable** for it: the wallet-signed claim carries a `program` field that must
-match both the transaction Anchor sent and the value measured into MRENCLAVE, and an override let those
-silently diverge. To target a different deployment, change the IDL.
+deliberately **no environment variable** for it: the enclave refuses any redemption whose transaction does not
+reference the program measured into its MRENCLAVE, and an override let the address the frontend transacts
+against silently diverge from that. To target a different deployment, change the IDL.
 
 ---
 
