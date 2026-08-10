@@ -27,6 +27,7 @@ import {
   getAssociatedTokenAddressSync,
 } from "@/lib/solanaToken";
 import {
+  type Commitment,
   PublicKey,
   SystemProgram,
   SYSVAR_RENT_PUBKEY,
@@ -54,6 +55,24 @@ interface WalletLike {
 /** A wallet that can sign a transaction without immediately sending it. */
 export interface SigningWallet extends WalletLike {
   signTransaction?: <T extends Transaction>(transaction: T) => Promise<T>;
+  signAllTransactions?: <T extends Transaction>(transactions: T[]) => Promise<T[]>;
+}
+
+/**
+ * Raised when a multi-transaction operation fails partway. The earlier
+ * transactions are already on-chain and cannot be rolled back, so the caller
+ * has to surface what did land rather than report a clean failure.
+ */
+export class PartialBatchError extends Error {
+  constructor(
+    message: string,
+    readonly landed: string[],
+    readonly failedIndex: number,
+    readonly cause: unknown
+  ) {
+    super(message);
+    this.name = "PartialBatchError";
+  }
 }
 
 /** A sent transaction, including the exact bytes the wallet signed. */
@@ -81,43 +100,170 @@ export async function signSendWithMemo(
   wallet: SigningWallet,
   transaction: Transaction,
   memoIx: TransactionInstruction,
-  updateStatus?: (status: string) => void
+  updateStatus?: (status: string) => void,
+  commitment: Commitment = COMMITMENT
 ): Promise<SentTransaction> {
+  const [sent] = await signSendBatchWithMemo(
+    connection,
+    wallet,
+    [transaction],
+    memoIx,
+    updateStatus,
+    commitment
+  );
+  return sent;
+}
+
+/**
+ * Serialized size of an unsigned transaction, for the packing budget.
+ *
+ * Measured from the compiled message rather than `serialize()`, which asserts
+ * on oversize and would throw before the caller can report a useful error.
+ */
+function unsignedSize(transaction: Transaction): number {
+  const message = transaction.serializeMessage();
+  const signers = transaction.compileMessage().header.numRequiredSignatures;
+  // compact-u16 length prefix on the signature array
+  const prefix = signers < 0x80 ? 1 : 2;
+  return prefix + signers * 64 + message.length;
+}
+
+/**
+ * Greedily pack instructions into as few transactions as fit under the packet
+ * limit, preserving order.
+ *
+ * Pool creation with three DRTs is 1274 bytes as a single transaction — over
+ * the 1232 limit before any memo is added — so it has to be split. Packing
+ * rather than hardcoding a split keeps this correct if the DRT catalogue grows.
+ */
+export function packInstructions(
+  instructions: TransactionInstruction[],
+  feePayer: PublicKey
+): Transaction[] {
+  // Any 32-byte value serializes to the same length as a real blockhash.
+  const placeholder = bs58.encode(new Uint8Array(32).fill(1));
+  const prepare = (ixs: TransactionInstruction[]) => {
+    const tx = new Transaction().add(...ixs);
+    tx.feePayer = feePayer;
+    tx.recentBlockhash = placeholder;
+    return tx;
+  };
+
+  const batches: TransactionInstruction[][] = [];
+  let current: TransactionInstruction[] = [];
+  for (const ix of instructions) {
+    const candidate = [...current, ix];
+    if (current.length > 0 && unsignedSize(prepare(candidate)) > MAX_TRANSACTION_LEN) {
+      batches.push(current);
+      current = [ix];
+    } else {
+      current = candidate;
+    }
+    if (unsignedSize(prepare(current)) > MAX_TRANSACTION_LEN) {
+      throw new Error(
+        "A single instruction does not fit in one Solana transaction; it cannot be batched"
+      );
+    }
+  }
+  if (current.length > 0) batches.push(current);
+  return batches.map(prepare);
+}
+
+/**
+ * Sign a batch of transactions with one wallet approval and send them in
+ * order, attaching the commitment memo to the first.
+ *
+ * The memo goes on `transactions[0]`, which must be the transaction carrying
+ * the event the enclave is authorized against — `createPoolWithDrts` or
+ * `redeemDrt`. Later transactions are follow-on setup and carry no commitment.
+ *
+ * They are sent sequentially because later transactions depend on accounts the
+ * earlier ones create; Solana gives no ordering guarantee within a block.
+ */
+export async function signSendBatchWithMemo(
+  connection: Connection,
+  wallet: SigningWallet,
+  transactions: Transaction[],
+  memoIx: TransactionInstruction,
+  updateStatus?: (status: string) => void,
+  commitment: Commitment = COMMITMENT
+): Promise<SentTransaction[]> {
   if (!wallet.publicKey) throw new Error("Wallet not connected");
-  if (typeof wallet.signTransaction !== "function") {
+  if (transactions.length === 0) throw new Error("No transactions to send");
+  const signAll = wallet.signAllTransactions;
+  const signOne = wallet.signTransaction;
+  if (transactions.length > 1 ? typeof signAll !== "function" : typeof signOne !== "function") {
     throw new Error(
       "Connected wallet cannot sign transactions without sending them, which " +
         "is required to authorize enclave operations."
     );
   }
 
-  transaction.add(memoIx);
-  transaction.feePayer = wallet.publicKey;
+  transactions[0].add(memoIx);
   const { blockhash, lastValidBlockHeight } =
-    await connection.getLatestBlockhash(COMMITMENT);
-  transaction.recentBlockhash = blockhash;
-
-  updateStatus?.("Waiting for wallet signature…");
-  const signed = await wallet.signTransaction(transaction);
-  const raw = signed.serialize();
-  if (raw.length > MAX_TRANSACTION_LEN) {
-    throw new Error(
-      `Transaction is ${raw.length} bytes, over Solana's ${MAX_TRANSACTION_LEN}-byte limit`
-    );
+    await connection.getLatestBlockhash(commitment);
+  for (const transaction of transactions) {
+    transaction.feePayer = wallet.publicKey;
+    transaction.recentBlockhash = blockhash;
+    const size = unsignedSize(transaction);
+    if (size > MAX_TRANSACTION_LEN) {
+      throw new Error(
+        `Transaction is ${size} bytes, over Solana's ${MAX_TRANSACTION_LEN}-byte limit`
+      );
+    }
   }
 
-  const tx = await connection.sendRawTransaction(raw, {
-    preflightCommitment: COMMITMENT,
-  });
-  await connection.confirmTransaction(
-    { signature: tx, blockhash, lastValidBlockHeight },
-    COMMITMENT
+  // One approval for the whole batch.
+  updateStatus?.(
+    transactions.length > 1
+      ? `Waiting for wallet signature (${transactions.length} transactions)…`
+      : "Waiting for wallet signature…"
   );
-  return {
-    tx,
-    signature: bs58.decode(tx),
-    signedTransaction: Uint8Array.from(raw),
-  };
+  const signed =
+    transactions.length > 1
+      ? await signAll!(transactions)
+      : [await signOne!(transactions[0])];
+
+  const sent: SentTransaction[] = [];
+  for (const [index, transaction] of signed.entries()) {
+    if (signed.length > 1) {
+      updateStatus?.(`Sending transaction ${index + 1} of ${signed.length}…`);
+    }
+    const raw = transaction.serialize();
+    try {
+      const tx = await connection.sendRawTransaction(raw, {
+        preflightCommitment: commitment,
+      });
+      updateStatus?.(
+        commitment === "finalized"
+          ? "Waiting for on-chain finality (usually 10-30s)…"
+          : "Confirming on-chain…"
+      );
+      await connection.confirmTransaction(
+        { signature: tx, blockhash, lastValidBlockHeight },
+        commitment
+      );
+      sent.push({
+        tx,
+        signature: bs58.decode(tx),
+        signedTransaction: Uint8Array.from(raw),
+      });
+    } catch (error) {
+      if (index === 0) throw error;
+      // Earlier transactions are already on-chain. Say so, with their
+      // signatures, rather than reporting a clean failure the caller might
+      // retry from scratch against a pool that already exists.
+      throw new PartialBatchError(
+        `Transaction ${index + 1} of ${signed.length} failed after ${index} ` +
+          `already landed on-chain (${sent.map((s) => s.tx).join(", ")}). ` +
+          `The pool exists but its DRT mints are not fully initialised.`,
+        sent.map((s) => s.tx),
+        index,
+        error
+      );
+    }
+  }
+  return sent;
 }
 
 // Raw on-chain DRT/pool account shapes (Anchor account fetch results aren't
@@ -634,12 +780,17 @@ export async function redeemDrt(
         })
         .instruction();
 
+      // Wait for finality here rather than at `confirmed`. The oracle reads
+      // the transaction at finalized commitment, so confirming early just
+      // moves the wait into the enclave call, where it surfaces as a series of
+      // failed requests instead of a progress message.
       const sent = await signSendWithMemo(
         program.provider.connection,
         wallet,
         new Transaction().add(redeemIx),
         memoIx,
-        updateStatus
+        updateStatus,
+        "finalized"
       );
 
       const ownershipTokenReceived = drtType === "append";
@@ -837,7 +988,10 @@ export async function buildPoolCreationTx(
   poolName: string,
   drtConfigs: ReturnType<typeof formatDrtConfigs>,   // reuse your formatter
   ownershipSupply: BN
-): Promise<{ tx: anchor.web3.Transaction; pdas: ReturnType<typeof derivePoolPdas> }> {
+): Promise<{
+  transactions: anchor.web3.Transaction[];
+  pdas: ReturnType<typeof derivePoolPdas>;
+}> {
   const owner = provider.wallet.publicKey;
   const { poolPda, feeVaultPda, ownershipMintPda, drtMintPdas } =
         derivePoolPdas(poolName, drtConfigs, program.programId, owner);
@@ -903,9 +1057,20 @@ export async function buildPoolCreationTx(
     })
   );
 
-  /* -- build tx ------------------------------------------------------- */
-  const tx = new anchor.web3.Transaction()
-    .add(createPoolIx, ...initMintIxs, ...createVaultIxs, ...mintSupplyIxs);
+  /* -- build transactions --------------------------------------------- */
+  // createPoolWithDrts goes alone in the first transaction: it emits the
+  // PoolCreated event the enclave is authorized against, so it is the one the
+  // commitment memo must ride in. With three DRTs the mint setup no longer
+  // fits alongside it, so the rest is packed into follow-on transactions and
+  // signed in the same approval.
+  const setupIxs = [...initMintIxs, ...createVaultIxs, ...mintSupplyIxs];
+  const transactions = [
+    new anchor.web3.Transaction().add(createPoolIx),
+    ...packInstructions(setupIxs, owner),
+  ];
 
-  return { tx, pdas: { poolPda, feeVaultPda, ownershipMintPda, drtMintPdas } };
+  return {
+    transactions,
+    pdas: { poolPda, feeVaultPda, ownershipMintPda, drtMintPdas },
+  };
 }

@@ -442,7 +442,7 @@ const JoinPoolDialog = ({ pool, drtInstances, fetchUserData, onAttest }: { pool:
       if (!sent.ownershipTokenReceived) throw new Error("Ownership token not received");
       updateProgress(2, "Append DRT redeemed, ownership token received", "success", `Tx: ${sent.tx}`);
 
-      updateProgress(2, "Appending data to enclave", "loading", "Waiting for on-chain finality and oracle verification");
+      updateProgress(2, "Appending data to enclave", "loading", "Verifying the redemption with the oracle and sealing the data");
       const result = await postToEnclave<string>("/api/append-data", {
         publicIp,
         ...buildEnclaveRequest({

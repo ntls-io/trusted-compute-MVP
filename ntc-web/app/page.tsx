@@ -368,7 +368,8 @@ const EnclaveDialog = ({ pool, onAttest }: { pool: Pool; onAttest: () => Promise
 async function redeemForExecute(
   program: anchor.Program<anchor.Idl>,
   wallet: WalletContextState,
-  drtInstance: DRTInstance
+  drtInstance: DRTInstance,
+  onStatus: (message: string) => void
 ): Promise<EnclaveRequest> {
   if (!wallet.publicKey) throw new Error("Wallet not connected");
   const chainDrtType = mapDrtTypeForChain(drtInstance.drt.name);
@@ -393,7 +394,7 @@ async function redeemForExecute(
     drtInstance.pool.chainAddress,
     chainDrtType,
     memoInstruction(memoFor(ephemeral.publicKey, "", code)),
-    (msg) => console.log(msg)
+    onStatus
   );
   console.log("Solana DRT redemption successful, tx:", sent.tx);
   return buildEnclaveRequest({
@@ -421,10 +422,12 @@ const PythonExecutionDialog = ({
   wallet: WalletContextState;
 }) => {
   const [isRedeeming, setIsRedeeming] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
   const [executionResult, setExecutionResult] = useState<ExecutionResult | null>(null);
 
   const handleRedeem = async () => {
     setIsRedeeming(true);
+    setStatus(null);
     setExecutionResult(null);
 
     try {
@@ -433,11 +436,13 @@ const PythonExecutionDialog = ({
 
       // Attestation preflight: verify the enclave measurement before any
       // redemption or upload is attempted.
+      setStatus("Verifying enclave attestation…");
       if (!(await onAttest())) {
         throw new Error("Enclave attestation preflight failed; compute operations are disabled");
       }
 
-      const request = await redeemForExecute(program, wallet, drtInstance);
+      const request = await redeemForExecute(program, wallet, drtInstance, setStatus);
+      setStatus("Running in the enclave…");
 
       const pythonResult = await onRedeem(request);
       setExecutionResult(pythonResult);
@@ -454,6 +459,7 @@ const PythonExecutionDialog = ({
       setExecutionResult({ success: false, error: (err as Error).message });
     } finally {
       setIsRedeeming(false);
+      setStatus(null);
     }
   };
 
@@ -526,6 +532,15 @@ const PythonExecutionDialog = ({
             </Button>
           </div>
 
+          {isRedeeming && status && (
+            <Alert className="bg-blue-50 border-blue-200">
+              <AlertDescription className="flex items-center gap-2 text-blue-900">
+                <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                {status}
+              </AlertDescription>
+            </Alert>
+          )}
+
           {executionResult && (
             <div className="space-y-2">
               <h3 className="text-lg font-semibold">Execution Result</h3>
@@ -570,10 +585,12 @@ const WasmExecutionDialog = ({
   wallet: WalletContextState;
 }) => {
   const [isRedeeming, setIsRedeeming] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
   const [executionResult, setExecutionResult] = useState<ExecutionResult | null>(null);
 
   const handleRedeem = async () => {
     setIsRedeeming(true);
+    setStatus(null);
     setExecutionResult(null);
 
     try {
@@ -582,11 +599,13 @@ const WasmExecutionDialog = ({
 
       // Attestation preflight: verify the enclave measurement before any
       // redemption or upload is attempted.
+      setStatus("Verifying enclave attestation…");
       if (!(await onAttest())) {
         throw new Error("Enclave attestation preflight failed; compute operations are disabled");
       }
 
-      const request = await redeemForExecute(program, wallet, drtInstance);
+      const request = await redeemForExecute(program, wallet, drtInstance, setStatus);
+      setStatus("Running in the enclave…");
 
       const wasmResult = await onRedeem(request);
       setExecutionResult(wasmResult);
@@ -603,6 +622,7 @@ const WasmExecutionDialog = ({
       setExecutionResult({ success: false, error: (err as Error).message });
     } finally {
       setIsRedeeming(false);
+      setStatus(null);
     }
   };
 
@@ -674,6 +694,15 @@ const WasmExecutionDialog = ({
               {buttonProps.text}
             </Button>
           </div>
+
+          {isRedeeming && status && (
+            <Alert className="bg-blue-50 border-blue-200">
+              <AlertDescription className="flex items-center gap-2 text-blue-900">
+                <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                {status}
+              </AlertDescription>
+            </Alert>
+          )}
 
           {executionResult && (
             <div className="space-y-2">

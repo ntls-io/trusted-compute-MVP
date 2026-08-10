@@ -29,6 +29,7 @@ import { ed25519 } from "@noble/curves/ed25519";
 import { Keypair, PublicKey, Transaction, TransactionInstruction } from "@solana/web3.js";
 import bs58 from "bs58";
 
+import { packInstructions } from "../lib/drtHelpers";
 import {
   buildEnclaveRequest,
   codeDigest,
@@ -297,4 +298,69 @@ test("feePayer is the account the enclave will treat as the claimant", () => {
   const message = tx.compileMessage();
   assert.ok(message.accountKeys[0].equals(payer.publicKey));
   assert.ok(message.accountKeys.some((key) => key.equals(MEMO_PROGRAM_ID)));
+});
+
+// ---------------------------------------------------------------------------
+// Instruction packing
+//
+// Pool creation with three DRTs serialized to 1274 bytes as a single
+// transaction -- over the 1232 limit before any memo was added -- and failed
+// in the wallet with "Transaction too large". These lock in the split.
+// ---------------------------------------------------------------------------
+
+function fatInstruction(accounts: number): TransactionInstruction {
+  return new TransactionInstruction({
+    keys: Array.from({ length: accounts }, () => ({
+      pubkey: Keypair.generate().publicKey,
+      isSigner: false,
+      isWritable: true,
+    })),
+    programId: new PublicKey("CME2Dg7UEW82Hf99rQetEi7Hc5Db9JQPx6Azmx1eWbEE"),
+    data: Buffer.alloc(48),
+  });
+}
+
+const sizeOf = (tx: Transaction) =>
+  tx.serialize({ requireAllSignatures: false, verifySignatures: false }).length;
+
+test("packing keeps every transaction under the packet limit", () => {
+  const payer = Keypair.generate();
+  const instructions = Array.from({ length: 12 }, () => fatInstruction(6));
+  const packed = packInstructions(instructions, payer.publicKey);
+
+  assert.ok(packed.length > 1, "this many instructions must not fit in one transaction");
+  for (const tx of packed) {
+    assert.ok(
+      sizeOf(tx) <= MAX_TRANSACTION_LEN,
+      `packed transaction is ${sizeOf(tx)} bytes`
+    );
+  }
+});
+
+test("packing preserves instruction order and loses none", () => {
+  const payer = Keypair.generate();
+  const instructions = Array.from({ length: 12 }, () => fatInstruction(6));
+  const flattened = packInstructions(instructions, payer.publicKey).flatMap(
+    (tx) => tx.instructions
+  );
+
+  assert.equal(flattened.length, instructions.length);
+  flattened.forEach((ix, i) => {
+    assert.deepEqual(ix.keys.map((k) => k.pubkey.toBase58()),
+      instructions[i].keys.map((k) => k.pubkey.toBase58()));
+  });
+});
+
+test("a batch that fits stays a single transaction", () => {
+  const payer = Keypair.generate();
+  const packed = packInstructions([fatInstruction(4)], payer.publicKey);
+  assert.equal(packed.length, 1);
+});
+
+test("an instruction too large to ever fit is rejected, not silently dropped", () => {
+  const payer = Keypair.generate();
+  assert.throws(
+    () => packInstructions([fatInstruction(40)], payer.publicKey),
+    /does not fit/
+  );
 });

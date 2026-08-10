@@ -21,7 +21,12 @@
 import React, { useState, useEffect, useCallback, JSX } from 'react'
 import { BN, AnchorProvider } from "@coral-xyz/anchor"
 import { useDrtProgram } from "@/lib/useDrtProgram"
-import { buildPoolCreationTx, formatDrtConfigs, signSendWithMemo } from "@/lib/drtHelpers"
+import {
+  buildPoolCreationTx,
+  formatDrtConfigs,
+  signSendBatchWithMemo,
+  PartialBatchError,
+} from "@/lib/drtHelpers"
 import { readJsonFile } from "@/lib/utils"
 import {
   buildEnclaveRequest,
@@ -784,8 +789,10 @@ function PoolCreationStep({
       // 1) anchor-side structs must be ‘null’-clean; helper does that
       const formatted = formatDrtConfigs(drtConfigs);
 
-      // 2) build the TX locally
-      const { tx, pdas } = await buildPoolCreationTx(
+      // 2) build the transactions locally. Pool creation with three DRTs
+      //    exceeds Solana's 1232-byte packet limit, so it is split; the memo
+      //    rides in the first, which is the one emitting PoolCreated.
+      const { transactions, pdas } = await buildPoolCreationTx(
         program,
         provider,
         poolName,
@@ -793,14 +800,27 @@ function PoolCreationStep({
         new BN(ownershipSupply)
       );
 
-      // 3) sign & send once
-      const sent = await signSendWithMemo(
-        provider.connection,
-        wallet,
-        tx,
-        memoIx,
-        (msg) => updateProgress(1, msg, "loading")
-      );
+      // 3) one wallet approval for the whole batch
+      let sent;
+      try {
+        [sent] = await signSendBatchWithMemo(
+          provider.connection,
+          wallet,
+          transactions,
+          memoIx,
+          (msg) => updateProgress(1, msg, "loading")
+        );
+      } catch (error) {
+        if (error instanceof PartialBatchError) {
+          // The pool is on-chain but its mints are not fully set up. Say which
+          // pool, so it can be diagnosed rather than silently retried.
+          throw new Error(
+            `${error.message} Pool address: ${pdas.poolPda.toBase58()}. ` +
+              `This pool is unusable and should not be reused.`
+          );
+        }
+        throw error;
+      }
 
       console.log("Pool TX:", sent.tx);
       updateProgress(1, "Pool created (mints initialised & funded)", "success");
@@ -872,7 +892,7 @@ function PoolCreationStep({
 
         // Create the data pool in the enclave. No further signature: the
         // creation transaction already committed to this exact payload.
-        updateProgress(3, "Creating data pool in the enclave", "loading", "Waiting for on-chain finality and oracle verification");
+        updateProgress(3, "Creating data pool in the enclave", "loading", "Verifying the pool creation with the oracle and sealing the seed data");
         const result = await postToEnclave<string>("/api/create-data-pool", {
           publicIp,
           ...buildEnclaveRequest({
