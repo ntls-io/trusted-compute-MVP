@@ -41,10 +41,6 @@ impl ApiError {
         Self::new(400, "invalid_claim", detail)
     }
 
-    pub fn wallet_signature_invalid(detail: impl Into<String>) -> Self {
-        Self::new(400, "wallet_signature_invalid", detail)
-    }
-
     pub fn oracle_unavailable(detail: impl Into<String>) -> Self {
         Self::new(502, "oracle_unavailable", detail)
     }

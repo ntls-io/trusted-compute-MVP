@@ -40,12 +40,11 @@ rust = "1.92.0"
 sigstruct_date = "0000-00-00"
 
 [enclave]
-# Pinned 2026-08-07 from `make docker-build && make docker-sigstruct`, and
-# reproduced byte-identically by a --no-cache rebuild.
+# Pinned 2026-08-10 from `make docker-build && make docker-sigstruct`.
 #
 # To change these: rebuild, re-run docker-sigstruct, and update this block in
 # the SAME PR as the source change. CI fails the build on any drift.
-mr_enclave = "0e3fd7f42d273aa779855c771351871debcfc3506132938beb38b0152c797a90"
+mr_enclave = "fcd2348f18e0d063f2475eecc4f1e7abca4174f17ea0fd5794fbbf9d79ba1dc9"
 mr_signer = "95c165e1e00cab9cb209a6f0771f15189bf32166679812cebf722ecb2dcbd87c"
 isv_prod_id = 0
 isv_svn = 0

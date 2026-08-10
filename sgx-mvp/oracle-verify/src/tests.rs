@@ -14,20 +14,26 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-//! SGX-side unit tests with a mock oracle (plan.md test plan, SGX row).
-//! Runs outside SGX: everything under test is pure over env/config/files.
+//! SGX-side unit tests with a mock oracle. Runs outside SGX: everything
+//! under test is pure over env/config/files.
+//!
+//! The transactions here are built by hand rather than with the Solana SDK,
+//! which the enclave deliberately does not depend on. That means these tests
+//! also serve as an independent check that the wire format the enclave
+//! accepts is the one the chain actually uses.
 
 use crate::authz::{authorize, validate_locally, EnclaveConfig};
 use crate::canonical;
-use crate::claim::{Action, ClaimContext};
+use crate::claim::{Action, RedemptionRequest, POSSESSION_PREFIX};
 use crate::error::ApiError;
 use crate::oracle_client::{verify_jws, OracleTransport};
+use crate::soltx::{self, MAX_TRANSACTION_LEN};
 use crate::state::{replay_key, EntryStatus, ReplayLedger};
+use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use ed25519_dalek::{Signer, SigningKey};
 use serde_json::json;
-use std::collections::BTreeMap;
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -37,10 +43,14 @@ const CLUSTER: &str = "devnet";
 const PROGRAM: &str = "CME2Dg7UEW82Hf99rQetEi7Hc5Db9JQPx6Azmx1eWbEE";
 const GITHUB_URL: &str =
     "https://github.com/nautilus-project/py_compute_median/blob/main/script.py";
-const SHA256_EMPTY: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+const POOL: &str = "4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi";
 
 fn wallet_key() -> SigningKey {
     SigningKey::from_bytes(&[7u8; 32])
+}
+
+fn ephemeral_key() -> SigningKey {
+    SigningKey::from_bytes(&[21u8; 32])
 }
 
 fn oracle_key() -> SigningKey {
@@ -61,37 +71,523 @@ fn claimant() -> String {
     bs58::encode(wallet_key().verifying_key().to_bytes()).into_string()
 }
 
-fn future_expiry() -> String {
-    (crate::claim::now_unix() + 300).to_string()
+fn program_key() -> [u8; 32] {
+    bs58::decode(PROGRAM)
+        .into_vec()
+        .unwrap()
+        .try_into()
+        .unwrap()
 }
 
-fn base_claim(action: &str) -> BTreeMap<String, String> {
-    let mut map = BTreeMap::new();
-    map.insert("version".into(), "1".into());
-    map.insert("action".into(), action.into());
-    map.insert("cluster".into(), CLUSTER.into());
-    map.insert("program".into(), PROGRAM.into());
-    map.insert("tx".into(), bs58::encode(vec![2u8; 64]).into_string());
-    map.insert("pool".into(), bs58::encode(vec![1u8; 32]).into_string());
-    map.insert("claimant".into(), claimant());
-    map.insert("payload_sha256".into(), SHA256_EMPTY.into());
-    map.insert("nonce".into(), "00112233445566778899aabbccddeeff".into());
-    map.insert("expiry".into(), future_expiry());
-    if action.starts_with("execute_") {
-        map.insert("github_url".into(), GITHUB_URL.into());
-        map.insert("code_hash".into(), "a".repeat(64));
+fn code_for(action: Action) -> Option<(&'static str, &'static str)> {
+    if action.is_compute() {
+        Some((GITHUB_URL, CODE_HASH))
+    } else {
+        None
     }
-    map
 }
 
-fn sign_claim(map: &BTreeMap<String, String>) -> String {
-    let signature = wallet_key().sign(&canonical::message_bytes(map));
-    bs58::encode(signature.to_bytes()).into_string()
+const CODE_HASH: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+// ---------------------------------------------------------------------------
+// Legacy transaction construction
+// ---------------------------------------------------------------------------
+
+fn push_shortvec(mut n: usize, out: &mut Vec<u8>) {
+    loop {
+        let mut byte = (n & 0x7f) as u8;
+        n >>= 7;
+        if n != 0 {
+            byte |= 0x80;
+        }
+        out.push(byte);
+        if n == 0 {
+            break;
+        }
+    }
 }
 
-fn validated(action: Action, map: BTreeMap<String, String>) -> ClaimContext {
-    ClaimContext::validate(map, action, CLUSTER, PROGRAM).expect("claim should validate")
+struct TxSpec {
+    /// Key placed at account_keys[0].
+    fee_payer: SigningKey,
+    /// Key that actually signs; differs from `fee_payer` to forge.
+    signer: SigningKey,
+    memos: Vec<String>,
+    include_program: bool,
+    versioned: bool,
+    filler_bytes: usize,
 }
+
+impl Default for TxSpec {
+    fn default() -> Self {
+        TxSpec {
+            fee_payer: wallet_key(),
+            signer: wallet_key(),
+            memos: Vec::new(),
+            include_program: true,
+            versioned: false,
+            filler_bytes: 0,
+        }
+    }
+}
+
+/// Serialize and sign a legacy transaction. Returns (bytes, signature).
+fn build_tx(spec: &TxSpec) -> (Vec<u8>, [u8; 64]) {
+    let mut keys: Vec<[u8; 32]> = vec![spec.fee_payer.verifying_key().to_bytes()];
+    let program_index = if spec.include_program {
+        keys.push(program_key());
+        Some((keys.len() - 1) as u8)
+    } else {
+        None
+    };
+    keys.push(soltx::MEMO_PROGRAM_ID);
+    let memo_index = (keys.len() - 1) as u8;
+
+    let mut message = Vec::new();
+    if spec.versioned {
+        message.push(0x80);
+    }
+    message.push(1); // num_required_signatures
+    message.push(0); // num_readonly_signed
+    message.push((keys.len() - 1) as u8); // num_readonly_unsigned
+    push_shortvec(keys.len(), &mut message);
+    for key in &keys {
+        message.extend_from_slice(key);
+    }
+    message.extend_from_slice(&[9u8; 32]); // recent blockhash
+
+    let mut instructions: Vec<(u8, Vec<u8>)> = Vec::new();
+    if let Some(index) = program_index {
+        let mut data = b"redeem_drt".to_vec();
+        data.resize(data.len() + spec.filler_bytes, 0u8);
+        instructions.push((index, data));
+    }
+    for memo in &spec.memos {
+        instructions.push((memo_index, memo.as_bytes().to_vec()));
+    }
+    push_shortvec(instructions.len(), &mut message);
+    for (index, data) in instructions {
+        message.push(index);
+        push_shortvec(0, &mut message); // no accounts
+        push_shortvec(data.len(), &mut message);
+        message.extend_from_slice(&data);
+    }
+
+    let signature = spec.signer.sign(&message).to_bytes();
+    let mut tx = Vec::new();
+    push_shortvec(1, &mut tx);
+    tx.extend_from_slice(&signature);
+    tx.extend_from_slice(&message);
+    (tx, signature)
+}
+
+struct Built {
+    signed_transaction: String,
+    ephemeral_pubkey: String,
+    ephemeral_signature: String,
+    tx_signature: String,
+}
+
+/// A well-formed request for `action` committing to `payload` and the
+/// action's code identity. Tests drive mismatches by passing *different*
+/// values to `verify_request` than the ones committed here.
+fn build_request(action: Action, payload: &str) -> Built {
+    build_committed(payload, code_for(action))
+}
+
+fn build_committed(committed_payload: &str, committed_code: Option<(&str, &str)>) -> Built {
+    let eph = ephemeral_key();
+    let eph_pubkey = eph.verifying_key().to_bytes();
+    let memo = canonical::memo_for(&eph_pubkey, committed_payload.as_bytes(), committed_code);
+    let (tx, signature) = build_tx(&TxSpec {
+        memos: vec![memo],
+        ..Default::default()
+    });
+    let mut possession_message = POSSESSION_PREFIX.to_vec();
+    possession_message.extend_from_slice(&signature);
+    Built {
+        signed_transaction: BASE64.encode(&tx),
+        ephemeral_pubkey: bs58::encode(eph_pubkey).into_string(),
+        ephemeral_signature: bs58::encode(eph.sign(&possession_message).to_bytes()).into_string(),
+        tx_signature: bs58::encode(signature).into_string(),
+    }
+}
+
+fn verify_request(
+    action: Action,
+    built: &Built,
+    payload: &str,
+    code: Option<(&str, &str)>,
+) -> Result<RedemptionRequest, ApiError> {
+    validate_locally(
+        action,
+        &built.signed_transaction,
+        payload,
+        code.map(|c| c.0),
+        code.map(|c| c.1),
+        &built.ephemeral_pubkey,
+        &built.ephemeral_signature,
+        &config(),
+    )
+}
+
+/// The common case: build and verify a consistent request.
+fn valid_request(action: Action, payload: &str) -> RedemptionRequest {
+    let built = build_request(action, payload);
+    verify_request(action, &built, payload, code_for(action)).expect("request should verify")
+}
+
+// ---------------------------------------------------------------------------
+// Commitment vector, pinned identically in ntc-web/tests/redemption.test.ts
+// ---------------------------------------------------------------------------
+
+#[test]
+fn commitment_vector() {
+    let eph = [3u8; 32];
+    assert_eq!(
+        canonical::memo_for(&eph, b"", Some((GITHUB_URL, CODE_HASH))),
+        "rcc1:a62f64638528d12d6b6e20f785527768ea6d8d5dbe4c3b0fd8e0b9196ced408c"
+    );
+    assert_eq!(
+        canonical::memo_for(&eph, br#"{"a":1}"#, None),
+        "rcc1:14952fb6c44231bde18f203a7cde30edbc3ae553bca48dea64dc651905f35c0c"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Transaction parsing and the memo commitment
+// ---------------------------------------------------------------------------
+
+#[test]
+fn valid_request_passes() {
+    let request = valid_request(Action::ExecutePython, "");
+    assert_eq!(request.claimant(), claimant());
+    assert_eq!(request.github_url.as_deref(), Some(GITHUB_URL));
+}
+
+#[test]
+fn append_request_binds_its_payload() {
+    let payload = r#"{"records":[{"x":1}]}"#;
+    let request = valid_request(Action::Append, payload);
+    assert_eq!(request.action, Action::Append);
+}
+
+#[test]
+fn tampered_message_rejected() {
+    let built = build_request(Action::Append, "{}");
+    let mut raw = BASE64.decode(&built.signed_transaction).unwrap();
+    // Flip a bit in the recent blockhash, well inside the signed message.
+    let index = 1 + 64 + 3 + 1 + 32 * 3 + 4;
+    raw[index] ^= 0x01;
+    let built = Built {
+        signed_transaction: BASE64.encode(&raw),
+        ..built
+    };
+    let err = verify_request(Action::Append, &built, "{}", None).unwrap_err();
+    assert_eq!(err.code, "tx_signature_invalid");
+}
+
+#[test]
+fn transaction_signed_by_another_key_rejected() {
+    let eph = ephemeral_key();
+    let memo = canonical::memo_for(&eph.verifying_key().to_bytes(), b"", None);
+    let (tx, signature) = build_tx(&TxSpec {
+        signer: SigningKey::from_bytes(&[99u8; 32]),
+        memos: vec![memo],
+        ..Default::default()
+    });
+    let mut possession = POSSESSION_PREFIX.to_vec();
+    possession.extend_from_slice(&signature);
+    let built = Built {
+        signed_transaction: BASE64.encode(&tx),
+        ephemeral_pubkey: bs58::encode(eph.verifying_key().to_bytes()).into_string(),
+        ephemeral_signature: bs58::encode(eph.sign(&possession).to_bytes()).into_string(),
+        tx_signature: bs58::encode(signature).into_string(),
+    };
+    let err = verify_request(Action::Append, &built, "", None).unwrap_err();
+    assert_eq!(err.code, "tx_signature_invalid");
+}
+
+#[test]
+fn transaction_without_memo_rejected() {
+    let (tx, _) = build_tx(&TxSpec::default());
+    let built = Built {
+        signed_transaction: BASE64.encode(&tx),
+        ephemeral_pubkey: bs58::encode(ephemeral_key().verifying_key().to_bytes()).into_string(),
+        ephemeral_signature: bs58::encode([0u8; 64]).into_string(),
+        tx_signature: String::new(),
+    };
+    let err = verify_request(Action::Append, &built, "", None).unwrap_err();
+    assert_eq!(err.code, "memo_missing");
+}
+
+#[test]
+fn transaction_with_two_memos_rejected() {
+    let eph = ephemeral_key().verifying_key().to_bytes();
+    let memo = canonical::memo_for(&eph, b"", None);
+    let (tx, _) = build_tx(&TxSpec {
+        memos: vec![memo.clone(), memo],
+        ..Default::default()
+    });
+    let built = Built {
+        signed_transaction: BASE64.encode(&tx),
+        ephemeral_pubkey: bs58::encode(eph).into_string(),
+        ephemeral_signature: bs58::encode([0u8; 64]).into_string(),
+        tx_signature: String::new(),
+    };
+    let err = verify_request(Action::Append, &built, "", None).unwrap_err();
+    assert_eq!(err.code, "transaction_malformed");
+    assert!(err.detail.contains("more than one memo"));
+}
+
+#[test]
+fn payload_not_covered_by_the_commitment_rejected() {
+    // The memo commits to sha256(""), but a payload is supplied.
+    let built = build_request(Action::Append, "");
+    let err = verify_request(Action::Append, &built, r#"{"x":1}"#, None).unwrap_err();
+    assert_eq!(err.code, "commitment_mismatch");
+}
+
+#[test]
+fn substituted_code_reference_rejected() {
+    // The heart of the design: the redeemer committed to one program
+    // on-chain, so no other program can be smuggled into the request.
+    let built = build_request(Action::ExecutePython, "");
+    let evil = ("https://github.com/evil/repo/blob/main/x.py", CODE_HASH);
+    let err = verify_request(Action::ExecutePython, &built, "", Some(evil)).unwrap_err();
+    assert_eq!(err.code, "commitment_mismatch");
+}
+
+#[test]
+fn substituted_code_hash_rejected() {
+    let built = build_request(Action::ExecutePython, "");
+    let evil = (
+        GITHUB_URL,
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    );
+    let err = verify_request(Action::ExecutePython, &built, "", Some(evil)).unwrap_err();
+    assert_eq!(err.code, "commitment_mismatch");
+}
+
+#[test]
+fn foreign_ephemeral_key_cannot_claim_the_redemption() {
+    // A bystander who saw the finalized transaction supplies their own key.
+    let built = build_request(Action::ExecutePython, "");
+    let intruder = SigningKey::from_bytes(&[77u8; 32]);
+    let hijacked = Built {
+        ephemeral_pubkey: bs58::encode(intruder.verifying_key().to_bytes()).into_string(),
+        ..built
+    };
+    let err = verify_request(
+        Action::ExecutePython,
+        &hijacked,
+        "",
+        code_for(Action::ExecutePython),
+    )
+    .unwrap_err();
+    assert_eq!(err.code, "commitment_mismatch");
+}
+
+#[test]
+fn bad_possession_proof_rejected() {
+    let built = build_request(Action::ExecutePython, "");
+    let intruder = SigningKey::from_bytes(&[77u8; 32]);
+    let mut possession = POSSESSION_PREFIX.to_vec();
+    possession.extend_from_slice(&bs58::decode(&built.tx_signature).into_vec().unwrap());
+    let forged = Built {
+        ephemeral_signature: bs58::encode(intruder.sign(&possession).to_bytes()).into_string(),
+        ..built
+    };
+    let err = verify_request(
+        Action::ExecutePython,
+        &forged,
+        "",
+        code_for(Action::ExecutePython),
+    )
+    .unwrap_err();
+    assert_eq!(err.code, "possession_proof_invalid");
+}
+
+#[test]
+fn possession_proof_for_another_transaction_rejected() {
+    let built = build_request(Action::ExecutePython, "");
+    let mut possession = POSSESSION_PREFIX.to_vec();
+    possession.extend_from_slice(&[4u8; 64]); // some other transaction
+    let replayed = Built {
+        ephemeral_signature: bs58::encode(ephemeral_key().sign(&possession).to_bytes())
+            .into_string(),
+        ..built
+    };
+    let err = verify_request(
+        Action::ExecutePython,
+        &replayed,
+        "",
+        code_for(Action::ExecutePython),
+    )
+    .unwrap_err();
+    assert_eq!(err.code, "possession_proof_invalid");
+}
+
+#[test]
+fn versioned_transaction_rejected() {
+    let eph = ephemeral_key().verifying_key().to_bytes();
+    let (tx, _) = build_tx(&TxSpec {
+        memos: vec![canonical::memo_for(&eph, b"", None)],
+        versioned: true,
+        ..Default::default()
+    });
+    let err = soltx::parse_and_verify(&tx).unwrap_err();
+    assert_eq!(err.code, "transaction_malformed");
+    assert!(err.detail.contains("versioned"));
+}
+
+#[test]
+fn transaction_not_touching_the_drt_program_rejected() {
+    let eph = ephemeral_key();
+    let eph_pubkey = eph.verifying_key().to_bytes();
+    let (tx, signature) = build_tx(&TxSpec {
+        memos: vec![canonical::memo_for(&eph_pubkey, b"", None)],
+        include_program: false,
+        ..Default::default()
+    });
+    let mut possession = POSSESSION_PREFIX.to_vec();
+    possession.extend_from_slice(&signature);
+    let built = Built {
+        signed_transaction: BASE64.encode(&tx),
+        ephemeral_pubkey: bs58::encode(eph_pubkey).into_string(),
+        ephemeral_signature: bs58::encode(eph.sign(&possession).to_bytes()).into_string(),
+        tx_signature: bs58::encode(signature).into_string(),
+    };
+    let err = verify_request(Action::Append, &built, "", None).unwrap_err();
+    assert_eq!(err.code, "invalid_claim");
+    assert!(err.detail.contains("DRT program"));
+}
+
+#[test]
+fn malformed_code_metadata_rejected() {
+    let built = build_request(Action::ExecutePython, "");
+    let err = verify_request(
+        Action::ExecutePython,
+        &built,
+        "",
+        Some(("https://example.com/x.py", CODE_HASH)),
+    )
+    .unwrap_err();
+    assert_eq!(err.code, "code_metadata_invalid");
+
+    let err = verify_request(
+        Action::ExecutePython,
+        &built,
+        "",
+        Some((GITHUB_URL, "not-a-hash")),
+    )
+    .unwrap_err();
+    assert_eq!(err.code, "code_metadata_invalid");
+}
+
+#[test]
+fn compute_without_code_metadata_rejected() {
+    let built = build_request(Action::ExecutePython, "");
+    let err = verify_request(Action::ExecutePython, &built, "", None).unwrap_err();
+    assert_eq!(err.code, "code_metadata_invalid");
+}
+
+#[test]
+fn code_metadata_on_append_rejected() {
+    let built = build_request(Action::Append, "{}");
+    let err =
+        verify_request(Action::Append, &built, "{}", Some((GITHUB_URL, CODE_HASH))).unwrap_err();
+    assert_eq!(err.code, "invalid_claim");
+}
+
+#[test]
+fn oversized_transaction_rejected() {
+    let err = soltx::parse_and_verify(&vec![0u8; MAX_TRANSACTION_LEN + 1]).unwrap_err();
+    assert_eq!(err.code, "transaction_malformed");
+    assert!(err.detail.contains("maximum packet size"));
+}
+
+#[test]
+fn truncated_transaction_rejected() {
+    let eph = ephemeral_key().verifying_key().to_bytes();
+    let (tx, _) = build_tx(&TxSpec {
+        memos: vec![canonical::memo_for(&eph, b"", None)],
+        ..Default::default()
+    });
+    for cut in [1usize, 10, 60, 70, 100, 150] {
+        if cut >= tx.len() {
+            continue;
+        }
+        let err = soltx::parse_and_verify(&tx[..cut]).unwrap_err();
+        assert_eq!(err.code, "transaction_malformed", "cut at {cut}");
+    }
+}
+
+#[test]
+fn trailing_bytes_rejected() {
+    let eph = ephemeral_key().verifying_key().to_bytes();
+    let (mut tx, _) = build_tx(&TxSpec {
+        memos: vec![canonical::memo_for(&eph, b"", None)],
+        ..Default::default()
+    });
+    tx.push(0);
+    let err = soltx::parse_and_verify(&tx).unwrap_err();
+    assert_eq!(err.code, "transaction_malformed");
+    assert!(err.detail.contains("trailing"));
+}
+
+#[test]
+fn non_canonical_shortvec_rejected() {
+    // 0x80 0x00 encodes zero in two groups; only the one-byte form is valid.
+    let err = soltx::parse_and_verify(&[0x80, 0x00]).unwrap_err();
+    assert_eq!(err.code, "transaction_malformed");
+    assert!(err.detail.contains("non-canonical"));
+}
+
+/// The parser is the only attacker-reachable deserializer in the TCB, so it
+/// must terminate with an error rather than panic on anything at all. A
+/// deterministic LCG keeps this reproducible in CI; `cargo fuzz` covers the
+/// same entry point more thoroughly.
+#[test]
+fn parser_never_panics_on_arbitrary_input() {
+    let mut state: u64 = 0x2545F4914F6CDD1D;
+    let mut next = move || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+
+    for _ in 0..2000 {
+        let len = (next() % (MAX_TRANSACTION_LEN as u64 + 8)) as usize;
+        let bytes: Vec<u8> = (0..len).map(|_| (next() & 0xff) as u8).collect();
+        let _ = soltx::parse_and_verify(&bytes);
+    }
+
+    // Mutations of a well-formed transaction reach much deeper into the
+    // parser than random bytes ever will.
+    let eph = ephemeral_key().verifying_key().to_bytes();
+    let (valid, _) = build_tx(&TxSpec {
+        memos: vec![canonical::memo_for(&eph, b"", None)],
+        ..Default::default()
+    });
+    for _ in 0..4000 {
+        let mut mutated = valid.clone();
+        let flips = 1 + (next() % 4);
+        for _ in 0..flips {
+            let index = (next() as usize) % mutated.len();
+            mutated[index] = (next() & 0xff) as u8;
+        }
+        if next() % 4 == 0 {
+            mutated.truncate((next() as usize) % mutated.len().max(1));
+        }
+        let _ = soltx::parse_and_verify(&mutated);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// JWS verification and assertion cross-checks
+// ---------------------------------------------------------------------------
 
 fn sign_jws_with(key: &SigningKey, payload: &serde_json::Value) -> String {
     let header = URL_SAFE_NO_PAD.encode(br#"{"alg":"EdDSA","typ":"JWT","kid":"oracle-1"}"#);
@@ -104,26 +600,23 @@ fn sign_jws_with(key: &SigningKey, payload: &serde_json::Value) -> String {
     )
 }
 
-fn assertion_payload(claim: &ClaimContext) -> serde_json::Value {
+fn assertion_payload(request: &RedemptionRequest) -> serde_json::Value {
     let now = crate::claim::now_unix();
-    let compute = claim.action().is_compute();
+    let compute = request.action.is_compute();
     json!({
         "iss": "relational-oracle-1",
         "iat": now,
         "exp": now + 300,
-        "cluster": claim.get("cluster"),
-        "program": claim.get("program"),
-        "tx": claim.get("tx"),
+        "cluster": CLUSTER,
+        "program": PROGRAM,
+        "tx": request.tx_signature(),
         "slot": 1234,
-        "action": claim.action().as_str(),
-        "pool": claim.get("pool"),
-        "claimant": claim.get("claimant"),
+        "pool": POOL,
+        "claimant": request.claimant(),
         "drt_type": if compute { json!("py_compute_median") } else { json!(null) },
-        "execution_type": claim.action().expected_execution_type(),
-        "github_url": if compute { json!(claim.get("github_url")) } else { json!(null) },
-        "code_hash": if compute { json!(claim.get("code_hash")) } else { json!(null) },
-        "payload_sha256": claim.get("payload_sha256"),
-        "claim_digest": claim.digest_hex(),
+        "execution_type": request.action.expected_execution_type(),
+        "github_url": if compute { json!(request.github_url) } else { json!(null) },
+        "code_hash": if compute { json!(request.code_hash) } else { json!(null) },
     })
 }
 
@@ -132,205 +625,123 @@ struct MockOracle {
 }
 
 impl OracleTransport for MockOracle {
-    fn verify_chain_claim(
-        &self,
-        _claim: &BTreeMap<String, String>,
-        _wallet_signature: &str,
-    ) -> Result<String, ApiError> {
+    fn verify_transaction(&self, _tx_signature: &str) -> Result<String, ApiError> {
         self.response.clone()
     }
 }
 
-fn authorize_with(claim: &ClaimContext, jws: String) -> Result<(), ApiError> {
+fn authorize_with(request: &RedemptionRequest, jws: String) -> Result<(), ApiError> {
     let transport = MockOracle { response: Ok(jws) };
-    authorize(claim, &sign_claim(claim.map()), &transport, &config()).map(|_| ())
+    authorize(request, &transport, &config()).map(|_| ())
 }
-
-// ---------------------------------------------------------------------------
-// Claim validation and wallet signatures
-// ---------------------------------------------------------------------------
-
-#[test]
-fn valid_claim_and_wallet_signature_pass() {
-    let map = base_claim("execute_python");
-    let signature = sign_claim(&map);
-    let claim = validate_locally(Action::ExecutePython, map, &signature, "", &config());
-    assert!(claim.is_ok());
-}
-
-#[test]
-fn forged_wallet_signature_rejected() {
-    let map = base_claim("execute_python");
-    let forger = SigningKey::from_bytes(&[9u8; 32]);
-    let forged =
-        bs58::encode(forger.sign(&canonical::message_bytes(&map)).to_bytes()).into_string();
-    let err = validate_locally(Action::ExecutePython, map, &forged, "", &config()).unwrap_err();
-    assert_eq!(err.code, "wallet_signature_invalid");
-}
-
-#[test]
-fn signature_over_modified_claim_rejected() {
-    let mut map = base_claim("execute_python");
-    let signature = sign_claim(&map);
-    map.insert("code_hash".into(), "b".repeat(64));
-    let err = validate_locally(Action::ExecutePython, map, &signature, "", &config()).unwrap_err();
-    assert_eq!(err.code, "wallet_signature_invalid");
-}
-
-#[test]
-fn payload_mismatch_rejected() {
-    let map = base_claim("append");
-    let signature = sign_claim(&map);
-    // Claim commits to sha256("") but a payload is supplied.
-    let err =
-        validate_locally(Action::Append, map, &signature, "{\"x\":1}", &config()).unwrap_err();
-    assert_eq!(err.code, "payload_mismatch");
-}
-
-#[test]
-fn expired_claim_rejected() {
-    let mut map = base_claim("execute_python");
-    map.insert("expiry".into(), (crate::claim::now_unix() - 10).to_string());
-    let signature = sign_claim(&map);
-    let err = validate_locally(Action::ExecutePython, map, &signature, "", &config()).unwrap_err();
-    assert_eq!(err.code, "claim_expired");
-}
-
-#[test]
-fn wrong_cluster_or_program_rejected() {
-    let mut map = base_claim("execute_python");
-    map.insert("cluster".into(), "mainnet-beta".into());
-    let signature = sign_claim(&map);
-    let err = validate_locally(Action::ExecutePython, map, &signature, "", &config()).unwrap_err();
-    assert_eq!(err.code, "invalid_claim");
-}
-
-#[test]
-fn action_endpoint_mismatch_rejected() {
-    let map = base_claim("execute_python");
-    let signature = sign_claim(&map);
-    let err = validate_locally(Action::ExecuteWasm, map, &signature, "", &config()).unwrap_err();
-    assert_eq!(err.code, "invalid_claim");
-}
-
-#[test]
-fn compute_claim_missing_code_metadata_rejected() {
-    let mut map = base_claim("execute_python");
-    map.remove("code_hash");
-    let signature = sign_claim(&map);
-    let err = validate_locally(Action::ExecutePython, map, &signature, "", &config()).unwrap_err();
-    assert_eq!(err.code, "invalid_claim");
-}
-
-#[test]
-fn non_github_url_rejected() {
-    let mut map = base_claim("execute_python");
-    map.insert("github_url".into(), "https://example.com/x.py".into());
-    let signature = sign_claim(&map);
-    let err = validate_locally(Action::ExecutePython, map, &signature, "", &config()).unwrap_err();
-    assert_eq!(err.code, "code_metadata_invalid");
-}
-
-// ---------------------------------------------------------------------------
-// JWS verification and claim/assertion cross-checks
-// ---------------------------------------------------------------------------
 
 #[test]
 fn valid_oracle_assertion_accepted() {
-    let claim = validated(Action::ExecutePython, base_claim("execute_python"));
-    let jws = sign_jws_with(&oracle_key(), &assertion_payload(&claim));
-    assert!(authorize_with(&claim, jws).is_ok());
+    let request = valid_request(Action::ExecutePython, "");
+    let jws = sign_jws_with(&oracle_key(), &assertion_payload(&request));
+    assert!(authorize_with(&request, jws).is_ok());
 }
 
 #[test]
 fn jws_signed_with_wrong_key_rejected() {
-    let claim = validated(Action::ExecutePython, base_claim("execute_python"));
+    let request = valid_request(Action::ExecutePython, "");
     let wrong_key = SigningKey::from_bytes(&[13u8; 32]);
-    let jws = sign_jws_with(&wrong_key, &assertion_payload(&claim));
-    let err = authorize_with(&claim, jws).unwrap_err();
+    let jws = sign_jws_with(&wrong_key, &assertion_payload(&request));
+    let err = authorize_with(&request, jws).unwrap_err();
     assert_eq!(err.code, "assertion_invalid");
 }
 
 #[test]
 fn tampered_jws_payload_rejected() {
-    let claim = validated(Action::ExecutePython, base_claim("execute_python"));
-    let jws = sign_jws_with(&oracle_key(), &assertion_payload(&claim));
+    let request = valid_request(Action::ExecutePython, "");
+    let jws = sign_jws_with(&oracle_key(), &assertion_payload(&request));
     let mut parts: Vec<String> = jws.split('.').map(String::from).collect();
-    let mut payload = assertion_payload(&claim);
+    let mut payload = assertion_payload(&request);
     payload["code_hash"] = json!("b".repeat(64));
     parts[1] = URL_SAFE_NO_PAD.encode(serde_json::to_vec(&payload).unwrap());
-    let err = authorize_with(&claim, parts.join(".")).unwrap_err();
+    let err = authorize_with(&request, parts.join(".")).unwrap_err();
     assert_eq!(err.code, "assertion_invalid");
 }
 
 #[test]
-fn wrong_claim_digest_rejected() {
-    let claim = validated(Action::ExecutePython, base_claim("execute_python"));
-    let mut payload = assertion_payload(&claim);
-    payload["claim_digest"] = json!("0".repeat(64));
+fn assertion_for_another_transaction_rejected() {
+    let request = valid_request(Action::ExecutePython, "");
+    let mut payload = assertion_payload(&request);
+    payload["tx"] = json!(bs58::encode(vec![8u8; 64]).into_string());
     let jws = sign_jws_with(&oracle_key(), &payload);
-    let err = authorize_with(&claim, jws).unwrap_err();
+    let err = authorize_with(&request, jws).unwrap_err();
     assert_eq!(err.code, "assertion_invalid");
-    assert!(err.detail.contains("digest"));
+    assert!(err.detail.contains("tx"));
 }
 
 #[test]
-fn assertion_code_metadata_differing_from_claim_rejected() {
-    // A malicious oracle cannot substitute code: the assertion must match
-    // the wallet-signed claim's github_url/code_hash.
-    let claim = validated(Action::ExecutePython, base_claim("execute_python"));
-    let mut payload = assertion_payload(&claim);
+fn assertion_naming_another_redeemer_rejected() {
+    let request = valid_request(Action::ExecutePython, "");
+    let mut payload = assertion_payload(&request);
+    payload["claimant"] = json!(bs58::encode(vec![6u8; 32]).into_string());
+    let jws = sign_jws_with(&oracle_key(), &payload);
+    let err = authorize_with(&request, jws).unwrap_err();
+    assert_eq!(err.code, "assertion_invalid");
+    assert!(err.detail.contains("claimant"));
+}
+
+#[test]
+fn assertion_code_metadata_differing_from_commitment_rejected() {
+    // A malicious oracle cannot substitute code: the assertion must agree
+    // with what the redeemer committed to on-chain.
+    let request = valid_request(Action::ExecutePython, "");
+    let mut payload = assertion_payload(&request);
     payload["github_url"] = json!("https://github.com/evil/repo/blob/main/x.py");
     let jws = sign_jws_with(&oracle_key(), &payload);
-    let err = authorize_with(&claim, jws).unwrap_err();
-    assert_eq!(err.code, "assertion_invalid");
-}
-
-#[test]
-fn assertion_pool_mismatch_rejected() {
-    let claim = validated(Action::ExecutePython, base_claim("execute_python"));
-    let mut payload = assertion_payload(&claim);
-    payload["pool"] = json!(bs58::encode(vec![5u8; 32]).into_string());
-    let jws = sign_jws_with(&oracle_key(), &payload);
-    let err = authorize_with(&claim, jws).unwrap_err();
+    let err = authorize_with(&request, jws).unwrap_err();
     assert_eq!(err.code, "assertion_invalid");
 }
 
 #[test]
 fn assertion_runtime_mismatch_rejected() {
-    let claim = validated(Action::ExecutePython, base_claim("execute_python"));
-    let mut payload = assertion_payload(&claim);
+    let request = valid_request(Action::ExecutePython, "");
+    let mut payload = assertion_payload(&request);
     payload["execution_type"] = json!("wasm");
     let jws = sign_jws_with(&oracle_key(), &payload);
-    let err = authorize_with(&claim, jws).unwrap_err();
+    let err = authorize_with(&request, jws).unwrap_err();
+    assert_eq!(err.code, "assertion_invalid");
+}
+
+#[test]
+fn assertion_wrong_cluster_rejected() {
+    let request = valid_request(Action::ExecutePython, "");
+    let mut payload = assertion_payload(&request);
+    payload["cluster"] = json!("mainnet-beta");
+    let jws = sign_jws_with(&oracle_key(), &payload);
+    let err = authorize_with(&request, jws).unwrap_err();
     assert_eq!(err.code, "assertion_invalid");
 }
 
 #[test]
 fn expired_assertion_rejected() {
-    let claim = validated(Action::ExecutePython, base_claim("execute_python"));
-    let mut payload = assertion_payload(&claim);
+    let request = valid_request(Action::ExecutePython, "");
+    let mut payload = assertion_payload(&request);
     payload["exp"] = json!(crate::claim::now_unix() - 5);
     let jws = sign_jws_with(&oracle_key(), &payload);
-    let err = authorize_with(&claim, jws).unwrap_err();
+    let err = authorize_with(&request, jws).unwrap_err();
     assert_eq!(err.code, "assertion_invalid");
     assert!(err.detail.contains("expired"));
 }
 
 #[test]
 fn oracle_outage_is_not_a_consumption() {
-    let claim = validated(Action::ExecutePython, base_claim("execute_python"));
+    let request = valid_request(Action::ExecutePython, "");
     let transport = MockOracle {
         response: Err(ApiError::oracle_unavailable("timed out")),
     };
-    let err = authorize(&claim, &sign_claim(claim.map()), &transport, &config()).unwrap_err();
+    let err = authorize(&request, &transport, &config()).unwrap_err();
     assert_eq!(err.code, "oracle_unavailable");
 }
 
 #[test]
 fn malformed_jws_rejected() {
-    let claim = validated(Action::ExecutePython, base_claim("execute_python"));
-    let err = authorize_with(&claim, "not-a-jws".to_string()).unwrap_err();
+    let request = valid_request(Action::ExecutePython, "");
+    let err = authorize_with(&request, "not-a-jws".to_string()).unwrap_err();
     assert_eq!(err.code, "assertion_invalid");
 }
 
@@ -371,7 +782,7 @@ fn replay_rejected_after_success_and_survives_reload() {
         let entry = reloaded.get(&key).unwrap();
         assert_eq!(entry.status, EntryStatus::Succeeded);
         assert_eq!(entry.result, Some(json!({"mean": 3})));
-        assert_eq!(entry.claim_digest, "digest1");
+        assert_eq!(entry.commitment, "digest1");
 
         let mut again = ReplayLedger::load().unwrap();
         let err = again.reserve(&key, "digest1").unwrap_err();
@@ -413,8 +824,8 @@ fn pool_identity_round_trips() {
         use crate::state::{load_identity, store_identity, PoolIdentity};
         assert!(load_identity().unwrap().is_none());
         let identity = PoolIdentity {
-            pool: "poolpda".into(),
-            owner: "owner".into(),
+            pool: POOL.into(),
+            owner: claimant(),
             cluster: CLUSTER.into(),
             program: PROGRAM.into(),
             init_tx: "tx".into(),
@@ -422,7 +833,7 @@ fn pool_identity_round_trips() {
         };
         store_identity(&identity).unwrap();
         let loaded = load_identity().unwrap().unwrap();
-        assert_eq!(loaded.pool, "poolpda");
+        assert_eq!(loaded.pool, POOL);
         assert_eq!(loaded.schema, json!({"type": "object"}));
     });
 }

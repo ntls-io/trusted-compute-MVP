@@ -14,18 +14,28 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-//! Wallet-signed chain claims: shape validation and in-enclave Ed25519
-//! verification. The enclave never trusts oracle assertions alone — every
-//! assertion is cross-checked against a claim the claimant's wallet signed
-//! (plan.md, "SGX enforcement").
+//! In-enclave verification of a redemption request against the claimant's
+//! own signed transaction.
+//!
+//! The enclave never trusts oracle assertions alone. Before the oracle is
+//! contacted at all, the request must be shown to match a commitment the
+//! claimant's wallet signed as part of the burn transaction (paper Appendix
+//! C1, "checked against authenticated ledger state rather than trusted as
+//! oracle assertions").
 
 use crate::canonical;
 use crate::error::ApiError;
+use crate::soltx::{self, ParsedTransaction};
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
-use std::collections::BTreeMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const MAX_GITHUB_URL_LENGTH: usize = 200;
+
+/// Domain separation for the ephemeral key's proof of possession, so the
+/// signature cannot be replayed into any other protocol.
+pub const POSSESSION_PREFIX: &[u8] = b"relational-possession:v1\n";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
@@ -60,35 +70,6 @@ impl Action {
     }
 }
 
-const BASE_FIELDS: [&str; 10] = [
-    "version",
-    "action",
-    "cluster",
-    "program",
-    "tx",
-    "pool",
-    "claimant",
-    "payload_sha256",
-    "nonce",
-    "expiry",
-];
-const COMPUTE_FIELDS: [&str; 2] = ["github_url", "code_hash"];
-
-fn is_lower_hex(value: &str, min: usize, max: usize) -> bool {
-    value.len() >= min
-        && value.len() <= max
-        && value
-            .chars()
-            .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c))
-}
-
-fn is_base58_of_length(value: &str, length: usize) -> bool {
-    bs58::decode(value)
-        .into_vec()
-        .map(|bytes| bytes.len() == length)
-        .unwrap_or(false)
-}
-
 pub fn now_unix() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -96,86 +77,67 @@ pub fn now_unix() -> i64 {
         .unwrap_or(0)
 }
 
-/// A validated wallet-signed claim.
-#[derive(Debug, Clone)]
-pub struct ClaimContext {
-    map: BTreeMap<String, String>,
-    action: Action,
+fn is_lower_hex(value: &str, len: usize) -> bool {
+    value.len() == len
+        && value
+            .chars()
+            .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c))
 }
 
-impl ClaimContext {
-    /// Validate the claim's shape against the v1 schema and the enclave's
-    /// pinned cluster/program. Fails closed on any anomaly.
-    pub fn validate(
-        map: BTreeMap<String, String>,
-        expected_action: Action,
-        expected_cluster: &str,
+fn decode_key(value: &str) -> Result<[u8; 32], ApiError> {
+    bs58::decode(value)
+        .into_vec()
+        .ok()
+        .and_then(|bytes| <[u8; 32]>::try_from(bytes).ok())
+        .ok_or_else(|| ApiError::invalid_claim("expected a base58 32-byte public key"))
+}
+
+/// A redemption request whose commitment has been verified against the
+/// claimant's signed transaction.
+#[derive(Debug, Clone)]
+pub struct RedemptionRequest {
+    pub action: Action,
+    pub tx: ParsedTransaction,
+    pub ephemeral_pubkey: [u8; 32],
+    pub github_url: Option<String>,
+    pub code_hash: Option<String>,
+}
+
+impl RedemptionRequest {
+    /// Verify the transaction signature, the memo commitment, and the
+    /// ephemeral key's proof of possession. Nothing here touches the network.
+    #[allow(clippy::too_many_arguments)]
+    pub fn verify(
+        action: Action,
+        signed_transaction_b64: &str,
+        payload: &str,
+        github_url: Option<&str>,
+        code_hash: Option<&str>,
+        ephemeral_pubkey_b58: &str,
+        ephemeral_signature_b58: &str,
         expected_program: &str,
     ) -> Result<Self, ApiError> {
-        let action_field = map
-            .get("action")
-            .ok_or_else(|| ApiError::invalid_claim("missing action"))?;
-        if action_field != expected_action.as_str() {
-            return Err(ApiError::invalid_claim(format!(
-                "claim action {:?} does not match this endpoint",
-                action_field
-            )));
-        }
+        // 1. The claimant's own signed transaction.
+        let raw = BASE64
+            .decode(signed_transaction_b64)
+            .map_err(|_| ApiError::invalid_claim("signed_transaction is not valid base64"))?;
+        let tx = soltx::parse_and_verify(&raw)?;
 
-        let mut expected_fields: Vec<&str> = BASE_FIELDS.to_vec();
-        if expected_action.is_compute() {
-            expected_fields.extend(COMPUTE_FIELDS);
-        }
-        let keys: Vec<&str> = map.keys().map(|k| k.as_str()).collect();
-        let mut sorted_expected = expected_fields.clone();
-        sorted_expected.sort_unstable();
-        if keys != sorted_expected {
+        // 2. It must actually invoke the program this enclave is bound to.
+        let program_key = decode_key(expected_program)
+            .map_err(|_| ApiError::internal("configured program id is not a valid address"))?;
+        if !tx.has_account(&program_key) {
             return Err(ApiError::invalid_claim(
-                "claim fields do not match the v1 schema",
+                "transaction does not reference the DRT program this enclave is bound to",
             ));
         }
 
-        let get = |key: &str| map.get(key).map(|s| s.as_str()).unwrap_or_default();
-
-        if get("version") != "1" {
-            return Err(ApiError::invalid_claim("unsupported claim version"));
-        }
-        if get("cluster") != expected_cluster {
-            return Err(ApiError::invalid_claim(
-                "claim cluster not bound to this enclave",
-            ));
-        }
-        if get("program") != expected_program {
-            return Err(ApiError::invalid_claim(
-                "claim program not bound to this enclave",
-            ));
-        }
-        if !is_base58_of_length(get("pool"), 32) {
-            return Err(ApiError::invalid_claim("pool is not a valid address"));
-        }
-        if !is_base58_of_length(get("claimant"), 32) {
-            return Err(ApiError::invalid_claim("claimant is not a valid address"));
-        }
-        if !is_base58_of_length(get("tx"), 64) {
-            return Err(ApiError::invalid_claim("tx is not a valid signature"));
-        }
-        if !is_lower_hex(get("payload_sha256"), 64, 64) {
-            return Err(ApiError::invalid_claim(
-                "payload_sha256 must be 64 hex chars",
-            ));
-        }
-        if !is_lower_hex(get("nonce"), 16, 64) {
-            return Err(ApiError::invalid_claim("nonce must be 16-64 hex chars"));
-        }
-        let expiry: i64 = get("expiry")
-            .parse()
-            .map_err(|_| ApiError::invalid_claim("expiry must be a unix timestamp"))?;
-        if expiry <= now_unix() {
-            return Err(ApiError::new(400, "claim_expired", "claim has expired"));
-        }
-
-        if expected_action.is_compute() {
-            let url = get("github_url");
+        // 3. Code metadata: required and well-formed for compute, absent
+        //    otherwise. Checked before it enters the commitment so a
+        //    malformed value fails closed rather than simply mismatching.
+        let (github_url, code_hash) = if action.is_compute() {
+            let url = github_url.unwrap_or_default();
+            let hash = code_hash.unwrap_or_default();
             if !url.starts_with("https://github.com/") || url.len() > MAX_GITHUB_URL_LENGTH {
                 return Err(ApiError::new(
                     400,
@@ -183,72 +145,87 @@ impl ClaimContext {
                     "github_url must be a https://github.com/ URL",
                 ));
             }
-            if !is_lower_hex(get("code_hash"), 64, 64) {
+            if !is_lower_hex(hash, 64) {
                 return Err(ApiError::new(
                     400,
                     "code_metadata_invalid",
-                    "code_hash must be 64 hex chars",
+                    "code_hash must be 64 lowercase hex chars",
                 ));
             }
+            (Some(url.to_string()), Some(hash.to_string()))
+        } else {
+            if github_url.is_some() || code_hash.is_some() {
+                return Err(ApiError::invalid_claim(
+                    "code metadata is only accepted for compute actions",
+                ));
+            }
+            (None, None)
+        };
+
+        // 4. The memo must equal the commitment over exactly what was sent.
+        let ephemeral_pubkey = decode_key(ephemeral_pubkey_b58)?;
+        let code = match (github_url.as_deref(), code_hash.as_deref()) {
+            (Some(url), Some(hash)) => Some((url, hash)),
+            _ => None,
+        };
+        let expected_memo = canonical::memo_for(&ephemeral_pubkey, payload.as_bytes(), code);
+        if tx.memo_str()? != expected_memo {
+            return Err(ApiError::new(
+                400,
+                "commitment_mismatch",
+                "the memo committed on-chain does not cover this payload, code reference, and ephemeral key",
+            ));
         }
 
-        Ok(ClaimContext {
-            map,
-            action: expected_action,
+        // 5. Proof that the caller holds the committed ephemeral key, so a
+        //    bystander who saw the finalized redemption cannot claim it.
+        let signature_bytes = bs58::decode(ephemeral_signature_b58)
+            .into_vec()
+            .ok()
+            .and_then(|bytes| <[u8; 64]>::try_from(bytes).ok())
+            .ok_or_else(|| {
+                ApiError::new(
+                    400,
+                    "possession_proof_invalid",
+                    "ephemeral_signature must be a base58 64-byte signature",
+                )
+            })?;
+        let mut message = POSSESSION_PREFIX.to_vec();
+        message.extend_from_slice(&tx.signature);
+        VerifyingKey::from_bytes(&ephemeral_pubkey)
+            .map_err(|_| {
+                ApiError::new(
+                    400,
+                    "possession_proof_invalid",
+                    "ephemeral_pubkey is not a valid Ed25519 public key",
+                )
+            })?
+            .verify(&message, &Signature::from_bytes(&signature_bytes))
+            .map_err(|_| {
+                ApiError::new(
+                    400,
+                    "possession_proof_invalid",
+                    "ephemeral key possession proof does not verify",
+                )
+            })?;
+
+        Ok(RedemptionRequest {
+            action,
+            tx,
+            ephemeral_pubkey,
+            github_url,
+            code_hash,
         })
     }
 
-    pub fn action(&self) -> Action {
-        self.action
+    /// Base58 transaction signature: the oracle's lookup key and the replay
+    /// ledger's identity for this redemption.
+    pub fn tx_signature(&self) -> &str {
+        &self.tx.signature_b58
     }
 
-    pub fn get(&self, key: &str) -> &str {
-        self.map.get(key).map(|s| s.as_str()).unwrap_or_default()
-    }
-
-    pub fn digest_hex(&self) -> String {
-        canonical::digest_hex(&self.map)
-    }
-
-    pub fn map(&self) -> &BTreeMap<String, String> {
-        &self.map
-    }
-
-    /// Verify the claimant's Ed25519 wallet signature over the canonical
-    /// claim message, inside the enclave.
-    pub fn verify_wallet_signature(&self, signature_b58: &str) -> Result<(), ApiError> {
-        let signature_bytes = bs58::decode(signature_b58)
-            .into_vec()
-            .map_err(|_| ApiError::wallet_signature_invalid("signature is not base58"))?;
-        let signature_array: [u8; 64] = signature_bytes
-            .try_into()
-            .map_err(|_| ApiError::wallet_signature_invalid("signature must be 64 bytes"))?;
-        let pubkey_bytes = bs58::decode(self.get("claimant"))
-            .into_vec()
-            .map_err(|_| ApiError::wallet_signature_invalid("claimant is not base58"))?;
-        let pubkey_array: [u8; 32] = pubkey_bytes
-            .try_into()
-            .map_err(|_| ApiError::wallet_signature_invalid("claimant key must be 32 bytes"))?;
-        let verifying_key = VerifyingKey::from_bytes(&pubkey_array)
-            .map_err(|_| ApiError::wallet_signature_invalid("claimant key is invalid"))?;
-        verifying_key
-            .verify(
-                &canonical::message_bytes(&self.map),
-                &Signature::from_bytes(&signature_array),
-            )
-            .map_err(|_| ApiError::wallet_signature_invalid("wallet signature does not verify"))
-    }
-
-    /// Require the request payload bytes to hash to the wallet-signed value.
-    pub fn verify_payload(&self, payload: &str) -> Result<(), ApiError> {
-        let actual = canonical::sha256_hex(payload.as_bytes());
-        if actual != self.get("payload_sha256") {
-            return Err(ApiError::new(
-                400,
-                "payload_mismatch",
-                "request payload does not hash to the wallet-signed payload_sha256",
-            ));
-        }
-        Ok(())
+    /// The redeeming wallet, taken from the signature we verified.
+    pub fn claimant(&self) -> String {
+        bs58::encode(self.tx.fee_payer).into_string()
     }
 }

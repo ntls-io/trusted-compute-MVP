@@ -14,111 +14,66 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-//! Canonical claim encoding shared with the frontend and the oracle.
+//! The redemption commitment carried in the transaction's memo.
 //!
-//! A claim is a flat map of string keys to string values, serialized as JCS
-//! (RFC 8785) restricted to that subset: keys sorted lexicographically,
-//! minimal separators, standard JSON escaping. The signed message is the
-//! UTF-8 bytes of `relational-chain-claim:v1\n` followed by the canonical
-//! JSON. Mirrors devops-acr/oracle/canonical.py and
-//! ntc-web/lib/enclaveClaim.ts; changes must keep the shared test vector
-//! passing in all three suites.
+//! A redeemer commits to their ephemeral key, their payload, and (for
+//! compute) the code they intend to run, by hashing all three into a memo
+//! instruction inside the same transaction that burns the DRT. The wallet's
+//! transaction signature therefore covers the commitment, which is what lets
+//! the enclave verify the request against something the claimant signed
+//! without a second signature prompt.
+//!
+//! Three fixed-size 32-byte fields, so there is no delimiter ambiguity and
+//! no canonicalization to keep in sync across languages. Mirrored by
+//! ntc-web/lib/redemption.ts; the shared vector in `tests.rs` is pinned
+//! byte-for-byte in that suite too.
 
 use sha2::{Digest, Sha256};
-use std::collections::BTreeMap;
 
-pub const DOMAIN_PREFIX: &str = "relational-chain-claim:v1\n";
-
-fn escape_json_string(value: &str, out: &mut String) {
-    out.push('"');
-    for ch in value.chars() {
-        match ch {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\u{0008}' => out.push_str("\\b"),
-            '\u{000C}' => out.push_str("\\f"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if (c as u32) < 0x20 => {
-                out.push_str(&format!("\\u{:04x}", c as u32));
-            }
-            c => out.push(c),
-        }
-    }
-    out.push('"');
-}
-
-/// Canonical JSON for a flat string-valued claim (BTreeMap iterates sorted).
-pub fn canonical_json(claim: &BTreeMap<String, String>) -> String {
-    let mut out = String::from("{");
-    for (i, (key, value)) in claim.iter().enumerate() {
-        if i > 0 {
-            out.push(',');
-        }
-        escape_json_string(key, &mut out);
-        out.push(':');
-        escape_json_string(value, &mut out);
-    }
-    out.push('}');
-    out
-}
-
-/// The exact bytes the wallet signs.
-pub fn message_bytes(claim: &BTreeMap<String, String>) -> Vec<u8> {
-    let mut bytes = DOMAIN_PREFIX.as_bytes().to_vec();
-    bytes.extend_from_slice(canonical_json(claim).as_bytes());
-    bytes
-}
-
-/// SHA-256 of the signed message, hex (the oracle's `claim_digest`).
-pub fn digest_hex(claim: &BTreeMap<String, String>) -> String {
-    hex::encode(Sha256::digest(message_bytes(claim)))
-}
+/// Memo prefix identifying a v1 relational chain commitment.
+pub const MEMO_PREFIX: &str = "rcc1:";
 
 pub fn sha256_hex(data: &[u8]) -> String {
     hex::encode(Sha256::digest(data))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+pub fn sha256(data: &[u8]) -> [u8; 32] {
+    Sha256::digest(data).into()
+}
 
-    /// Cross-language canonicalization vector, pinned identically in
-    /// devops-acr/tests/test_oracle.py and ntc-web/tests/enclaveClaim.test.ts.
-    #[test]
-    fn canonical_vector_digest() {
-        let mut claim = BTreeMap::new();
-        let entries = [
-            ("version", "1".to_string()),
-            ("action", "execute_python".to_string()),
-            ("cluster", "devnet".to_string()),
-            (
-                "program",
-                "CME2Dg7UEW82Hf99rQetEi7Hc5Db9JQPx6Azmx1eWbEE".to_string(),
-            ),
-            ("tx", bs58::encode(vec![2u8; 64]).into_string()),
-            ("pool", bs58::encode(vec![1u8; 32]).into_string()),
-            ("claimant", bs58::encode(vec![3u8; 32]).into_string()),
-            (
-                "payload_sha256",
-                "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".to_string(),
-            ),
-            ("nonce", "00112233445566778899aabbccddeeff".to_string()),
-            ("expiry", "1767225600".to_string()),
-            (
-                "github_url",
-                "https://github.com/nautilus-project/py_compute_median/blob/main/script.py"
-                    .to_string(),
-            ),
-            ("code_hash", "a".repeat(64)),
-        ];
-        for (key, value) in entries {
-            claim.insert(key.to_string(), value);
+/// Hash of the code identity a compute redemption commits to. Append and
+/// pool initialization carry no code reference and commit to `sha256("")`.
+pub fn code_digest(code: Option<(&str, &str)>) -> [u8; 32] {
+    match code {
+        None => sha256(b""),
+        Some((github_url, code_hash)) => {
+            let mut buf = Vec::with_capacity(github_url.len() + code_hash.len() + 1);
+            buf.extend_from_slice(github_url.as_bytes());
+            buf.push(0);
+            buf.extend_from_slice(code_hash.as_bytes());
+            sha256(&buf)
         }
-        assert_eq!(
-            digest_hex(&claim),
-            "600528edcf47bf38a4ced6da3b9565d0e43e8d408073ad38aa1eb4ee38098628"
-        );
     }
+}
+
+/// `sha256(ephemeral_pubkey ‖ sha256(payload) ‖ code_digest)`.
+pub fn commitment(
+    ephemeral_pubkey: &[u8; 32],
+    payload: &[u8],
+    code: Option<(&str, &str)>,
+) -> [u8; 32] {
+    let mut buf = [0u8; 96];
+    buf[..32].copy_from_slice(ephemeral_pubkey);
+    buf[32..64].copy_from_slice(&sha256(payload));
+    buf[64..].copy_from_slice(&code_digest(code));
+    sha256(&buf)
+}
+
+/// The exact memo string the transaction must carry.
+pub fn memo_for(ephemeral_pubkey: &[u8; 32], payload: &[u8], code: Option<(&str, &str)>) -> String {
+    format!(
+        "{}{}",
+        MEMO_PREFIX,
+        hex::encode(commitment(ephemeral_pubkey, payload, code))
+    )
 }

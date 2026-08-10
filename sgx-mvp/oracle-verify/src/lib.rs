@@ -16,16 +16,17 @@
 
 //! Oracle-backed DRT redemption verification for the SGX enclave.
 //!
-//! Split from the enclave binary so the security-critical logic (canonical
-//! claims, wallet signatures, JWS verification, replay ledger, pool
-//! identity) is unit-testable outside SGX and without the Python runtime
-//! the enclave links against.
+//! Split from the enclave binary so the security-critical logic (transaction
+//! parsing, memo commitments, JWS verification, replay ledger, pool identity)
+//! is unit-testable outside SGX and without the Python runtime the enclave
+//! links against.
 
 pub mod authz;
 pub mod canonical;
 pub mod claim;
 pub mod error;
 pub mod oracle_client;
+pub mod soltx;
 pub mod state;
 
 #[cfg(test)]
