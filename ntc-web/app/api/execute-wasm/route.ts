@@ -18,9 +18,9 @@
 
 // app/api/execute-wasm/route.ts
 //
-// Verified WASM execution: wallet-signed claim only. The binary's GitHub
-// URL/hash come from the oracle-verified on-chain redemption and the schema
-// from the enclave's sealed pool identity, never from the client.
+// Verified WASM execution: the signed redemption transaction, and the
+// binary's GitHub URL and hash as committed in its on-chain memo. The schema
+// comes from the enclave's sealed pool identity, never from the client.
 import { NextRequest } from 'next/server';
 import { proxyProtectedRequest } from '@/lib/server/enclaveProxy';
 

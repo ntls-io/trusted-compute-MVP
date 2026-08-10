@@ -22,3 +22,25 @@ import { twMerge } from "tailwind-merge"
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
+
+/**
+ * Parse a user-selected JSON file.
+ *
+ * Both upload paths need the parsed document before the redemption
+ * transaction is signed, because the transaction's memo commits to the
+ * payload built from it.
+ */
+export function readJsonFile(file: File): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      try {
+        resolve(JSON.parse(e.target?.result as string))
+      } catch {
+        reject(new Error("Invalid JSON in data file"))
+      }
+    }
+    reader.onerror = () => reject(new Error("Failed to read data file"))
+    reader.readAsText(file)
+  })
+}

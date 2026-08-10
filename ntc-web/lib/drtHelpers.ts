@@ -26,17 +26,19 @@ import {
   createAssociatedTokenAccountInstruction,
   getAssociatedTokenAddressSync,
 } from "@/lib/solanaToken";
-import { 
-  PublicKey, 
-  SystemProgram, 
+import {
+  PublicKey,
+  SystemProgram,
   SYSVAR_RENT_PUBKEY,
-  clusterApiUrl, 
   Connection,
-  ComputeBudgetProgram, 
-  Transaction
+  ComputeBudgetProgram,
+  Transaction,
+  TransactionInstruction
 } from "@solana/web3.js";
+import bs58 from "bs58";
 
 import { SOLANA_ENDPOINT } from "@/lib/config";
+import { MAX_TRANSACTION_LEN } from "@/lib/redemption";
 
 // Constants for retry logic and network configuration
 const MAX_RETRIES = 3;
@@ -47,6 +49,75 @@ const COMMITMENT = 'confirmed';
 // Minimal wallet shape needed by the helpers below
 interface WalletLike {
   publicKey: PublicKey | null;
+}
+
+/** A wallet that can sign a transaction without immediately sending it. */
+export interface SigningWallet extends WalletLike {
+  signTransaction?: <T extends Transaction>(transaction: T) => Promise<T>;
+}
+
+/** A sent transaction, including the exact bytes the wallet signed. */
+export interface SentTransaction {
+  /** Base58 transaction signature. */
+  tx: string;
+  /** The 64 raw signature bytes, for the ephemeral possession proof. */
+  signature: Uint8Array;
+  /** Serialized signed transaction; the enclave verifies these bytes. */
+  signedTransaction: Uint8Array;
+}
+
+/**
+ * Sign and send a transaction with the redemption memo attached, returning the
+ * signed bytes.
+ *
+ * This exists instead of `.rpc()` / `provider.sendAndConfirm` because those
+ * return only a signature, and the enclave needs the signed transaction
+ * itself: verifying it is what lets a single wallet prompt authorize both the
+ * burn and the enclave operation. Still one prompt — `signTransaction`
+ * followed by a raw send.
+ */
+export async function signSendWithMemo(
+  connection: Connection,
+  wallet: SigningWallet,
+  transaction: Transaction,
+  memoIx: TransactionInstruction,
+  updateStatus?: (status: string) => void
+): Promise<SentTransaction> {
+  if (!wallet.publicKey) throw new Error("Wallet not connected");
+  if (typeof wallet.signTransaction !== "function") {
+    throw new Error(
+      "Connected wallet cannot sign transactions without sending them, which " +
+        "is required to authorize enclave operations."
+    );
+  }
+
+  transaction.add(memoIx);
+  transaction.feePayer = wallet.publicKey;
+  const { blockhash, lastValidBlockHeight } =
+    await connection.getLatestBlockhash(COMMITMENT);
+  transaction.recentBlockhash = blockhash;
+
+  updateStatus?.("Waiting for wallet signature…");
+  const signed = await wallet.signTransaction(transaction);
+  const raw = signed.serialize();
+  if (raw.length > MAX_TRANSACTION_LEN) {
+    throw new Error(
+      `Transaction is ${raw.length} bytes, over Solana's ${MAX_TRANSACTION_LEN}-byte limit`
+    );
+  }
+
+  const tx = await connection.sendRawTransaction(raw, {
+    preflightCommitment: COMMITMENT,
+  });
+  await connection.confirmTransaction(
+    { signature: tx, blockhash, lastValidBlockHeight },
+    COMMITMENT
+  );
+  return {
+    tx,
+    signature: bs58.decode(tx),
+    signedTransaction: Uint8Array.from(raw),
+  };
 }
 
 // Raw on-chain DRT/pool account shapes (Anchor account fetch results aren't
@@ -495,21 +566,23 @@ export async function buyDrt(
 }
 
 /**
- * Redeem a DRT token
- * 
+ * Redeem a DRT token, carrying the enclave commitment in the same transaction.
+ *
  * @param program The anchor program instance
  * @param wallet The wallet to use for redemption
  * @param poolAddress The address of the pool
  * @param drtType The type of DRT to redeem
+ * @param memoIx Memo instruction committing to the enclave request
  * @param updateStatus Optional callback for status updates
  */
 export async function redeemDrt(
   program: anchor.Program,
-  wallet: WalletLike,
+  wallet: SigningWallet,
   poolAddress: string,
   drtType: string,
+  memoIx: TransactionInstruction,
   updateStatus?: (status: string) => void
-): Promise<{ tx: string; ownershipTokenReceived: boolean }> {
+): Promise<SentTransaction & { ownershipTokenReceived: boolean }> {
   if (!wallet.publicKey) throw new Error("Wallet not connected");
   const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
   const poolPubkey = new PublicKey(poolAddress);
@@ -545,7 +618,7 @@ export async function redeemDrt(
   
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
-      const tx = await program.methods
+      const redeemIx = await program.methods
         .redeemDrt(drtType)
         .accounts({
           pool: poolPubkey,
@@ -559,12 +632,20 @@ export async function redeemDrt(
           associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
           rent: SYSVAR_RENT_PUBKEY,
         })
-        .rpc({ commitment: COMMITMENT });
-        
+        .instruction();
+
+      const sent = await signSendWithMemo(
+        program.provider.connection,
+        wallet,
+        new Transaction().add(redeemIx),
+        memoIx,
+        updateStatus
+      );
+
       const ownershipTokenReceived = drtType === "append";
-      updateStatus?.(`DRT redeemed successfully. Transaction: ${tx}${ownershipTokenReceived ? ", ownership token received" : ""}`);
-      
-      return { tx, ownershipTokenReceived };
+      updateStatus?.(`DRT redeemed successfully. Transaction: ${sent.tx}${ownershipTokenReceived ? ", ownership token received" : ""}`);
+
+      return { ...sent, ownershipTokenReceived };
     } catch (error) {
       console.warn(`DRT redemption attempt ${attempt + 1} failed:`, error);
       if (attempt < MAX_RETRIES - 1) {

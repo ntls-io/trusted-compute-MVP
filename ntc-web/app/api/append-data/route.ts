@@ -18,8 +18,8 @@
 
 // app/api/append-data/route.ts
 //
-// Verified append: wallet-signed claim plus the exact JSON payload string
-// the claim's payload_sha256 commits to.
+// Verified append: the signed redemption transaction plus the exact JSON
+// payload string its on-chain memo commits to.
 import { NextRequest } from 'next/server';
 import { proxyProtectedRequest } from '@/lib/server/enclaveProxy';
 
