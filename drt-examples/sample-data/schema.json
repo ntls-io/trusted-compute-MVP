@@ -1,0 +1,12 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Clinical measurements",
+  "type": "object",
+  "properties": {
+    "systolic_bp": { "type": "array", "items": { "type": "number" } },
+    "diastolic_bp": { "type": "array", "items": { "type": "number" } },
+    "resting_hr": { "type": "array", "items": { "type": "number" } },
+    "bmi": { "type": "array", "items": { "type": "number" } }
+  },
+  "required": ["systolic_bp", "diastolic_bp", "resting_hr", "bmi"]
+}

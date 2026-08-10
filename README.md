@@ -30,6 +30,7 @@ attested enclave.
 | Execution enclave | [sgx-mvp](sgx-mvp/) | Runs WASM and Python workloads over sealed data, producing attested results |
 | Front-end | [ntc-web](ntc-web/) | Next.js app for managing data pools, DRTs, and enclave jobs |
 | Smart contract | [drt-manager](drt-manager/) | Solana program governing DRT issuance and redemption |
+| DRT examples | [drt-examples](drt-examples/) | Reference Python scripts and WASM binaries a DRT can authorise, with sample data |
 
 ## Deployment service and oracle
 

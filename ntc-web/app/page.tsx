@@ -48,6 +48,7 @@ import { useDrtProgram } from "@/lib/useDrtProgram";
 import { useWallet, type WalletContextState } from "@solana/wallet-adapter-react";
 import * as anchor from "@coral-xyz/anchor";
 import { redeemDrt, getOnChainDrtMetadata } from "@/lib/drtHelpers";
+import { chainTypeFor, runtimeFor } from "@/lib/drtCatalogue";
 import {
   buildEnclaveRequest,
   generateEphemeralKey,
@@ -142,18 +143,6 @@ interface ExecutionResult {
   error?: string;
 }
 
-const mapDrtTypeForChain = (name: string): string => {
-  switch (name) {
-    case 'Execute Median Python':
-      return 'py_compute_median';
-    case 'Execute Median WASM':
-      return 'w_compute_median';
-    case 'Append Data Pool':
-      return 'append';
-    default:
-      return name.toLowerCase(); // fallback
-  }
-};
 
 // Enclave Dialog Component (unchanged)
 const EnclaveDialog = ({ pool, onAttest }: { pool: Pool; onAttest: () => Promise<AttestationResult> }) => {
@@ -372,7 +361,10 @@ async function redeemForExecute(
   onStatus: (message: string) => void
 ): Promise<EnclaveRequest> {
   if (!wallet.publicKey) throw new Error("Wallet not connected");
-  const chainDrtType = mapDrtTypeForChain(drtInstance.drt.name);
+  // Look the on-chain drt_type up by catalogue id rather than deriving it from
+  // the display name: a wrong type reads the wrong DRT's code reference out of
+  // pool state, and chainTypeFor throws instead of guessing.
+  const chainDrtType = chainTypeFor(drtInstance.drt.id);
   // Code identity comes from on-chain pool state, not the database.
   const metadata = await getOnChainDrtMetadata(
     program,
@@ -1547,7 +1539,7 @@ export default function Home() {
                                 >
                                   Sell
                                 </Button>
-                                {item.drt.name.toLowerCase().includes('python') ? (
+                                {runtimeFor(item.drt.id) === 'python' ? (
                                   <Dialog>
                                     <DialogTrigger asChild>
                                       <Button 
@@ -1568,7 +1560,7 @@ export default function Home() {
                                       wallet={wallet}
                                     />
                                   </Dialog>
-                                ) : item.drt.name.toLowerCase().includes('wasm') ? (
+                                ) : runtimeFor(item.drt.id) === 'wasm' ? (
                                   <Dialog>
                                     <DialogTrigger asChild>
                                       <Button 

@@ -28,6 +28,14 @@ import {
   PartialBatchError,
 } from "@/lib/drtHelpers"
 import { readJsonFile } from "@/lib/utils"
+import { Badge } from "@/components/ui/badge"
+import {
+  canAdd,
+  maxPoolNameLength,
+  poolBudget,
+  type DrtConfigShape,
+} from "@/lib/poolBudget"
+import { chainTypeFor, isSelectable, runtimeFor } from "@/lib/drtCatalogue"
 import {
   buildEnclaveRequest,
   generateEphemeralKey,
@@ -77,10 +85,10 @@ interface StepProps {
 
 interface DigitalRightsTableProps {
   digitalRights: DigitalRight[];
+  selected: Set<string>;
   onToggleRight: (right: DigitalRight, checked: boolean) => void;
-  appendSelected: boolean;
-  wComputeSelected: boolean;
-  pyComputeSelected: boolean;
+  /** Ids that cannot be added because the transaction has no room left. */
+  blocked: Set<string>;
 }
 
 interface Progress {
@@ -90,6 +98,30 @@ interface Progress {
   icon: JSX.Element;
   status: 'loading' | 'success' | 'error';
   details?: string;
+}
+
+/** 0.1 SOL, in lamports. */
+const DEFAULT_DRT_COST = 100_000_000;
+
+/** Product cap on a pool name; the transaction budget may lower it further. */
+const POOL_NAME_MAX_LENGTH = 50;
+
+/** Append is cheap to redeem and expected to be used often; compute is not. */
+function defaultSupplyFor(id: string): number {
+  return runtimeFor(id) === "append" ? 5000 : 800;
+}
+
+/**
+ * The on-chain footprint of a catalogue entry. Append is native to the enclave
+ * and carries no code reference, so it costs a fraction of a compute DRT.
+ */
+function drtConfigShape(right: DigitalRight): DrtConfigShape {
+  const isAppend = runtimeFor(right.id) === "append";
+  return {
+    drtType: chainTypeFor(right.id),
+    githubUrl: isAppend ? null : right.githubUrl,
+    codeHash: isAppend ? null : right.hash,
+  };
 }
 
 /* ------------------------------------------------------------------
@@ -141,65 +173,114 @@ function HashDisplay({ hash }: { hash: string | null }) {
 ------------------------------------------------------------------ */
 function DigitalRightsTable({
   digitalRights,
+  selected,
   onToggleRight,
-  appendSelected,
-  wComputeSelected,
-  pyComputeSelected
+  blocked,
 }: DigitalRightsTableProps) {
   return (
     <Table>
       <TableHeader>
         <TableRow>
-          <TableHead className="w-1/6">Name</TableHead>
-          <TableHead className="w-2/6">Description</TableHead>
-          <TableHead className="w-1/6">GitHub</TableHead>
-          <TableHead className="w-1/6">Expected SHA256 Hash</TableHead>
-          <TableHead className="w-24">Select</TableHead>
+          <TableHead className="w-1/5">Name</TableHead>
+          <TableHead className="w-2/5">Description</TableHead>
+          <TableHead className="w-20">Runtime</TableHead>
+          <TableHead className="w-24">Source</TableHead>
+          <TableHead className="w-28">SHA-256</TableHead>
+          <TableHead className="w-16 text-right">Select</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
         {digitalRights.map((right) => {
-          let checked = false
-          if (right.name.toLowerCase().includes('append')) {
-            checked = appendSelected
-          } else if (right.name.toLowerCase().includes('wasm')) {
-            checked = wComputeSelected
-          } else if (right.name.toLowerCase().includes('python')) {
-            checked = pyComputeSelected
-          }
-
+          const isSelected = selected.has(right.id);
+          const isBlocked = blocked.has(right.id) && !isSelected;
           return (
-            <TableRow key={right.id}>
-              <TableCell className="font-medium">{right.name}</TableCell>
-              <TableCell>{right.description}</TableCell>
-              <TableCell>
+            <TableRow key={right.id} className={isBlocked ? "opacity-50" : undefined}>
+              <TableCell className="font-medium align-top">{right.name}</TableCell>
+              <TableCell className="align-top text-sm text-gray-600">
+                {right.description}
+                {isBlocked && (
+                  <div className="mt-1 text-xs text-amber-700">
+                    No room left in the pool creation transaction
+                  </div>
+                )}
+              </TableCell>
+              <TableCell className="align-top">
+                <Badge variant="outline" className="font-normal">
+                  {runtimeFor(right.id) ?? "-"}
+                </Badge>
+              </TableCell>
+              <TableCell className="align-top">
                 {right.githubUrl ? (
-                  <a 
+                  <a
                     href={right.githubUrl}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-blue-600 hover:text-blue-800 underline"
                   >
-                    View Source
+                    View
                   </a>
                 ) : (
                   "-"
                 )}
               </TableCell>
-              <TableCell>
+              <TableCell className="align-top">
                 <HashDisplay hash={right.hash} />
               </TableCell>
-              <TableCell>
+              <TableCell className="align-top text-right">
                 <Checkbox
-                  checked={checked}
+                  checked={isSelected}
+                  disabled={isBlocked}
                   onCheckedChange={(c) => onToggleRight(right, !!c)}
                 />
               </TableCell>
             </TableRow>
-          )
+          );
         })}
       </TableBody>
     </Table>
+  );
+}
+
+/* ------------------------------------------------------------------
+   TransactionBudget - how much of the pool creation transaction is used
+------------------------------------------------------------------ */
+function TransactionBudget({ configs }: { configs: DrtConfigShape[] }) {
+  const budget = poolBudget(configs);
+  const nameRoom = maxPoolNameLength(configs);
+  const percent = Math.min(100, Math.round((budget.used / budget.limit) * 100));
+  const tight = nameRoom < 40;
+
+  return (
+    <div className="rounded-md border bg-gray-50 p-3 space-y-2">
+      <div className="flex items-baseline justify-between text-sm">
+        <span className="font-medium">Pool creation transaction</span>
+        <span className="font-mono text-xs text-gray-600">
+          {budget.used} / {budget.limit} bytes
+        </span>
+      </div>
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-gray-200">
+        <div
+          className={`h-full transition-all ${
+            !budget.fits ? "bg-red-500" : tight ? "bg-amber-500" : "bg-green-600"
+          }`}
+          style={{ width: `${percent}%` }}
+        />
+      </div>
+      <p className="text-xs text-gray-600">
+        Every DRT&apos;s source URL and hash travel in one Solana instruction, capped
+        at {budget.limit} bytes.{" "}
+        {budget.fits ? (
+          <>
+            This selection leaves room for a pool name of up to{" "}
+            <span className="font-medium">{nameRoom} characters</span>.
+          </>
+        ) : (
+          <span className="text-red-700">
+            This selection does not fit. Deselect a compute DRT to continue.
+          </span>
+        )}
+      </p>
+    </div>
   );
 }
 
@@ -340,19 +421,11 @@ function DigitalRightsStep({
   isActive,
   onNext,
   onPrev,
-  appendSelected,
-  setAppendSelected,
-  wComputeSelected,
-  setWComputeSelected,
-  pyComputeSelected,
-  setPyComputeSelected
+  selectedRights,
+  setSelectedRights,
 }: StepProps & {
-  appendSelected: boolean;
-  setAppendSelected: (b: boolean) => void;
-  wComputeSelected: boolean;
-  setWComputeSelected: (b: boolean) => void;
-  pyComputeSelected: boolean;
-  setPyComputeSelected: (b: boolean) => void;
+  selectedRights: DigitalRight[];
+  setSelectedRights: (rights: DigitalRight[]) => void;
 }) {
   const [digitalRights, setDigitalRights] = useState<DigitalRight[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -365,8 +438,10 @@ function DigitalRightsStep({
         if (!response.ok) {
           throw new Error('Failed to fetch digital rights')
         }
-        const data = await response.json()
-        setDigitalRights(data)
+        const data: DigitalRight[] = await response.json()
+        // Only entries with a known on-chain type can be created; anything
+        // else would mint a DRT that can never be redeemed.
+        setDigitalRights(data.filter((right) => isSelectable(right.id)))
       } catch (err) {
         setError('Failed to load digital rights. Please try again.')
         console.error('Error fetching digital rights:', err)
@@ -380,15 +455,24 @@ function DigitalRightsStep({
     }
   }, [isActive])
 
+  const selectedIds = new Set(selectedRights.map((right) => right.id))
+  const selectedConfigs = selectedRights.map(drtConfigShape)
+
+  // Anything that would not fit alongside the current selection.
+  const blocked = new Set(
+    digitalRights
+      .filter((right) => !selectedIds.has(right.id))
+      .filter((right) => !canAdd(selectedConfigs, drtConfigShape(right)))
+      .map((right) => right.id)
+  )
+
   const handleToggleRight = (right: DigitalRight, checked: boolean) => {
-    const name = right.name.toLowerCase()
-    if (name.includes('append')) {
-      setAppendSelected(checked)
-    } else if (name.includes('wasm')) {
-      setWComputeSelected(checked)
-    } else if (name.includes('python')) {
-      setPyComputeSelected(checked)
-    }
+    // Rebuild from the table order rather than appending, so step 3 lists the
+    // selection the same way it was presented here.
+    const next = checked
+      ? digitalRights.filter((r) => r.id === right.id || selectedIds.has(r.id))
+      : selectedRights.filter((r) => r.id !== right.id)
+    setSelectedRights(next)
   }
 
   if (!isActive) return null
@@ -409,30 +493,44 @@ function DigitalRightsStep({
     )
   }
 
-  return (
-    <div className="space-y-6">
-      <h2 className="text-xl font-semibold">Assign Digital Rights</h2>
+  const fits = poolBudget(selectedConfigs).fits
 
-      <Card>
-        <DigitalRightsTable 
+  return (
+    // Fixed height with the table scrolling inside it, so selecting a DRT or
+    // revealing the budget warning does not resize the page under the cursor.
+    <div className="flex h-[32rem] flex-col space-y-4">
+      <div className="shrink-0 space-y-1">
+        <h2 className="text-xl font-semibold">Assign Digital Rights</h2>
+        <p className="text-sm text-gray-600">
+          Choose which computations this pool will permit. Each one is fixed at
+          creation and bound to the exact code hash shown.
+        </p>
+      </div>
+
+      <Card className="min-h-0 flex-1 overflow-y-auto">
+        <DigitalRightsTable
           digitalRights={digitalRights}
+          selected={selectedIds}
           onToggleRight={handleToggleRight}
-          appendSelected={appendSelected}
-          wComputeSelected={wComputeSelected}
-          pyComputeSelected={pyComputeSelected}
+          blocked={blocked}
         />
       </Card>
 
-      <div className="flex justify-between">
-        <Button variant="outline" onClick={onPrev} className={buttonOutlineClass}>
-          Previous
-        </Button>
-        <Button 
-          onClick={onNext} 
-          className={buttonBaseClass}
-        >
-          Next
-        </Button>
+      <div className="shrink-0 space-y-4">
+        <TransactionBudget configs={selectedConfigs} />
+
+        <div className="flex justify-between">
+          <Button variant="outline" onClick={onPrev} className={buttonOutlineClass}>
+            Previous
+          </Button>
+          <Button
+            onClick={onNext}
+            className={buttonBaseClass}
+            disabled={selectedRights.length === 0 || !fits}
+          >
+            Next
+          </Button>
+        </div>
       </div>
     </div>
   )
@@ -442,9 +540,7 @@ function DigitalRightsStep({
    Step 3: Final pool creation (Name, Description, Supplies, On-Chain)
 ------------------------------------------------------------------ */
 interface PoolCreationStepProps extends StepProps {
-  appendSelected: boolean;
-  wComputeSelected: boolean;
-  pyComputeSelected: boolean;
+  selectedRights: DigitalRight[];
   setPoolCreated: (value: React.SetStateAction<boolean>) => void;
   schemaDefinition: JsonSchemaLike | null;
   dataFile: File | null;
@@ -453,9 +549,7 @@ interface PoolCreationStepProps extends StepProps {
 function PoolCreationStep({
   isActive,
   onPrev,
-  appendSelected,
-  wComputeSelected,
-  pyComputeSelected,
+  selectedRights,
   setPoolCreated,
   schemaDefinition,
   dataFile
@@ -473,12 +567,10 @@ function PoolCreationStep({
   const [teeDeploymentId, setTeeDeploymentId] = useState<string | null>(null);
   const [teeStatus, setTeeStatus] = useState<string | null>(null);
   const [ownershipSupply, setOwnershipSupply] = useState(1000000);
-  const [appendSupply, setAppendSupply] = useState(5000);
-  const [wComputeSupply, setWComputeSupply] = useState(800);
-  const [pyComputeSupply, setPyComputeSupply] = useState(800);
-  const [appendCost, setAppendCost] = useState(100000000); // 0.1 SOL in lamports
-  const [wComputeCost, setWComputeCost] = useState(100000000); // 0.1 SOL in lamports
-  const [pyComputeCost, setPyComputeCost] = useState(100000000); // 0.1 SOL in lamports
+  // Keyed by DRT id; an absent entry means "still on the default", so the
+  // selection can change on step 2 without stranding stale numbers here.
+  const [supplies, setSupplies] = useState<Record<string, number>>({});
+  const [costs, setCosts] = useState<Record<string, number>>({});
   const [steps, setSteps] = useState<{ name: string; walletSignatureRequired: boolean; }[]>([]);
   const [progress, setProgress] = useState<Progress>({
     step: 0,
@@ -489,6 +581,19 @@ function PoolCreationStep({
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [allInputsLocked, setAllInputsLocked] = useState(false);
+
+  const supplyFor = (right: DigitalRight) =>
+    supplies[right.id] ?? defaultSupplyFor(right.id);
+  const costFor = (right: DigitalRight) => costs[right.id] ?? DEFAULT_DRT_COST;
+
+  // The DRT configs and the pool name share one 1232-byte transaction, so how
+  // long a name is allowed depends on what was selected on step 2. A light
+  // selection leaves room for hundreds of characters, which is not a useful
+  // name, so the product cap still applies above the transaction one.
+  const nameLimit = Math.min(
+    POOL_NAME_MAX_LENGTH,
+    maxPoolNameLength(selectedRights.map(drtConfigShape))
+  );
 
   const handleLockPoolName = async () => {
     if (!poolName.trim() || !publicKey) {
@@ -638,7 +743,7 @@ function PoolCreationStep({
     const allSteps = [...baseSteps, ...vmSteps, ...finalSteps];
     setSteps(allSteps);
     setProgress(prev => ({ ...prev, total: allSteps.length }));
-  }, [skipVmCreation, appendSelected, wComputeSelected, pyComputeSelected]);
+  }, [skipVmCreation]);
 
   const updateProgress = (
     step: number,
@@ -680,72 +785,56 @@ function PoolCreationStep({
       if (!poolName.trim()) throw new Error("Pool name is required");
       if (!description.trim()) throw new Error("Pool description is required");
       if (!poolNameLocked) throw new Error("Please lock the pool name before creating");
+      if (selectedRights.length === 0) {
+        throw new Error("Select at least one Digital Right Token on the previous step");
+      }
+      if (poolName.length > nameLimit) {
+        throw new Error(
+          `Pool name is too long for this DRT selection: ${poolName.length} characters, limit ${nameLimit}. ` +
+            `The name and the DRT code references share one Solana transaction.`
+        );
+      }
 
-      // Pull the real code catalog so the on-chain DRT configs carry the
-      // actual GitHub URLs and SHA-256 hashes; compute DRTs with missing
-      // metadata are rejected rather than created (the enclave would refuse
-      // them anyway).
-      const catalogResponse = await fetch('/api/digital-rights');
-      if (!catalogResponse.ok) throw new Error("Failed to load the DRT code catalog");
-      const catalog: { name: string; githubUrl: string | null; hash: string | null }[] =
-        await catalogResponse.json();
-      const findCatalogEntry = (keyword: string) =>
-        catalog.find((entry) => entry.name.toLowerCase().includes(keyword));
-      const requireComputeMetadata = (drtType: string, keyword: string) => {
-        const entry = findCatalogEntry(keyword);
-        if (!entry?.githubUrl || !entry?.hash) {
+      // Compute DRTs must carry a GitHub URL and SHA-256 on-chain; one that
+      // does not is rejected here rather than created, because the enclave
+      // would refuse it only after the DRT had been burned.
+      const requireComputeMetadata = (right: DigitalRight, drtType: string) => {
+        if (!right.githubUrl || !right.hash) {
           throw new Error(
-            `Cannot create ${drtType}: the code catalog has no GitHub URL / SHA-256 hash for it. Compute DRTs must carry on-chain code metadata.`
+            `Cannot create ${drtType}: the catalogue has no GitHub URL / SHA-256 hash for it. Compute DRTs must carry on-chain code metadata.`
           );
         }
         if (
-          !entry.githubUrl.startsWith("https://github.com/") ||
-          entry.githubUrl.length > MAX_GITHUB_URL_LENGTH
+          !right.githubUrl.startsWith("https://github.com/") ||
+          right.githubUrl.length > MAX_GITHUB_URL_LENGTH
         ) {
-          throw new Error(`Cannot create ${drtType}: catalog GitHub URL is malformed or too long`);
+          throw new Error(`Cannot create ${drtType}: catalogue GitHub URL is malformed or too long`);
         }
-        if (!/^[0-9a-f]{64}$/.test(entry.hash)) {
-          throw new Error(`Cannot create ${drtType}: catalog code hash is not a 64-char SHA-256`);
+        if (!/^[0-9a-f]{64}$/.test(right.hash)) {
+          throw new Error(`Cannot create ${drtType}: catalogue code hash is not a 64-char SHA-256`);
         }
-        return { githubUrl: entry.githubUrl, codeHash: entry.hash };
+        return { githubUrl: right.githubUrl, codeHash: right.hash };
       };
 
-      // Prepare DRT configurations for the pool creation
-      const drtConfigs = [];
+      // Prepare DRT configurations for the pool creation. chainTypeFor throws
+      // on an unrecognised catalogue entry: the on-chain drt_type determines
+      // which runtime the enclave will accept, so guessing it is not safe.
+      const drtConfigs = selectedRights.map((right) => {
+        const drtType = chainTypeFor(right.id);
+        // Append is native to the platform; it carries no code reference.
+        const metadata =
+          runtimeFor(right.id) === "append"
+            ? undefined
+            : requireComputeMetadata(right, drtType);
+        return {
+          drtType,
+          supply: new BN(supplyFor(right)),
+          cost: new BN(costFor(right)),
+          githubUrl: metadata?.githubUrl,
+          codeHash: metadata?.codeHash,
+        };
+      });
 
-      if (appendSelected) {
-        drtConfigs.push({
-          drtType: "append",
-          supply: new BN(appendSupply),
-          cost: new BN(appendCost),
-          // Append is native to the platform; it carries no code reference.
-          githubUrl: undefined,
-          codeHash: undefined
-        });
-      }
-
-      if (wComputeSelected) {
-        const metadata = requireComputeMetadata("w_compute_median", "wasm");
-        drtConfigs.push({
-          drtType: "w_compute_median",
-          supply: new BN(wComputeSupply),
-          cost: new BN(wComputeCost),
-          githubUrl: metadata.githubUrl,
-          codeHash: metadata.codeHash
-        });
-      }
-
-      if (pyComputeSelected) {
-        const metadata = requireComputeMetadata("py_compute_median", "python");
-        drtConfigs.push({
-          drtType: "py_compute_median",
-          supply: new BN(pyComputeSupply),
-          cost: new BN(pyComputeCost),
-          githubUrl: metadata.githubUrl,
-          codeHash: metadata.codeHash
-        });
-      }
-  
       // Start the VM deployment in parallel if not skipped
       let vmDeploymentPromise;
       let measurements = null;
@@ -983,7 +1072,7 @@ function PoolCreationStep({
           <div className="flex space-x-2">
             <Input
               placeholder="Enter name"
-              maxLength={50}
+              maxLength={nameLimit}
               value={poolName}
               onChange={(e) => setPoolName(e.target.value)}
               disabled={allInputsLocked || (poolNameLocked && !isSubmitting)}
@@ -1008,11 +1097,20 @@ function PoolCreationStep({
               )}
             </Button>
           </div>
-          {poolNameLocked && (
-            <p className="mt-1 text-xs text-gray-500">
-              This pool will be created with ID #{poolId}
-            </p>
-          )}
+          {/* A name typed under a looser limit stays in state if DRTs are
+              added on the previous step, so flag it rather than silently
+              failing at signing time. */}
+          <p
+            className={`mt-1 text-xs ${
+              poolName.length > nameLimit ? "text-red-700" : "text-gray-500"
+            }`}
+          >
+            {poolNameLocked && <>This pool will be created with ID #{poolId}. </>}
+            {poolName.length}/{nameLimit} characters
+            {nameLimit < POOL_NAME_MAX_LENGTH && (
+              <> — shortened to fit {selectedRights.length} DRTs in one transaction</>
+            )}
+          </p>
         </div>
         
         <div className="md:col-span-2">
@@ -1054,114 +1152,66 @@ function PoolCreationStep({
             </span>
           </div>
         </div>
-        <div className="bg-gray-50 rounded-md p-3">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-4">
-              <div className="flex items-center space-x-2">
-                <label className="text-sm font-medium">Ownership Token Supply:</label>
-                <Input
-                  type="number"
-                  min={1}
-                  value={ownershipSupply}
-                  onChange={(e) => setOwnershipSupply(Number(e.target.value))}
-                  className={`w-32 ${allInputsLocked ? "bg-gray-100" : ""}`}
-                  disabled={allInputsLocked}
-                />
-              </div>
-              
-              {appendSelected && (
-                <>
-                <div className="flex items-center space-x-2">
-                  <label className="text-sm font-medium">Append DRT Supply:</label>
-                  <Input
-                    type="number"
-                    min={1}
-                    value={appendSupply}
-                    onChange={(e) => setAppendSupply(Number(e.target.value))}
-                    className={`w-32 ${allInputsLocked ? "bg-gray-100" : ""}`}
-                    disabled={allInputsLocked}
-                  />
-                </div>
-                <div className="flex items-center space-x-2">
-                  <label className="text-sm font-medium">Append DRT Cost (lamports):</label>
-                  <Input
-                    type="number"
-                    min={1}
-                    value={appendCost}
-                    onChange={(e) => setAppendCost(Number(e.target.value))}
-                    className={`w-32 ${allInputsLocked ? "bg-gray-100" : ""}`}
-                    disabled={allInputsLocked}
-                  />
-                  <span className="text-xs text-gray-500">
-                    ({(appendCost / 1_000_000_000).toFixed(3)} SOL)
-                  </span>
-                </div>
-                </>
-              )}
-            </div>
-            
-            <div className="space-y-4">
-              {wComputeSelected && (
-                <>
-                <div className="flex items-center space-x-2">
-                  <label className="text-sm font-medium">W Compute DRT Supply:</label>
-                  <Input
-                    type="number"
-                    min={1}
-                    value={wComputeSupply}
-                    onChange={(e) => setWComputeSupply(Number(e.target.value))}
-                    className={`w-32 ${allInputsLocked ? "bg-gray-100" : ""}`}
-                    disabled={allInputsLocked}
-                  />
-                </div>
-                <div className="flex items-center space-x-2">
-                  <label className="text-sm font-medium">W Compute Cost (lamports):</label>
-                  <Input
-                    type="number"
-                    min={1}
-                    value={wComputeCost}
-                    onChange={(e) => setWComputeCost(Number(e.target.value))}
-                    className={`w-32 ${allInputsLocked ? "bg-gray-100" : ""}`}
-                    disabled={allInputsLocked}
-                  />
-                  <span className="text-xs text-gray-500">
-                    ({(wComputeCost / 1_000_000_000).toFixed(3)} SOL)
-                  </span>
-                </div>
-                </>
-              )}
-              
-              {pyComputeSelected && (
-                <>
-                <div className="flex items-center space-x-2">
-                  <label className="text-sm font-medium">Py Compute DRT Supply:</label>
-                  <Input
-                    type="number"
-                    min={1}
-                    value={pyComputeSupply}
-                    onChange={(e) => setPyComputeSupply(Number(e.target.value))}
-                    className={`w-32 ${allInputsLocked ? "bg-gray-100" : ""}`}
-                    disabled={allInputsLocked}
-                  />
-                </div>
-                <div className="flex items-center space-x-2">
-                  <label className="text-sm font-medium">Py Compute Cost (lamports):</label>
-                  <Input
-                    type="number"
-                    min={1}
-                    value={pyComputeCost}
-                    onChange={(e) => setPyComputeCost(Number(e.target.value))}
-                    className={`w-32 ${allInputsLocked ? "bg-gray-100" : ""}`}
-                    disabled={allInputsLocked}
-                  />
-                  <span className="text-xs text-gray-500">
-                    ({(pyComputeCost / 1_000_000_000).toFixed(3)} SOL)
-                  </span>
-                </div>
-                </>
-              )}
-            </div>
+        <div className="bg-gray-50 rounded-md p-3 space-y-4">
+          <div className="flex items-center space-x-2">
+            <label className="text-sm font-medium">Ownership Token Supply:</label>
+            <Input
+              type="number"
+              min={1}
+              value={ownershipSupply}
+              onChange={(e) => setOwnershipSupply(Number(e.target.value))}
+              className={`w-32 ${allInputsLocked ? "bg-gray-100" : ""}`}
+              disabled={allInputsLocked}
+            />
           </div>
+
+          {selectedRights.length === 0 ? (
+            <p className="text-sm text-amber-700">
+              No Digital Right Tokens selected. Go back and choose at least one.
+            </p>
+          ) : (
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              {selectedRights.map((right) => (
+                <div key={right.id} className="rounded-md border bg-white p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium">{right.name}</span>
+                    <Badge variant="outline" className="font-normal">
+                      {runtimeFor(right.id) ?? "-"}
+                    </Badge>
+                  </div>
+                  <div className="flex items-center justify-between space-x-2">
+                    <label className="text-sm text-gray-600">Supply</label>
+                    <Input
+                      type="number"
+                      min={1}
+                      value={supplyFor(right)}
+                      onChange={(e) =>
+                        setSupplies((prev) => ({ ...prev, [right.id]: Number(e.target.value) }))
+                      }
+                      className={`w-32 ${allInputsLocked ? "bg-gray-100" : ""}`}
+                      disabled={allInputsLocked}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between space-x-2">
+                    <label className="text-sm text-gray-600">Cost (lamports)</label>
+                    <Input
+                      type="number"
+                      min={1}
+                      value={costFor(right)}
+                      onChange={(e) =>
+                        setCosts((prev) => ({ ...prev, [right.id]: Number(e.target.value) }))
+                      }
+                      className={`w-32 ${allInputsLocked ? "bg-gray-100" : ""}`}
+                      disabled={allInputsLocked}
+                    />
+                  </div>
+                  <p className="text-right text-xs text-gray-500">
+                    {(costFor(right) / 1_000_000_000).toFixed(3)} SOL per redemption
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </Card>
       <Card className="p-4">
@@ -1177,7 +1227,14 @@ function PoolCreationStep({
             </Button>
             <Button
               onClick={handleCreatePool}
-              disabled={!poolNameLocked || !description.trim() || isSubmitting || allInputsLocked}
+              disabled={
+                !poolNameLocked ||
+                !description.trim() ||
+                isSubmitting ||
+                allInputsLocked ||
+                selectedRights.length === 0 ||
+                poolName.length > nameLimit
+              }
               className={buttonBaseClass}
             >
               {isSubmitting ? 'Creating Pool...' : 'Create Pool'}
@@ -1242,9 +1299,7 @@ export default function Pools() {
   const [currentStep, setCurrentStep] = useState(1)
   const [schemaDefinition, setSchemaDefinition] = useState<JsonSchemaLike | null>(null);
   const [dataFile, setDataFile] = useState<File | null>(null);
-  const [appendSelected, setAppendSelected] = useState(false)
-  const [wComputeSelected, setWComputeSelected] = useState(false)
-  const [pyComputeSelected, setPyComputeSelected] = useState(false)
+  const [selectedRights, setSelectedRights] = useState<DigitalRight[]>([])
   const [poolCreated, setPoolCreated] = useState(false);
 
   useEffect(() => {
@@ -1280,12 +1335,8 @@ export default function Pools() {
           isActive={currentStep === 2}
           onNext={() => setCurrentStep(3)}
           onPrev={() => setCurrentStep(1)}
-          appendSelected={appendSelected}
-          setAppendSelected={setAppendSelected}
-          wComputeSelected={wComputeSelected}
-          setWComputeSelected={setWComputeSelected}
-          pyComputeSelected={pyComputeSelected}
-          setPyComputeSelected={setPyComputeSelected}
+          selectedRights={selectedRights}
+          setSelectedRights={setSelectedRights}
         />
         <PoolCreationStep
           isActive={currentStep === 3}
@@ -1295,9 +1346,7 @@ export default function Pools() {
             setDataFile(null)
           }}
           onPrev={() => setCurrentStep(2)}
-          appendSelected={appendSelected}
-          wComputeSelected={wComputeSelected}
-          pyComputeSelected={pyComputeSelected}
+          selectedRights={selectedRights}
           setPoolCreated={setPoolCreated}
           schemaDefinition={schemaDefinition}
           dataFile={dataFile}

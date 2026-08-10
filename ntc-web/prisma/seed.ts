@@ -62,30 +62,72 @@ async function main() {
   console.log('✅ Roles seeded.');
 
   console.log('🏷️ Seeding Digital Right Tokens (DRTs)...');
+  // Short paths are deliberate. createPoolWithDrts carries every DRT's URL and
+  // hash in one Solana instruction, capped at 1232 bytes, so ~10 characters of
+  // URL is the difference between fitting three compute DRTs on a pool and
+  // fitting two. See drt-examples/README.md.
+  const EXAMPLES =
+    'https://github.com/Relational-Network/trusted-compute-MVP/blob/main/drt-examples';
+
   const drtsToUpsert = [
     {
       id: 'APPEND_DATA_POOL',
       name: 'Append Data Pool',
-      description: 'Allows adding new data entries while maintaining schema integrity.',
-      githubUrl: 'https://github.com/ntls-io/trusted-compute-MVP/blob/main/sgx-mvp/json-append/src/lib.rs',
+      description: 'Adds new records to the sealed pool, enforcing the pool schema.',
+      githubUrl:
+        'https://github.com/Relational-Network/trusted-compute-MVP/blob/main/sgx-mvp/json-append/src/lib.rs',
       isActive: true,
+      // Append is native to the enclave rather than downloaded code, so it
+      // carries no artefact hash and none is written on-chain.
       hash: null,
     },
     {
-      id: 'EXECUTE_MEDIAN_WASM',
-      name: 'Execute Median WASM',
-      description: 'Runs Rust WebAssembly-based median calculations.',
-      githubUrl: 'https://github.com/ntls-io/WASM-Binaries-MVP/blob/master/bin/get_median_wasm.wasm',
+      id: 'EXECUTE_MEAN_PYTHON',
+      name: 'Execute Mean Python',
+      description: 'Mean of every numeric column, in the enclave Python runtime.',
+      githubUrl: `${EXAMPLES}/python/mean.py`,
       isActive: true,
-      hash: '728445d425153350b3e353cc96d29c16d5d81978ea3d7bad21f3d2b2dd76d813',
+      hash: 'd1bb84ecf1f107013df0fe5ea8a63c15bbd673a81a13a6871c6b43d7e85fd690',
     },
     {
       id: 'EXECUTE_MEDIAN_PYTHON',
       name: 'Execute Median Python',
-      description: 'Runs Python-based median computations on data pools.',
-      githubUrl: 'https://github.com/ntls-io/Python-Scripts-MVP/blob/main/calculate_median.py',
+      description: 'Median of every numeric column, in the enclave Python runtime.',
+      githubUrl: `${EXAMPLES}/python/median.py`,
       isActive: true,
       hash: 'c648a5eefbd58c1fe95c48a53ceb7f0957ee1c5842f043710a41b21123e170d7',
+    },
+    {
+      id: 'EXECUTE_SD_PYTHON',
+      name: 'Execute SD Python',
+      description: 'Population standard deviation per column, in the enclave Python runtime.',
+      githubUrl: `${EXAMPLES}/python/sd.py`,
+      isActive: true,
+      hash: '65230a7a140e30f94fe4d070c9f9e8146a44c2f59d85bff2e83ac9ffa5db39ee',
+    },
+    {
+      id: 'EXECUTE_MEAN_WASM',
+      name: 'Execute Mean WASM',
+      description: 'Mean of every schema-declared numeric column, as a WASM binary.',
+      githubUrl: `${EXAMPLES}/wasm/bin/mean.wasm`,
+      isActive: true,
+      hash: 'b5ee81a20256dec2bd3db6e673b11eadae4baf8fafbe68cec1f36517bb569255',
+    },
+    {
+      id: 'EXECUTE_MEDIAN_WASM',
+      name: 'Execute Median WASM',
+      description: 'Median of every schema-declared numeric column, as a WASM binary.',
+      githubUrl: `${EXAMPLES}/wasm/bin/median.wasm`,
+      isActive: true,
+      hash: '728445d425153350b3e353cc96d29c16d5d81978ea3d7bad21f3d2b2dd76d813',
+    },
+    {
+      id: 'EXECUTE_SD_WASM',
+      name: 'Execute SD WASM',
+      description: 'Population standard deviation per column, as a WASM binary.',
+      githubUrl: `${EXAMPLES}/wasm/bin/sd.wasm`,
+      isActive: true,
+      hash: 'feb835e2eb26115d1865f381ab80440442761f7c89bc7a56d05bca2cb151c37e',
     },
     {
       id: 'OWNERSHIP_TOKEN',
