@@ -18,8 +18,9 @@
 
 // app/api/create-data-pool/route.ts
 //
-// One-time pool initialization: wallet-signed PoolCreated claim plus the
-// exact payload string containing `schema` and seed `data`.
+// One-time pool initialization: the signed pool-creation transaction plus
+// the exact payload string containing `schema` and seed `data`, which its
+// on-chain memo commits to.
 import { NextRequest } from 'next/server';
 import { proxyProtectedRequest } from '@/lib/server/enclaveProxy';
 

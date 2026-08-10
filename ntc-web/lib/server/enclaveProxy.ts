@@ -19,9 +19,11 @@
 // lib/server/enclaveProxy.ts
 //
 // Shared proxy for the enclave's protected endpoints. Every protected
-// request is a wallet-signed chain claim (+ optional exact payload string);
-// security-sensitive fields (GitHub URL, code hash, schema) never come from
-// the client. Enclave error bodies are passed through verbatim in `details`
+// request is the claimant's signed redemption transaction plus the values
+// its on-chain memo commits to; the enclave re-derives the commitment and
+// refuses anything that does not match, so this layer only forwards. The
+// WASM schema still never comes from the client -- the enclave uses its
+// sealed copy. Enclave error bodies are passed through verbatim in `details`
 // so the browser can surface distinct error codes.
 import { NextRequest, NextResponse } from 'next/server';
 import fetch from 'node-fetch';
@@ -29,9 +31,12 @@ import https from 'https';
 
 interface ProtectedBody {
   publicIp?: string;
-  claim?: Record<string, string>;
-  wallet_signature?: string;
+  signed_transaction?: string;
+  ephemeral_pubkey?: string;
+  ephemeral_signature?: string;
   payload?: string;
+  github_url?: string;
+  code_hash?: string;
 }
 
 export async function proxyProtectedRequest(
@@ -49,24 +54,48 @@ export async function proxyProtectedRequest(
     );
   }
 
-  const { publicIp, claim, wallet_signature, payload } = body;
-  if (!publicIp || !claim || !wallet_signature) {
+  const {
+    publicIp,
+    signed_transaction,
+    ephemeral_pubkey,
+    ephemeral_signature,
+    payload,
+    github_url,
+    code_hash,
+  } = body;
+  if (!publicIp || !signed_transaction || !ephemeral_pubkey || !ephemeral_signature) {
     return NextResponse.json(
-      { error: 'Missing required fields', required: ['publicIp', 'claim', 'wallet_signature'] },
+      {
+        error: 'Missing required fields',
+        required: [
+          'publicIp',
+          'signed_transaction',
+          'ephemeral_pubkey',
+          'ephemeral_signature',
+        ],
+      },
       { status: 400 }
     );
   }
   if (options.requirePayload && typeof payload !== 'string') {
     return NextResponse.json(
-      { error: 'Missing payload (exact JSON string the claim commits to)' },
+      { error: 'Missing payload (exact JSON string the memo commits to)' },
       { status: 400 }
     );
   }
 
   try {
-    const enclaveRequest: Record<string, unknown> = { claim, wallet_signature };
+    const enclaveRequest: Record<string, unknown> = {
+      signed_transaction,
+      ephemeral_pubkey,
+      ephemeral_signature,
+    };
     if (typeof payload === 'string') {
       enclaveRequest.payload = payload;
+    }
+    if (typeof github_url === 'string' && typeof code_hash === 'string') {
+      enclaveRequest.github_url = github_url;
+      enclaveRequest.code_hash = code_hash;
     }
 
     const response = await fetch(`https://${publicIp}${enclavePath}`, {

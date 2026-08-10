@@ -49,11 +49,18 @@ const FRIENDLY_MESSAGES: Record<string, string> = {
     "The DRT's code metadata (GitHub URL / SHA-256 hash) is missing or malformed.",
   replay_rejected:
     "This redemption was already used; each DRT authorizes exactly one operation.",
-  payload_mismatch:
-    "The uploaded payload does not match what the wallet signed.",
-  wallet_signature_invalid: "The wallet signature was rejected.",
-  invalid_claim: "The redemption claim was rejected as invalid.",
-  claim_expired: "The redemption claim expired before it was verified.",
+  commitment_mismatch:
+    "This request does not match what the redemption transaction committed to on-chain.",
+  memo_missing:
+    "The redemption transaction carries no commitment; nothing binds it to this request.",
+  tx_signature_invalid:
+    "The redemption transaction's signature was rejected by the enclave.",
+  transaction_malformed:
+    "The enclave could not read the redemption transaction.",
+  possession_proof_invalid:
+    "This session does not hold the key the redemption was committed to.",
+  invalid_claim: "The redemption request was rejected as invalid.",
+  tx_too_old: "The redemption transaction is older than the oracle will verify.",
   pool_binding_violation:
     "This enclave is bound to a different pool or is not initialized.",
   execution_failed:

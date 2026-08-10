@@ -16,19 +16,23 @@
 
 //! Outbound oracle client and local JWS verification.
 //!
+//! The oracle answers exactly one on-demand question: *did this transaction
+//! signature finalize, and what did it emit?* It is never trusted for
+//! anything the claimant signed — payload, code identity, and the ephemeral
+//! key are all bound by the on-chain memo commitment and verified in
+//! `claim.rs` before this module is reached.
+//!
 //! The enclave never trusts the host, DNS, or an unsigned response: every
 //! assertion is a compact JWS verified against the Ed25519 oracle public key
 //! pinned into the measured enclave image (ORACLE_ED25519_PUBKEY_HEX in the
-//! Gramine manifest), then cross-checked field-by-field against the
-//! wallet-signed claim.
+//! Gramine manifest), then cross-checked against the verified transaction.
 
-use crate::claim::{now_unix, ClaimContext};
+use crate::claim::{now_unix, RedemptionRequest};
 use crate::error::ApiError;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::Deserialize;
-use std::collections::BTreeMap;
 use std::time::Duration;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -40,26 +44,20 @@ pub struct OracleAssertion {
     pub program: String,
     pub tx: String,
     pub slot: Option<u64>,
-    pub action: String,
     pub pool: String,
+    /// Pool owner for an initialization, redeemer for a redemption.
     pub claimant: String,
     pub drt_type: Option<String>,
     pub execution_type: String,
     pub github_url: Option<String>,
     pub code_hash: Option<String>,
-    pub payload_sha256: String,
-    pub claim_digest: String,
 }
 
 /// Transport to the oracle; a trait so unit tests can mock outages,
 /// timeouts, and forged responses without a network.
 pub trait OracleTransport: Send + Sync {
-    /// Submit the claim + wallet signature, returning the raw compact JWS.
-    fn verify_chain_claim(
-        &self,
-        claim: &BTreeMap<String, String>,
-        wallet_signature: &str,
-    ) -> Result<String, ApiError>;
+    /// Submit the transaction signature, returning the raw compact JWS.
+    fn verify_transaction(&self, tx_signature: &str) -> Result<String, ApiError>;
 }
 
 pub struct HttpOracleTransport {
@@ -68,26 +66,19 @@ pub struct HttpOracleTransport {
 }
 
 impl OracleTransport for HttpOracleTransport {
-    fn verify_chain_claim(
-        &self,
-        claim: &BTreeMap<String, String>,
-        wallet_signature: &str,
-    ) -> Result<String, ApiError> {
+    fn verify_transaction(&self, tx_signature: &str) -> Result<String, ApiError> {
         let client = reqwest::blocking::Client::builder()
             .use_rustls_tls()
             .timeout(self.timeout)
             .build()
             .map_err(|e| ApiError::oracle_unavailable(format!("oracle client init: {e}")))?;
         let url = format!(
-            "{}/oracle/v1/verify-chain-claim",
+            "{}/oracle/v1/verify-transaction",
             self.base_url.trim_end_matches('/')
         );
         let response = client
             .post(url)
-            .json(&serde_json::json!({
-                "claim": claim,
-                "wallet_signature": wallet_signature,
-            }))
+            .json(&serde_json::json!({ "tx": tx_signature }))
             .send()
             .map_err(|e| ApiError::oracle_unavailable(format!("oracle unreachable: {e}")))?;
 
@@ -105,7 +96,11 @@ impl OracleTransport for HttpOracleTransport {
             return Err(ApiError::oracle_rejected(
                 409,
                 "oracle_rejected",
-                format!("oracle refused claim ({}): {}", status.as_u16(), detail),
+                format!(
+                    "oracle refused transaction ({}): {}",
+                    status.as_u16(),
+                    detail
+                ),
             ));
         }
         body.get("assertion")
@@ -154,52 +149,48 @@ pub fn verify_jws(token: &str, oracle_pubkey: &[u8; 32]) -> Result<OracleAsserti
         .map_err(|e| ApiError::assertion_invalid(format!("bad JWS payload: {e}")))
 }
 
-/// Require every assertion field to match the wallet-signed claim. The
-/// oracle can only approve or deny what the claimant signed for; it cannot
-/// substitute code, pools, or payloads.
-pub fn cross_check(assertion: &OracleAssertion, claim: &ClaimContext) -> Result<(), ApiError> {
+/// Require the assertion to describe the transaction the enclave already
+/// verified. The oracle can only confirm or deny that transaction; it cannot
+/// point the enclave at a different one, a different redeemer, or different
+/// code.
+///
+/// Pool binding is checked by the caller, which holds the sealed identity.
+pub fn cross_check(
+    assertion: &OracleAssertion,
+    request: &RedemptionRequest,
+    expected_cluster: &str,
+    expected_program: &str,
+) -> Result<(), ApiError> {
     if assertion.exp <= now_unix() {
         return Err(ApiError::assertion_invalid("oracle assertion has expired"));
     }
-    if assertion.claim_digest != claim.digest_hex() {
-        return Err(ApiError::assertion_invalid(
-            "assertion digest does not match the wallet-signed claim",
-        ));
-    }
     let mismatch = |field: &str| {
         Err(ApiError::assertion_invalid(format!(
-            "assertion {field} does not match the wallet-signed claim"
+            "assertion {field} does not match the verified transaction"
         )))
     };
-    if assertion.cluster != claim.get("cluster") {
+    if assertion.cluster != expected_cluster {
         return mismatch("cluster");
     }
-    if assertion.program != claim.get("program") {
+    if assertion.program != expected_program {
         return mismatch("program");
     }
-    if assertion.tx != claim.get("tx") {
+    if assertion.tx != request.tx_signature() {
         return mismatch("tx");
     }
-    if assertion.action != claim.action().as_str() {
-        return mismatch("action");
-    }
-    if assertion.pool != claim.get("pool") {
-        return mismatch("pool");
-    }
-    if assertion.claimant != claim.get("claimant") {
+    if assertion.claimant != request.claimant() {
         return mismatch("claimant");
     }
-    if assertion.payload_sha256 != claim.get("payload_sha256") {
-        return mismatch("payload_sha256");
-    }
-    if assertion.execution_type != claim.action().expected_execution_type() {
+    if assertion.execution_type != request.action.expected_execution_type() {
         return mismatch("execution_type");
     }
-    if claim.action().is_compute() {
-        if assertion.github_url.as_deref() != Some(claim.get("github_url")) {
+    // For compute the on-chain DRT's code identity must be exactly what the
+    // claimant committed to in the memo.
+    if request.action.is_compute() {
+        if assertion.github_url.as_deref() != request.github_url.as_deref() {
             return mismatch("github_url");
         }
-        if assertion.code_hash.as_deref() != Some(claim.get("code_hash")) {
+        if assertion.code_hash.as_deref() != request.code_hash.as_deref() {
             return mismatch("code_hash");
         }
     }

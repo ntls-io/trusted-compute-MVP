@@ -2,7 +2,7 @@
 # Nautilus Trusted Compute
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
-# Orchestrates the local-validator integration test (plan.md test plan).
+# Orchestrates the local-validator integration test.
 # Requires: solana-test-validator, anchor CLI, node 20+, python 3.10+,
 # a built drt_manager.so (anchor build in trusted-compute-MVP/drt-manager),
 # and `pip install -r devops-acr/requirements.txt`.

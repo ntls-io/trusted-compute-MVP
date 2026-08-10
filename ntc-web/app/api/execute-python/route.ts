@@ -18,9 +18,11 @@
 
 // app/api/execute-python/route.ts
 //
-// Verified Python execution: wallet-signed claim only. The script's GitHub
-// URL and code hash come from the oracle-verified on-chain redemption,
-// never from the client.
+// Verified Python execution: the signed redemption transaction, and the
+// script's GitHub URL and code hash as committed in its on-chain memo. The
+// enclave re-derives the commitment and cross-checks both against the
+// oracle's view of the redeemed DRT, so neither the client nor the oracle
+// can substitute a different program.
 import { NextRequest } from 'next/server';
 import { proxyProtectedRequest } from '@/lib/server/enclaveProxy';
 

@@ -22,8 +22,14 @@ import { useState, useEffect, useCallback, JSX } from 'react';
 import { useDrtProgram } from "@/lib/useDrtProgram";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { redeemDrt } from "@/lib/drtHelpers";
-import { buildClaim, signClaim, walletSupportsSignMessage } from "@/lib/enclaveClaim";
+import {
+  buildEnclaveRequest,
+  generateEphemeralKey,
+  memoFor,
+  memoInstruction,
+} from "@/lib/redemption";
 import { postToEnclave } from "@/lib/enclaveApi";
+import { readJsonFile } from "@/lib/utils";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -403,33 +409,12 @@ const JoinPoolDialog = ({ pool, drtInstances, fetchUserData, onAttest }: { pool:
       const drtInstance = appendDrts.find(drt => drt.id === selectedDrt);
       if (!drtInstance) throw new Error("Selected DRT not found");
 
-      // The enclave claim requires an additional wallet message signature;
-      // check support BEFORE burning the DRT.
-      if (!walletSupportsSignMessage(wallet)) {
-        throw new Error(
-          "Connected wallet does not support message signing (signMessage), which is required to authorize the enclave append. Please use a wallet that supports it."
-        );
-      }
-
       const publicIp = pool.enclaveMeasurement?.publicIp;
       if (!publicIp) throw new Error("Enclave public IP not available");
 
-      // Read and serialize the payload up front: the wallet signs its hash.
-      const dataReader = new FileReader();
-      const dataPromise = new Promise((resolve, reject) => {
-        dataReader.onload = (e) => {
-          try {
-            const data = JSON.parse(e.target?.result as string);
-            resolve(data);
-          } catch {
-            reject(new Error("Invalid JSON in data file"));
-          }
-        };
-        dataReader.onerror = () => reject(new Error("Failed to read data file"));
-        dataReader.readAsText(dataFile!);
-      });
-      const dataJson = await dataPromise;
-      const payload = JSON.stringify(dataJson);
+      // Read and serialize the payload up front: the burn transaction's memo
+      // commits to these exact bytes.
+      const payload = JSON.stringify(await readJsonFile(dataFile!));
 
       // Attestation preflight before any redemption or upload.
       updateProgress(1, "Verifying enclave attestation", "loading");
@@ -440,34 +425,32 @@ const JoinPoolDialog = ({ pool, drtInstances, fetchUserData, onAttest }: { pool:
         );
       }
 
+      // One wallet prompt: the burn transaction carries a memo committing to
+      // this exact payload and to the ephemeral key that will collect the
+      // result, so its signature authorizes the enclave append as well.
+      const ephemeral = generateEphemeralKey();
       updateProgress(1, "Redeeming Append DRT", "loading", "Please sign with your wallet");
-      const { tx, ownershipTokenReceived } = await redeemDrt(
+      const sent = await redeemDrt(
         program,
         wallet,
         pool.chainAddress,
         "append",
+        memoInstruction(memoFor(ephemeral.publicKey, payload, null)),
         (msg) => updateProgress(1, msg, "loading")
       );
 
-      if (!ownershipTokenReceived) throw new Error("Ownership token not received");
-      updateProgress(2, "Append DRT redeemed, ownership token received", "success", `Tx: ${tx}`);
-
-      // Build and sign the chain claim binding this payload to the burn tx.
-      const claim = await buildClaim({
-        action: "append",
-        tx,
-        pool: pool.chainAddress,
-        claimant: wallet.publicKey.toBase58(),
-        payload,
-      });
-      const walletSignature = await signClaim(wallet, claim);
+      if (!sent.ownershipTokenReceived) throw new Error("Ownership token not received");
+      updateProgress(2, "Append DRT redeemed, ownership token received", "success", `Tx: ${sent.tx}`);
 
       updateProgress(2, "Appending data to enclave", "loading", "Waiting for on-chain finality and oracle verification");
       const result = await postToEnclave<string>("/api/append-data", {
         publicIp,
-        claim,
-        wallet_signature: walletSignature,
-        payload,
+        ...buildEnclaveRequest({
+          signedTransaction: sent.signedTransaction,
+          txSignature: sent.signature,
+          ephemeral,
+          payload,
+        }),
       });
 
       if (result === "Data appended, sealed, and saved successfully") {

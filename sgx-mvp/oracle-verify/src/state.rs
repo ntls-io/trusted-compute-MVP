@@ -20,7 +20,7 @@
 //! encrypted mount keyed by MRENCLAVE (`/data`), so they are sealed at rest
 //! and survive restarts. `DATA_DIR` overrides the location for unit tests.
 //! Rollback protection for this sealed state is explicitly out of scope for
-//! the research prototype (plan.md, "Assumptions and Scope").
+//! the research prototype.
 
 use crate::error::ApiError;
 use serde::{Deserialize, Serialize};
@@ -89,7 +89,7 @@ pub enum EntryStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LedgerEntry {
     pub status: EntryStatus,
-    pub claim_digest: String,
+    pub commitment: String,
     /// Cached result for identical successful retries.
     pub result: Option<Value>,
 }
@@ -125,7 +125,7 @@ impl ReplayLedger {
 
     /// Atomically reserve a redemption before any mutation or execution.
     /// Fails if the key was ever seen, so a redemption never runs twice.
-    pub fn reserve(&mut self, key: &str, claim_digest: &str) -> Result<(), ApiError> {
+    pub fn reserve(&mut self, key: &str, commitment: &str) -> Result<(), ApiError> {
         if self.entries.contains_key(key) {
             return Err(ApiError::replay(
                 "redemption already consumed or in progress",
@@ -135,7 +135,7 @@ impl ReplayLedger {
             key.to_string(),
             LedgerEntry {
                 status: EntryStatus::Reserved,
-                claim_digest: claim_digest.to_string(),
+                commitment: commitment.to_string(),
                 result: None,
             },
         );

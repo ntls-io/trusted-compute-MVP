@@ -14,15 +14,14 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-//! End-to-end authorization of a protected request: local claim checks,
-//! oracle round-trip, pinned-key JWS verification, and claim/assertion
-//! cross-check. Pure over its inputs so unit tests can drive it with a mock
-//! oracle transport.
+//! End-to-end authorization of a protected request: local verification of
+//! the claimant's signed transaction, oracle round-trip, pinned-key JWS
+//! verification, and assertion cross-check. Pure over its inputs so unit
+//! tests can drive it with a mock oracle transport.
 
-use crate::claim::{Action, ClaimContext};
+use crate::claim::{Action, RedemptionRequest};
 use crate::error::ApiError;
 use crate::oracle_client::{cross_check, verify_jws, OracleAssertion, OracleTransport};
-use std::collections::BTreeMap;
 use std::time::Duration;
 
 /// Enclave trust anchors. In production these come from the Gramine
@@ -71,32 +70,41 @@ impl EnclaveConfig {
     }
 }
 
-/// Validate the claim locally (shape, payload hash, wallet signature)
-/// without contacting the oracle. Used for both the full authorization path
-/// and the cached-retry fast path.
+/// Verify the request against the claimant's signed transaction, without
+/// contacting the oracle. Used for both the full authorization path and the
+/// cached-retry fast path.
+#[allow(clippy::too_many_arguments)]
 pub fn validate_locally(
     action: Action,
-    claim_map: BTreeMap<String, String>,
-    wallet_signature: &str,
+    signed_transaction_b64: &str,
     payload: &str,
+    github_url: Option<&str>,
+    code_hash: Option<&str>,
+    ephemeral_pubkey: &str,
+    ephemeral_signature: &str,
     config: &EnclaveConfig,
-) -> Result<ClaimContext, ApiError> {
-    let claim = ClaimContext::validate(claim_map, action, &config.cluster, &config.program)?;
-    claim.verify_payload(payload)?;
-    claim.verify_wallet_signature(wallet_signature)?;
-    Ok(claim)
+) -> Result<RedemptionRequest, ApiError> {
+    RedemptionRequest::verify(
+        action,
+        signed_transaction_b64,
+        payload,
+        github_url,
+        code_hash,
+        ephemeral_pubkey,
+        ephemeral_signature,
+        &config.program,
+    )
 }
 
-/// Full authorization: local checks, then the oracle round-trip with local
-/// JWS verification against the pinned key and field-by-field cross-check.
+/// Full authorization: the oracle round-trip with local JWS verification
+/// against the pinned key and a cross-check against the verified transaction.
 pub fn authorize(
-    claim: &ClaimContext,
-    wallet_signature: &str,
+    request: &RedemptionRequest,
     transport: &dyn OracleTransport,
     config: &EnclaveConfig,
 ) -> Result<OracleAssertion, ApiError> {
-    let jws = transport.verify_chain_claim(claim.map(), wallet_signature)?;
+    let jws = transport.verify_transaction(request.tx_signature())?;
     let assertion = verify_jws(&jws, &config.oracle_pubkey)?;
-    cross_check(&assertion, claim)?;
+    cross_check(&assertion, request, &config.cluster, &config.program)?;
     Ok(assertion)
 }

@@ -20,16 +20,15 @@
 //
 // This previously lived in four places that could disagree: a hardcoded
 // cluster in app/layout.tsx, another in lib/solanaConnection.ts, another in
-// lib/drtHelpers.ts, and env-var reads in lib/enclaveClaim.ts. The program ID
+// lib/drtHelpers.ts, and env-var reads in the old claim module. The program ID
 // had three sources — the committed IDL, an env var, and the oracle's own
 // setting.
 //
-// That divergence was not cosmetic. The signed chain claim carries `program`
-// and `cluster` fields, and the enclave rejects any claim whose values do not
-// match what was measured into its MRENCLAVE. Setting NEXT_PUBLIC_DRT_PROGRAM_ID
-// alone would desync the claim from the transaction Anchor actually sent
-// against the IDL address, producing an authorisation failure with no obvious
-// cause. Both env vars are therefore gone.
+// That divergence was not cosmetic. The enclave has the cluster and program ID
+// measured into its MRENCLAVE, and refuses a redemption whose transaction does
+// not reference that program. Setting NEXT_PUBLIC_DRT_PROGRAM_ID alone would
+// desync it from the address Anchor actually transacts against, producing an
+// authorisation failure with no obvious cause. Both env vars are therefore gone.
 
 import { clusterApiUrl } from "@solana/web3.js";
 import idl from "@/lib/idl/drt_manager.json";

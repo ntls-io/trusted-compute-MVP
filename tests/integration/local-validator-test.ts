@@ -6,18 +6,18 @@
 
 // tests/integration/local-validator-test.ts
 //
-// Local-validator integration test (plan.md test plan) using the UNCHANGED
-// Anchor program:
+// Local-validator integration test using the UNCHANGED Anchor program:
 //   1. create a correctly configured pool (compute DRTs carry real
-//      URL/hash metadata on-chain),
-//   2. redeem each DRT type,
-//   3. confirm the oracle authorizes exactly one operation per redemption
-//      (a second identical verify succeeds — statelessness is the enclave's
-//      replay ledger's job — but altered payload/code metadata is rejected,
-//      and unredeemed/forged claims are rejected).
+//      URL/hash metadata on-chain), with the commitment memo attached,
+//   2. redeem each DRT type, again with a commitment memo,
+//   3. confirm the oracle reports each transaction correctly, and rejects
+//      unknown, stale, or non-DRT transactions.
 //
-// The oracle→enclave half is covered by the mock-oracle unit tests in
-// sgx-mvp/oracle-verify; full end-to-end runs on Azure SGX hardware via
+// The oracle is now only asked "did this finalize, and what did it emit?",
+// so what this driver exercises is the chain→oracle half. The commitment
+// itself — payload, code identity, ephemeral key — is verified inside the
+// enclave; that half is covered by the mock-oracle unit tests in
+// sgx-mvp/oracle-verify, and end to end on SGX hardware via
 // azure-smoke-test.ts.
 //
 // Prerequisites (run local-validator-test.sh to orchestrate):
@@ -26,18 +26,30 @@
 //     SOLANA_CLUSTER=localnet, and a test ORACLE_SIGNING_KEY_HEX
 //   - env: ORACLE_URL (default http://127.0.0.1:8000), ANCHOR_WALLET
 import * as anchor from "@coral-xyz/anchor";
-import { Keypair, PublicKey, SystemProgram, SYSVAR_RENT_PUBKEY } from "@solana/web3.js";
-import { buildClaim, signClaim, sha256Hex, type ChainClaim } from "./claim.js";
+import {
+  Keypair,
+  PublicKey,
+  SystemProgram,
+  SYSVAR_RENT_PUBKEY,
+  Transaction,
+} from "@solana/web3.js";
 import { readFileSync } from "node:fs";
+import {
+  assertVectorMatches,
+  generateEphemeral,
+  memoFor,
+  memoInstruction,
+  signSendWithMemo,
+} from "./commitment.js";
 
 const ORACLE_URL = process.env.ORACLE_URL ?? "http://127.0.0.1:8000";
 const RPC_URL = process.env.SOLANA_RPC_URL ?? "http://127.0.0.1:8899";
-const CLUSTER = process.env.SOLANA_CLUSTER ?? "localnet";
 const PROGRAM_ID = process.env.DRT_PROGRAM_ID ?? "CME2Dg7UEW82Hf99rQetEi7Hc5Db9JQPx6Azmx1eWbEE";
 const IDL_PATH = process.env.DRT_IDL_PATH ?? "../../drt-manager/target/idl/drt_manager.json";
 
 const GITHUB_URL = "https://github.com/ntls-io/python-scripts/blob/main/calculate_mean.py";
 const CODE_HASH = process.env.TEST_CODE_HASH ?? "a".repeat(64);
+const CODE = { githubUrl: GITHUB_URL, codeHash: CODE_HASH };
 
 let failures = 0;
 function check(name: string, ok: boolean, detail = "") {
@@ -45,16 +57,24 @@ function check(name: string, ok: boolean, detail = "") {
   if (!ok) failures += 1;
 }
 
-async function verifyChainClaim(claim: ChainClaim, walletSignature: string) {
-  const response = await fetch(`${ORACLE_URL}/oracle/v1/verify-chain-claim`, {
+async function verifyTransaction(tx: string) {
+  const response = await fetch(`${ORACLE_URL}/oracle/v1/verify-transaction`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ claim, wallet_signature: walletSignature }),
+    body: JSON.stringify({ tx }),
   });
   return { status: response.status, body: await response.json() };
 }
 
+/** Decode a compact JWS payload without verifying (the enclave verifies). */
+function assertionPayload(jws: string): Record<string, unknown> {
+  return JSON.parse(Buffer.from(jws.split(".")[1], "base64url").toString("utf8"));
+}
+
 async function main() {
+  // Guard against this driver drifting from the other three implementations.
+  assertVectorMatches();
+
   const wallet = Keypair.fromSecretKey(
     Uint8Array.from(JSON.parse(readFileSync(process.env.ANCHOR_WALLET!, "utf8")))
   );
@@ -93,7 +113,13 @@ async function main() {
     await import("@solana/spl-token");
   const ownershipTokenAccount = await getAssociatedTokenAddress(ownershipMint, wallet.publicKey);
 
-  const createTx = await program.methods
+  const initPayload = JSON.stringify({ schema: { type: "object" }, data: { rows: [] } });
+  const initEphemeral = generateEphemeral();
+
+  // Cast: Anchor's builder types recurse without depth limit on an untyped
+  // IDL, which tsc reports as TS2589.
+  const methods = program.methods as anchor.Program["methods"];
+  const createIx = await methods
     .createPoolWithDrts(poolName, drtConfigs, new anchor.BN(1000))
     .accounts({
       pool: poolPda,
@@ -106,57 +132,91 @@ async function main() {
       associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
       rent: SYSVAR_RENT_PUBKEY,
     })
-    .rpc({ commitment: "finalized" });
-  console.log("pool created:", poolPda.toBase58(), createTx);
+    .instruction();
 
-  // pool_initialize claim verifies against the PoolCreated event
-  const initPayload = JSON.stringify({ schema: { type: "object" }, data: { rows: [] } });
-  const initClaim = buildClaim({
-    action: "pool_initialize", cluster: CLUSTER, program: PROGRAM_ID,
-    tx: createTx, pool: poolPda.toBase58(),
-    claimant: wallet.publicKey.toBase58(), payload: initPayload,
-  });
-  const initResult = await verifyChainClaim(initClaim, signClaim(wallet, initClaim));
-  check("oracle authorizes pool_initialize", initResult.status === 200, JSON.stringify(initResult.body).slice(0, 120));
+  const created = await signSendWithMemo(
+    connection,
+    wallet,
+    new Transaction().add(createIx),
+    memoInstruction(memoFor(initEphemeral.publicKey, initPayload, null))
+  );
+  console.log("pool created:", poolPda.toBase58(), created.tx);
+
+  const initResult = await verifyTransaction(created.tx);
+  check(
+    "oracle reports pool_initialize",
+    initResult.status === 200,
+    JSON.stringify(initResult.body).slice(0, 120)
+  );
+  if (initResult.status === 200) {
+    const payload = assertionPayload(initResult.body.assertion);
+    check("assertion names the pool", payload.pool === poolPda.toBase58());
+    check("assertion names the owner", payload.claimant === wallet.publicKey.toBase58());
+    check("assertion execution_type is pool_initialize", payload.execution_type === "pool_initialize");
+  }
 
   // ---- 2. Redeem each DRT and verify --------------------------------
   // (mint/buy steps depend on the program's buy flow; the driver assumes
   //  the wallet holds one token of each DRT — see local-validator-test.sh)
-  for (const [drtType, action, payload, extra] of [
-    ["append", "append", '{"rows":[{"x":1}]}', {}],
-    ["py_compute_median", "execute_python", "", { githubUrl: GITHUB_URL, codeHash: CODE_HASH }],
+  for (const [drtType, executionType, payload, code] of [
+    ["append", "append", '{"rows":[{"x":1}]}', null],
+    ["py_compute_median", "python", "", CODE],
   ] as const) {
-    const redeemTx = await redeemOne(program, wallet, poolPda, ownershipMint, drtType, programId);
-    const claim = buildClaim({
-      action, cluster: CLUSTER, program: PROGRAM_ID, tx: redeemTx,
-      pool: poolPda.toBase58(), claimant: wallet.publicKey.toBase58(),
-      payload, ...extra,
-    });
-    const ok = await verifyChainClaim(claim, signClaim(wallet, claim));
-    check(`oracle authorizes ${action}`, ok.status === 200);
+    const ephemeral = generateEphemeral();
+    const redeemed = await redeemOne(
+      program,
+      connection,
+      wallet,
+      poolPda,
+      ownershipMint,
+      drtType,
+      programId,
+      memoInstruction(memoFor(ephemeral.publicKey, payload, code))
+    );
 
-    // Altered payload must be rejected (signature no longer matches).
-    const tampered = { ...claim, payload_sha256: sha256Hex("tampered") };
-    const tamperedResult = await verifyChainClaim(tampered, signClaim(wallet, claim));
-    check(`altered payload rejected for ${action}`, tamperedResult.status === 400);
+    const result = await verifyTransaction(redeemed.tx);
+    check(`oracle reports ${drtType} redemption`, result.status === 200);
+    if (result.status !== 200) continue;
 
-    if (action === "execute_python") {
-      // Altered code metadata (resigned by the claimant) must be rejected
-      // against the on-chain event.
-      const wrongCode = { ...claim, code_hash: "b".repeat(64) };
-      const wrongResult = await verifyChainClaim(wrongCode, signClaim(wallet, wrongCode));
-      check("altered code metadata rejected", wrongResult.status === 409);
+    const assertion = assertionPayload(result.body.assertion);
+    check(`${drtType}: execution_type is ${executionType}`, assertion.execution_type === executionType);
+    check(`${drtType}: redeemer matches`, assertion.claimant === wallet.publicKey.toBase58());
+    check(`${drtType}: pool matches`, assertion.pool === poolPda.toBase58());
+    if (code) {
+      // The oracle reports the on-chain code identity; the enclave requires
+      // it to equal what the memo committed to.
+      check("compute: assertion carries the on-chain URL", assertion.github_url === code.githubUrl);
+      check("compute: assertion carries the on-chain hash", assertion.code_hash === code.codeHash);
+    } else {
+      check("append: assertion carries no code reference", assertion.github_url === null);
     }
   }
 
-  // ---- 3. Unredeemed transaction rejected -----------------------------
-  const bogus = buildClaim({
-    action: "append", cluster: CLUSTER, program: PROGRAM_ID,
-    tx: "5".repeat(87).slice(0, 87), pool: poolPda.toBase58(),
-    claimant: wallet.publicKey.toBase58(), payload: "{}",
-  });
-  const bogusResult = await verifyChainClaim(bogus, signClaim(wallet, bogus));
-  check("unknown transaction rejected", bogusResult.status >= 400);
+  // ---- 3. Unknown / non-DRT transactions rejected ---------------------
+  const unknown = await verifyTransaction(
+    "4".repeat(64) + "5".repeat(24) // syntactically plausible, never sent
+  );
+  check("unknown transaction rejected", unknown.status >= 400);
+
+  const malformed = await verifyTransaction("not-a-signature");
+  check("malformed signature rejected", malformed.status === 400);
+
+  // A transaction that touches only the system program emits no DRT event.
+  const transfer = new Transaction().add(
+    SystemProgram.transfer({
+      fromPubkey: wallet.publicKey,
+      toPubkey: wallet.publicKey,
+      lamports: 1,
+    })
+  );
+  const plain = await signSendWithMemo(
+    connection,
+    wallet,
+    transfer,
+    memoInstruction(memoFor(generateEphemeral().publicKey, "", null))
+  );
+  const plainResult = await verifyTransaction(plain.tx);
+  check("non-DRT transaction rejected", plainResult.status === 409);
 
   console.log(failures === 0 ? "\nALL CHECKS PASSED" : `\n${failures} CHECK(S) FAILED`);
   process.exit(failures === 0 ? 0 : 1);
@@ -164,12 +224,14 @@ async function main() {
 
 async function redeemOne(
   program: anchor.Program,
+  connection: anchor.web3.Connection,
   wallet: Keypair,
   pool: PublicKey,
   ownershipMint: PublicKey,
   drtType: string,
-  programId: PublicKey
-): Promise<string> {
+  programId: PublicKey,
+  memoIx: ReturnType<typeof memoInstruction>
+) {
   const { getAssociatedTokenAddress, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } =
     await import("@solana/spl-token");
   const [drtMint] = PublicKey.findProgramAddressSync(
@@ -178,7 +240,7 @@ async function redeemOne(
   );
   const userTokenAccount = await getAssociatedTokenAddress(drtMint, wallet.publicKey);
   const userOwnershipAccount = await getAssociatedTokenAddress(ownershipMint, wallet.publicKey);
-  return program.methods
+  const redeemIx = await program.methods
     .redeemDrt(drtType)
     .accounts({
       pool,
@@ -192,7 +254,8 @@ async function redeemOne(
       associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
       rent: SYSVAR_RENT_PUBKEY,
     })
-    .rpc({ commitment: "finalized" });
+    .instruction();
+  return signSendWithMemo(connection, wallet, new Transaction().add(redeemIx), memoIx);
 }
 
 main().catch((error) => {

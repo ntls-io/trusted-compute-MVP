@@ -15,12 +15,11 @@
     "postinstall": "prisma generate",
     "vercel-build": "prisma generate && prisma db push --accept-data-loss && prisma db seed && SKIP_LINTING=true next build"
   },
-  "prisma": {
-    "seed": "tsx --tsconfig tsconfig.seed.json prisma/seed.ts"
-  },
   "dependencies": {
     "@clerk/nextjs": "^7.5.18",
     "@coral-xyz/anchor": "^0.30.1",
+    "@noble/curves": "^1.9.7",
+    "@noble/hashes": "^1.8.0",
     "@prisma/client": "^6.10.0",
     "@radix-ui/react-alert-dialog": "^1.1.14",
     "@radix-ui/react-checkbox": "^1.1.3",

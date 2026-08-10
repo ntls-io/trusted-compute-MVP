@@ -31,7 +31,7 @@
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ORACLE_URL — base URL of the devops-acr service hosting the oracle router.
-# The enclave calls {ORACLE_URL}/oracle/v1/verify-chain-claim. Must be HTTPS.
+# The enclave calls {ORACLE_URL}/oracle/v1/verify-transaction. Must be HTTPS.
 #
 # Find it with:
 #   az containerapp show --name relational-devops --resource-group relational-network \

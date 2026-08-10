@@ -21,8 +21,15 @@
 import React, { useState, useEffect, useCallback, JSX } from 'react'
 import { BN, AnchorProvider } from "@coral-xyz/anchor"
 import { useDrtProgram } from "@/lib/useDrtProgram"
-import { buildPoolCreationTx, formatDrtConfigs } from "@/lib/drtHelpers"
-import { buildClaim, signClaim, walletSupportsSignMessage, MAX_GITHUB_URL_LENGTH } from "@/lib/enclaveClaim"
+import { buildPoolCreationTx, formatDrtConfigs, signSendWithMemo } from "@/lib/drtHelpers"
+import { readJsonFile } from "@/lib/utils"
+import {
+  buildEnclaveRequest,
+  generateEphemeralKey,
+  memoFor,
+  memoInstruction,
+  MAX_GITHUB_URL_LENGTH,
+} from "@/lib/redemption"
 import { postToEnclave } from "@/lib/enclaveApi"
 import { useWallet } from "@solana/wallet-adapter-react"
 import { RefreshCcw, Check, AlertTriangle, Wallet, Copy } from "lucide-react"
@@ -669,14 +676,6 @@ function PoolCreationStep({
       if (!description.trim()) throw new Error("Pool description is required");
       if (!poolNameLocked) throw new Error("Please lock the pool name before creating");
 
-      // The enclave initialization claim needs a wallet message signature;
-      // check support before anything is created on-chain.
-      if (!skipVmCreation && !walletSupportsSignMessage(wallet)) {
-        throw new Error(
-          "Connected wallet does not support message signing (signMessage), which is required to initialize the enclave data pool."
-        );
-      }
-
       // Pull the real code catalog so the on-chain DRT configs carry the
       // actual GitHub URLs and SHA-256 hashes; compute DRTs with missing
       // metadata are rejected rather than created (the enclave would refuse
@@ -767,6 +766,21 @@ function PoolCreationStep({
       ---------------------------------------------------------------- */
       updateProgress(1, "Building transaction", "loading");
 
+      // The creation transaction carries a memo committing to the seed
+      // payload and the ephemeral key, so its signature also authorizes the
+      // enclave initialization. That means the payload has to be read now,
+      // before signing -- not after the VM finishes deploying.
+      const ephemeral = generateEphemeralKey();
+      let seedPayload = "";
+      if (!skipVmCreation) {
+        const dataJson = await readJsonFile(dataFile!);
+        console.log("Data file parsed for enclave:", dataJson);
+        seedPayload = JSON.stringify({ schema: schemaDefinition, data: dataJson });
+      }
+      const memoIx = memoInstruction(
+        memoFor(ephemeral.publicKey, seedPayload, null)
+      );
+
       // 1) anchor-side structs must be ‘null’-clean; helper does that
       const formatted = formatDrtConfigs(drtConfigs);
 
@@ -780,10 +794,15 @@ function PoolCreationStep({
       );
 
       // 3) sign & send once
-      updateProgress(1, "Waiting for wallet signature…", "loading");
-      const sig = await provider.sendAndConfirm(tx, [], { commitment: "confirmed" });
+      const sent = await signSendWithMemo(
+        provider.connection,
+        wallet,
+        tx,
+        memoIx,
+        (msg) => updateProgress(1, msg, "loading")
+      );
 
-      console.log("Pool TX:", sig);
+      console.log("Pool TX:", sent.tx);
       updateProgress(1, "Pool created (mints initialised & funded)", "success");
 
       const chainAddress   = pdas.poolPda.toBase58();
@@ -851,44 +870,17 @@ function PoolCreationStep({
         }
         updateProgress(3, "Enclave attestation verified", "success");
 
-        // Create the data pool in the enclave
-        updateProgress(3, "Creating new data pool in the enclave", "loading");
-        const dataReader = new FileReader();
-        const dataPromise = new Promise((resolve, reject) => {
-          dataReader.onload = (e) => {
-            try {
-              const data = JSON.parse(e.target?.result as string);
-              console.log("Data file parsed for enclave:", data);
-              resolve(data);
-            } catch {
-              reject(new Error("Invalid JSON in data file"));
-            }
-          };
-          dataReader.onerror = () => reject(new Error("Failed to read data file"));
-          dataReader.readAsText(dataFile!);
-        });
-
-        const dataJson = await dataPromise;
-
-        // The wallet signs a pool_initialize claim binding the creation tx,
-        // the pool PDA, and the exact schema+seed payload.
-        const payload = JSON.stringify({ schema: schemaDefinition, data: dataJson });
-        const claim = await buildClaim({
-          action: "pool_initialize",
-          tx: sig,
-          pool: chainAddress,
-          claimant: publicKey.toBase58(),
-          payload,
-        });
-        updateProgress(3, "Awaiting claim signature", "loading", "Please sign the enclave authorization message");
-        const walletSignature = await signClaim(wallet, claim);
-
+        // Create the data pool in the enclave. No further signature: the
+        // creation transaction already committed to this exact payload.
         updateProgress(3, "Creating data pool in the enclave", "loading", "Waiting for on-chain finality and oracle verification");
         const result = await postToEnclave<string>("/api/create-data-pool", {
           publicIp,
-          claim,
-          wallet_signature: walletSignature,
-          payload,
+          ...buildEnclaveRequest({
+            signedTransaction: sent.signedTransaction,
+            txSignature: sent.signature,
+            ephemeral,
+            payload: seedPayload,
+          }),
         });
 
         if (result === "Data pool created, sealed, and saved successfully") {

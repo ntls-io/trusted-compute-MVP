@@ -41,7 +41,6 @@ use rustls::server::ServerConfig;
 use serde::Deserialize;
 use serde_json::Value;
 use sha2::Sha256;
-use std::collections::BTreeMap;
 use std::fs::{read, File};
 use std::io::{BufReader, Write};
 use std::path::Path;
@@ -349,21 +348,31 @@ async fn main() -> Result<()> {
     .map_err(|e| anyhow!("Actix web server error: {}", e))
 }
 
-/// Protected request envelope: a wallet-signed claim, its signature, and
-/// (for init/append) the exact payload string the claim's payload_sha256
-/// commits to. Runtime, GitHub URL, and code hash are NOT accepted from the
-/// client; they come from the verified oracle assertion cross-checked
-/// against the wallet-signed claim.
+/// Protected request envelope: the claimant's own signed redemption
+/// transaction, plus everything its on-chain memo commits to — the payload
+/// (for init/append), the code reference (for compute), and the ephemeral
+/// key that binds the result to this caller.
+///
+/// Nothing here is trusted on the client's word. The memo commitment is
+/// covered by the wallet's transaction signature, which the enclave verifies
+/// itself, so a compromised oracle cannot substitute a payload or a program.
 #[derive(Deserialize)]
 struct ProtectedRequest {
-    claim: BTreeMap<String, String>,
-    wallet_signature: String,
+    /// Base64 of the serialized, signed legacy transaction.
+    signed_transaction: String,
     /// JSON document as a string; hashed byte-for-byte. Absent for execute.
     payload: Option<String>,
+    /// Compute only: the code identity committed on-chain.
+    github_url: Option<String>,
+    code_hash: Option<String>,
+    /// Base58 Ed25519 key committed in the memo, with a proof of possession
+    /// over the transaction signature.
+    ephemeral_pubkey: String,
+    ephemeral_signature: String,
 }
 
 struct VerifiedOp {
-    claim: claim::ClaimContext,
+    request: claim::RedemptionRequest,
     assertion: OracleAssertion,
     replay_key: String,
 }
@@ -373,21 +382,27 @@ enum PreCheck {
     Fresh,
 }
 
-/// Local claim checks plus a cached-retry probe, before the oracle is asked.
-/// A redemption is never consumed when oracle verification fails, and an
-/// identical successful retry is served from the sealed result cache.
-async fn pre_check(claim: &claim::ClaimContext) -> Result<(PreCheck, String), ApiError> {
-    let key = replay_key(claim.get("cluster"), claim.get("program"), claim.get("tx"));
+/// Cached-retry probe, before the oracle is asked. A redemption is never
+/// consumed when oracle verification fails, and an identical successful
+/// retry is served from the sealed result cache. The on-chain memo is the
+/// redemption's content identity: it is fixed by the signed transaction, so
+/// a retry that commits to different data cannot masquerade as the same one.
+async fn pre_check(
+    config: &EnclaveConfig,
+    request: &claim::RedemptionRequest,
+) -> Result<(PreCheck, String), ApiError> {
+    let key = replay_key(&config.cluster, &config.program, request.tx_signature());
+    let memo = request.tx.memo_str()?.to_string();
     let _guard = STATE_LOCK.lock().await;
     let ledger = ReplayLedger::load()?;
     if let Some(entry) = ledger.get(&key) {
         return match entry.status {
-            EntryStatus::Succeeded if entry.claim_digest == claim.digest_hex() => Ok((
+            EntryStatus::Succeeded if entry.commitment == memo => Ok((
                 PreCheck::Cached(entry.result.clone().unwrap_or(Value::Null)),
                 key,
             )),
             EntryStatus::Succeeded => Err(ApiError::replay(
-                "redemption already consumed with a different claim",
+                "redemption already consumed with a different commitment",
             )),
             EntryStatus::Reserved => Err(ApiError::replay("redemption is already in progress")),
             EntryStatus::Failed => Err(ApiError::replay(
@@ -398,22 +413,28 @@ async fn pre_check(claim: &claim::ClaimContext) -> Result<(PreCheck, String), Ap
     Ok((PreCheck::Fresh, key))
 }
 
-/// Verify claim + oracle assertion and atomically reserve the redemption.
+/// Verify the signed transaction, obtain the oracle assertion, and
+/// atomically reserve the redemption.
 async fn verify_and_reserve(
     action: Action,
     body: &ProtectedRequest,
     payload: &str,
 ) -> Result<Result<VerifiedOp, Value>, ApiError> {
     let config = EnclaveConfig::from_env()?;
-    let claim = validate_locally(
+    let request = validate_locally(
         action,
-        body.claim.clone(),
-        &body.wallet_signature,
+        &body.signed_transaction,
         payload,
+        body.github_url.as_deref(),
+        body.code_hash.as_deref(),
+        &body.ephemeral_pubkey,
+        &body.ephemeral_signature,
         &config,
     )?;
 
-    // Pool binding: one enclave, one pool.
+    // Pool binding: one enclave, one pool. Which pool this transaction
+    // touched is only known once the oracle has decoded the event, so the
+    // identity comparison happens after the round-trip below.
     let identity = load_identity()?;
     match (action, &identity) {
         (Action::PoolInitialize, Some(_)) => {
@@ -423,19 +444,10 @@ async fn verify_and_reserve(
         (_, None) => {
             return Err(ApiError::pool_binding("pool is not initialized"));
         }
-        (_, Some(identity)) => {
-            if claim.get("pool") != identity.pool
-                || claim.get("cluster") != identity.cluster
-                || claim.get("program") != identity.program
-            {
-                return Err(ApiError::pool_binding(
-                    "claim is not for the pool bound to this enclave",
-                ));
-            }
-        }
+        (_, Some(_)) => {}
     }
 
-    let (pre, key) = pre_check(&claim).await?;
+    let (pre, key) = pre_check(&config, &request).await?;
     if let PreCheck::Cached(result) = pre {
         return Ok(Err(result));
     }
@@ -446,15 +458,26 @@ async fn verify_and_reserve(
         base_url: config.oracle_url.clone(),
         timeout: config.oracle_timeout,
     };
-    let assertion = authorize(&claim, &body.wallet_signature, &transport, &config)?;
+    let assertion = authorize(&request, &transport, &config)?;
+
+    if let Some(identity) = &identity {
+        if assertion.pool != identity.pool
+            || identity.cluster != config.cluster
+            || identity.program != config.program
+        {
+            return Err(ApiError::pool_binding(
+                "redemption is not for the pool bound to this enclave",
+            ));
+        }
+    }
 
     {
         let _guard = STATE_LOCK.lock().await;
         let mut ledger = ReplayLedger::load()?;
-        ledger.reserve(&key, &claim.digest_hex())?;
+        ledger.reserve(&key, request.tx.memo_str()?)?;
     }
     Ok(Ok(VerifiedOp {
-        claim,
+        request,
         assertion,
         replay_key: key,
     }))
@@ -476,7 +499,7 @@ const POOL_CREATED_MSG: &str = "Data pool created, sealed, and saved successfull
 const DATA_APPENDED_MSG: &str = "Data appended, sealed, and saved successfully";
 
 /// Handler for the `create_data_pool` API. One-time pool initialization:
-/// verifies the PoolCreated claim, seals the seed data, and binds this
+/// verifies the PoolCreated redemption, seals the seed data, and binds this
 /// enclave to the pool PDA.
 async fn create_data_pool_handler(
     body: web::Json<ProtectedRequest>,
@@ -510,11 +533,11 @@ async fn create_data_pool_handler(
     }
 
     store_identity(&PoolIdentity {
-        pool: op.claim.get("pool").to_string(),
-        owner: op.claim.get("claimant").to_string(),
-        cluster: op.claim.get("cluster").to_string(),
-        program: op.claim.get("program").to_string(),
-        init_tx: op.claim.get("tx").to_string(),
+        pool: op.assertion.pool.clone(),
+        owner: op.request.claimant(),
+        cluster: op.assertion.cluster.clone(),
+        program: op.assertion.program.clone(),
+        init_tx: op.request.tx_signature().to_string(),
         schema,
     })?;
     record_success(&op.replay_key, Some(Value::String(POOL_CREATED_MSG.into()))).await?;
@@ -522,7 +545,7 @@ async fn create_data_pool_handler(
 }
 
 /// Handler for the `append_data` API: verified AppendDRT redemption plus
-/// the exact JSON payload the wallet-signed claim committed to.
+/// the exact JSON payload the on-chain memo committed to.
 async fn append_data_handler(body: web::Json<ProtectedRequest>) -> Result<HttpResponse, ApiError> {
     let payload = body
         .payload
@@ -561,9 +584,9 @@ async fn append_data_handler(body: web::Json<ProtectedRequest>) -> Result<HttpRe
     }
 }
 
-/// Shared execute path: runtime, GitHub URL, and expected code hash come
-/// exclusively from the verified oracle assertion (cross-checked against
-/// the wallet-signed claim); the WASM schema comes from sealed state.
+/// Shared execute path: the GitHub URL and expected code hash are the ones
+/// the claimant committed to on-chain, already cross-checked against the
+/// oracle's view of the redeemed DRT; the WASM schema comes from sealed state.
 async fn handle_execute(
     action: Action,
     body: web::Json<ProtectedRequest>,
@@ -575,8 +598,8 @@ async fn handle_execute(
         Ok(op) => op,
         Err(cached) => return Ok(HttpResponse::Ok().json(cached)),
     };
-    let github_url = op.assertion.github_url.clone().unwrap_or_default();
-    let code_hash = op.assertion.code_hash.clone().unwrap_or_default();
+    let github_url = op.request.github_url.clone().unwrap_or_default();
+    let code_hash = op.request.code_hash.clone().unwrap_or_default();
 
     let execution = unseal_data()
         .map_err(|e| anyhow!("failed to unseal data: {e}"))
@@ -626,7 +649,7 @@ fn execute_wasm_binary(
     let wasm_path = "/tmp/downloaded_wasm.wasm";
 
     // Step 1: Download and verify the WASM binary
-    verify_and_download_wasm(&github_url, wasm_path, expected_hash)
+    verify_and_download_wasm(github_url, wasm_path, expected_hash)
         .map_err(|e| anyhow!("Failed to download or verify WASM binary: {}", e))?;
 
     // Step 2: Execute the WASM binary with the data and schema
@@ -671,7 +694,7 @@ fn execute_python_script(
     let script_path = "/tmp/downloaded_script.py";
 
     // Step 1: Download and verify the script
-    verify_and_download_python_github(&github_url, script_path, expected_hash)
+    verify_and_download_python_github(github_url, script_path, expected_hash)
         .map_err(|e| anyhow!("Failed to download or verify script: {}", e))?;
 
     // Step 2: Execute the Python script

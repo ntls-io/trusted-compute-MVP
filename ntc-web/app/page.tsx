@@ -49,11 +49,13 @@ import { useWallet, type WalletContextState } from "@solana/wallet-adapter-react
 import * as anchor from "@coral-xyz/anchor";
 import { redeemDrt, getOnChainDrtMetadata } from "@/lib/drtHelpers";
 import {
-  buildClaim,
-  signClaim,
-  walletSupportsSignMessage,
-  type ChainClaim,
-} from "@/lib/enclaveClaim";
+  buildEnclaveRequest,
+  generateEphemeralKey,
+  memoFor,
+  memoInstruction,
+  validateCodeReference,
+  type EnclaveRequest,
+} from "@/lib/redemption";
 import { postToEnclave } from "@/lib/enclaveApi";
 import PoolAccount from "@/components/PoolAccount";
 import { useUser } from "@clerk/nextjs";
@@ -354,30 +356,21 @@ const EnclaveDialog = ({ pool, onAttest }: { pool: Pool; onAttest: () => Promise
   );
 };
 
-// Wallet-signed claim + signature, produced after the on-chain redemption
-// and consumed by the enclave proxy routes.
-interface ClaimBundle {
-  claim: ChainClaim;
-  walletSignature: string;
-}
-
 /**
- * Redeem a compute DRT on-chain and produce the wallet-signed enclave claim.
- * signMessage support and on-chain code metadata are checked BEFORE the DRT
- * is burned so a redemption is never consumed without a usable claim.
+ * Redeem a compute DRT on-chain and produce the enclave request.
+ *
+ * One wallet prompt: the commitment to the ephemeral key and the code
+ * reference rides in a memo inside the burn transaction, so the transaction
+ * signature authorizes the enclave operation too. On-chain code metadata is
+ * checked BEFORE the DRT is burned so a redemption is never consumed against
+ * metadata the enclave would refuse.
  */
-async function redeemAndSignExecuteClaim(
+async function redeemForExecute(
   program: anchor.Program<anchor.Idl>,
   wallet: WalletContextState,
-  drtInstance: DRTInstance,
-  action: "execute_wasm" | "execute_python"
-): Promise<ClaimBundle> {
+  drtInstance: DRTInstance
+): Promise<EnclaveRequest> {
   if (!wallet.publicKey) throw new Error("Wallet not connected");
-  if (!walletSupportsSignMessage(wallet)) {
-    throw new Error(
-      "Connected wallet does not support message signing (signMessage), which is required to authorize enclave execution. Please use a wallet that supports it."
-    );
-  }
   const chainDrtType = mapDrtTypeForChain(drtInstance.drt.name);
   // Code identity comes from on-chain pool state, not the database.
   const metadata = await getOnChainDrtMetadata(
@@ -390,25 +383,25 @@ async function redeemAndSignExecuteClaim(
       "This DRT has no on-chain GitHub URL / code hash; the enclave would reject it. Refusing to burn the token."
     );
   }
-  const { tx } = await redeemDrt(
+  const code = { githubUrl: metadata.githubUrl, codeHash: metadata.codeHash };
+  validateCodeReference(code);
+
+  const ephemeral = generateEphemeralKey();
+  const sent = await redeemDrt(
     program,
     wallet,
     drtInstance.pool.chainAddress,
     chainDrtType,
+    memoInstruction(memoFor(ephemeral.publicKey, "", code)),
     (msg) => console.log(msg)
   );
-  console.log("Solana DRT redemption successful, tx:", tx);
-  const claim = await buildClaim({
-    action,
-    tx,
-    pool: drtInstance.pool.chainAddress,
-    claimant: wallet.publicKey.toBase58(),
-    payload: "",
-    githubUrl: metadata.githubUrl,
-    codeHash: metadata.codeHash,
+  console.log("Solana DRT redemption successful, tx:", sent.tx);
+  return buildEnclaveRequest({
+    signedTransaction: sent.signedTransaction,
+    txSignature: sent.signature,
+    ephemeral,
+    code,
   });
-  const walletSignature = await signClaim(wallet, claim);
-  return { claim, walletSignature };
 }
 
 // Python Execution Dialog Component
@@ -421,7 +414,7 @@ const PythonExecutionDialog = ({
   wallet
 }: {
   drtInstance: DRTInstance;
-  onRedeem: (bundle: ClaimBundle) => Promise<ExecutionResult>;
+  onRedeem: (request: EnclaveRequest) => Promise<ExecutionResult>;
   onStateUpdate: (newState: string) => void;
   onAttest: () => Promise<boolean>;
   program: anchor.Program<anchor.Idl> | null;
@@ -444,14 +437,9 @@ const PythonExecutionDialog = ({
         throw new Error("Enclave attestation preflight failed; compute operations are disabled");
       }
 
-      const bundle = await redeemAndSignExecuteClaim(
-        program,
-        wallet,
-        drtInstance,
-        "execute_python"
-      );
+      const request = await redeemForExecute(program, wallet, drtInstance);
 
-      const pythonResult = await onRedeem(bundle);
+      const pythonResult = await onRedeem(request);
       setExecutionResult(pythonResult);
 
       if (pythonResult.success) {
@@ -575,7 +563,7 @@ const WasmExecutionDialog = ({
   wallet
 }: {
   drtInstance: DRTInstance;
-  onRedeem: (bundle: ClaimBundle) => Promise<ExecutionResult>;
+  onRedeem: (request: EnclaveRequest) => Promise<ExecutionResult>;
   onStateUpdate: (newState: string) => void;
   onAttest: () => Promise<boolean>;
   program: anchor.Program<anchor.Idl> | null;
@@ -598,14 +586,9 @@ const WasmExecutionDialog = ({
         throw new Error("Enclave attestation preflight failed; compute operations are disabled");
       }
 
-      const bundle = await redeemAndSignExecuteClaim(
-        program,
-        wallet,
-        drtInstance,
-        "execute_wasm"
-      );
+      const request = await redeemForExecute(program, wallet, drtInstance);
 
-      const wasmResult = await onRedeem(bundle);
+      const wasmResult = await onRedeem(request);
       setExecutionResult(wasmResult);
 
       if (wasmResult.success) {
@@ -960,11 +943,11 @@ export default function Home() {
     }
   };
 
-  // The enclave derives the script's URL/hash from the oracle-verified
-  // on-chain redemption; only the wallet-signed claim is sent.
+  // The code identity is the one committed on-chain in the redemption memo,
+  // which the enclave re-checks against the oracle's view of the burnt DRT.
   const handlePythonRedeem = async (
     drtInstance: DRTInstance,
-    bundle: ClaimBundle
+    request: EnclaveRequest
   ): Promise<ExecutionResult> => {
     if (!drtInstance.pool.enclaveMeasurement?.publicIp) {
       return { success: false, error: 'Missing enclave public IP' };
@@ -973,8 +956,7 @@ export default function Home() {
     try {
       const result = await postToEnclave('/api/execute-python', {
         publicIp: drtInstance.pool.enclaveMeasurement.publicIp,
-        claim: bundle.claim,
-        wallet_signature: bundle.walletSignature,
+        ...request,
       });
       return { success: true, result };
     } catch (error) {
@@ -985,11 +967,11 @@ export default function Home() {
     }
   };
 
-  // The enclave uses its sealed schema and the oracle-verified on-chain
-  // code identity; no database-sourced URL/hash/schema is sent.
+  // The enclave uses its sealed schema; no database-sourced URL, hash or
+  // schema is sent.
   const handleWasmRedeem = async (
     drtInstance: DRTInstance,
-    bundle: ClaimBundle
+    request: EnclaveRequest
   ): Promise<ExecutionResult> => {
     if (!drtInstance.pool.enclaveMeasurement?.publicIp) {
       return { success: false, error: 'Missing enclave public IP' };
@@ -998,8 +980,7 @@ export default function Home() {
     try {
       const result = await postToEnclave('/api/execute-wasm', {
         publicIp: drtInstance.pool.enclaveMeasurement.publicIp,
-        claim: bundle.claim,
-        wallet_signature: bundle.walletSignature,
+        ...request,
       });
       return { success: true, result };
     } catch (error) {
@@ -1551,7 +1532,7 @@ export default function Home() {
                                     </DialogTrigger>
                                     <PythonExecutionDialog
                                       drtInstance={item}
-                                      onRedeem={(bundle) => handlePythonRedeem(item, bundle)}
+                                      onRedeem={(request) => handlePythonRedeem(item, request)}
                                       onStateUpdate={(newState) => handleStateUpdate(item.id, newState)}
                                       onAttest={async () => (await handleAttestation(item.pool)).success}
                                       program={program}
@@ -1572,7 +1553,7 @@ export default function Home() {
                                     </DialogTrigger>
                                     <WasmExecutionDialog
                                       drtInstance={item}
-                                      onRedeem={(bundle) => handleWasmRedeem(item, bundle)}
+                                      onRedeem={(request) => handleWasmRedeem(item, request)}
                                       onStateUpdate={(newState) => handleStateUpdate(item.id, newState)}
                                       onAttest={async () => (await handleAttestation(item.pool)).success}
                                       program={program}
